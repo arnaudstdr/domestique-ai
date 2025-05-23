@@ -1,1 +1,9 @@
 checklist_domestiqueai.md
+copilot-context.md
+
+*.db
+*.sqlite
+*.sqlite3
+*.db-journal
+*.log
+*.csv
