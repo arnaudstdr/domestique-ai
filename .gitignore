@@ -1,9 +1,15 @@
 checklist_domestiqueai.md
 copilot-context.md
 
+example_analyze.py
+
+screenshots/
+
 *.db
 *.sqlite
 *.sqlite3
 *.db-journal
 *.log
 *.csv
+
+__pycache__/
