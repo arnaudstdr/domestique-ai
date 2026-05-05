@@ -72,6 +72,21 @@ def load_session(session_id: str,
     return [json.loads(row[0]) for row in rows]
 
 
+def delete_session(session_id: str,
+                   db_path: Path | None = None) -> int:
+    """Supprime tous les messages d'une session. Retourne le nombre de lignes supprimées."""
+    conn = _connect(db_path)
+    try:
+        cursor = conn.execute(
+            "DELETE FROM conversations WHERE session_id = ?",
+            (session_id,),
+        )
+        conn.commit()
+        return cursor.rowcount
+    finally:
+        conn.close()
+
+
 def list_sessions(limit: int = 50,
                   db_path: Path | None = None) -> list[dict[str, Any]]:
     """

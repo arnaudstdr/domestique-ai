@@ -33,6 +33,7 @@ from domestique_ai.ingestion.strava import (
 from domestique_ai.llm.coach import run_turn
 from domestique_ai.llm.conversations import (
     append_message,
+    delete_session,
     list_sessions,
     load_session,
     new_session_id,
@@ -309,6 +310,25 @@ def _render_coach_message(idx: int, role: str, content: str) -> None:
                         st.json(call["result"])
 
 
+@st.dialog("Supprimer la conversation ?")
+def _confirm_delete_session() -> None:
+    st.write(
+        "Cette action supprimera définitivement tous les messages de la "
+        "conversation courante."
+    )
+    col_yes, col_no = st.columns(2)
+    with col_yes:
+        if st.button("Oui, supprimer", type="primary", width="stretch"):
+            delete_session(st.session_state.coach_session_id)
+            st.session_state.coach_session_id = new_session_id()
+            st.session_state.coach_history = []
+            st.session_state.coach_traces = {}
+            st.rerun()
+    with col_no:
+        if st.button("Annuler", width="stretch"):
+            st.rerun()
+
+
 with tab_coach:
     _ensure_coach_state()
 
@@ -317,15 +337,24 @@ with tab_coach:
         f"Session : `{st.session_state.coach_session_id[:8]}…`"
     )
 
-    col_new, col_load = st.columns([1, 3])
+    sessions = list_sessions(limit=20)
+    has_persisted = any(
+        s["session_id"] == st.session_state.coach_session_id for s in sessions
+    )
+
+    col_new, col_delete, col_load = st.columns([1, 1, 3])
     with col_new:
         if st.button("🆕 Nouvelle session", width="stretch"):
             st.session_state.coach_session_id = new_session_id()
             st.session_state.coach_history = []
             st.session_state.coach_traces = {}
             st.rerun()
+    with col_delete:
+        if st.button("🗑️ Supprimer", width="stretch",
+                     disabled=not has_persisted,
+                     help="Supprime la conversation courante de l'historique."):
+            _confirm_delete_session()
     with col_load:
-        sessions = list_sessions(limit=20)
         labels = {
             s["session_id"]: f"{s['started_at'][:16]} · {s['preview'] or '—'}"
             for s in sessions
