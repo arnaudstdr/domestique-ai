@@ -6,6 +6,7 @@
 # Données locales (DB, tokens, exports)
 data/
 !data/.gitkeep
+!data/objective.yaml.example
 
 # Environnements virtuels
 .venv/

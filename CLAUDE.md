@@ -86,9 +86,34 @@ Gestion des erreurs API :
 - `StravaAuthError` pour 401 / token absent.
 - 429 → backoff via `Retry-After` puis retry (déjà géré dans `fetch_activities`).
 
-### `llm/assistant.py` — non branché
+### Coach LLM — `domestique_ai/llm/`
 
-Le wrapper Mistral existe mais **n'est pas appelé par le dashboard**. Toute intégration LLM à venir doit lire le contexte depuis `fetch_activities_from_db()` / `calculate_ctl_atl_tsb()` plutôt que re-requêter Strava.
+Coach conversationnel via Ollama (modèle par défaut `gemma4:31b-cloud`, override `OLLAMA_MODEL`). Branché sur le dashboard dans l'onglet « Coach ».
+
+Architecture :
+
+```text
+ollama_client.py    # wrapper SDK ollama : chat(messages, tools, think=True) → dict
+tools.py            # TOOL_SCHEMAS (JSON) + TOOLS (fonctions Python) + dispatch()
+coach.py            # SYSTEM_PROMPT + run_turn() : boucle tool-calling (max 5 itérations)
+objectives.py       # load_objective() / save_objective() — YAML data/objective.yaml
+conversations.py    # persistance SQLite (table conversations) + new_session_id()
+```
+
+Règle d'or : **le LLM n'invente jamais de chiffre**. Le `SYSTEM_PROMPT` impose d'appeler un tool avant toute affirmation chiffrée (CTL, TSB, zones, distance, etc.). Les 6 tools exposent les données calculées par notre code Python.
+
+Pour ajouter un tool :
+
+1. Écrire la fonction Python dans `tools.py` (signature explicite, retourne un dict JSON-sérialisable).
+2. Ajouter son schéma JSON dans `TOOL_SCHEMAS` (description claire, paramètres typés).
+3. L'enregistrer dans le dict `TOOLS`. `dispatch()` route automatiquement.
+4. Tester sur DB tmp dans `tests/test_tools.py` (pas de réseau, pas de LLM).
+
+Mode `thinking` activé par défaut : le modèle réfléchit explicitement avant de répondre, le contenu est exposé dans un expander Streamlit (debug).
+
+Persistance : chaque message (user / assistant / tool) est stocké en JSON brut dans la table `conversations` (clé `session_id`, ordre par `id`). Reprise d'une session via le selectbox du dashboard.
+
+Objectif : `data/objective.yaml` (gitignoré, template `data/objective.yaml.example`). Lu par le tool `get_objective`. Champs : `type` (cyclosportive/course/cyclo/maintenance), `date`, `distance_km`, `elevation_m`, `target_ftp`, `notes`. Override du chemin via `DOMESTIQUE_AI_OBJECTIVE_PATH` (utile pour les tests).
 
 ## Conventions
 

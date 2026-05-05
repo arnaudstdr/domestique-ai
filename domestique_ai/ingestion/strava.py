@@ -256,6 +256,19 @@ def init_db(db_path: Path | None = None) -> None:
         for zone in ("hr_z1_time", "hr_z2_time", "hr_z3_time",
                      "hr_z4_time", "hr_z5_time"):
             _ensure_column(conn, "activities", zone, "REAL")
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS conversations (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_id TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                role TEXT NOT NULL,
+                payload TEXT NOT NULL
+            )
+        """)
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_conversations_session "
+            "ON conversations(session_id, id)"
+        )
         conn.commit()
     finally:
         conn.close()
@@ -344,17 +357,21 @@ def sync_activities(client: StravaClient, after: int | None = None) -> int:
     activities = client.fetch_activities(after=after)
     hr_rest = get_hr_rest()
     hr_max = get_hr_max()
-    can_compute_zones = bool(hr_rest and hr_max and hr_max > hr_rest)
+    zone_params: tuple[float, float] | None = (
+        (float(hr_rest), float(hr_max))
+        if hr_rest and hr_max and hr_max > hr_rest
+        else None
+    )
 
     inserted = 0
     for raw in activities:
         data = client.extract_activity_data(raw)
         zones: dict[str, float] | None = None
-        if can_compute_zones and data.get("avg_heart_rate") and data.get("id"):
+        if zone_params and data.get("avg_heart_rate") and data.get("id"):
             streams = client.fetch_activity_streams(data["id"])
             if streams is not None:
                 hr_stream, time_stream = streams
-                zones = calculate_hr_zones(hr_stream, time_stream, hr_rest, hr_max)
+                zones = calculate_hr_zones(hr_stream, time_stream, *zone_params)
         if save_activity(data, hr_zones=zones):
             inserted += 1
     return inserted

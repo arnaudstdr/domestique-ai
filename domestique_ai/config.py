@@ -78,5 +78,22 @@ def get_strava_credentials() -> tuple[str | None, str | None, str]:
     )
 
 
-def get_mistral_api_key() -> str | None:
-    return os.getenv("MISTRAL_API_KEY")
+def get_objective_path() -> Path:
+    """Chemin vers le fichier YAML d'objectif d'entraînement (gitignoré).
+
+    Override possible via DOMESTIQUE_AI_OBJECTIVE_PATH (utile pour les tests).
+    """
+    custom = os.getenv("DOMESTIQUE_AI_OBJECTIVE_PATH")
+    if custom:
+        return Path(custom).expanduser().resolve()
+    return REPO_ROOT / "data" / "objective.yaml"
+
+
+def get_ollama_model() -> str:
+    """Modèle Ollama utilisé par le coach. Override via OLLAMA_MODEL."""
+    return os.getenv("OLLAMA_MODEL", "gemma4:31b-cloud")
+
+
+def get_ollama_host() -> str | None:
+    """Host Ollama. None = SDK utilise sa valeur par défaut (http://localhost:11434)."""
+    return os.getenv("OLLAMA_HOST") or None

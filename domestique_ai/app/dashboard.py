@@ -1,8 +1,10 @@
 """
 Dashboard Streamlit DomestiqueAI.
 
-Affiche les courbes CTL/ATL/TSB et les détails d'activités, avec un bouton
-de synchronisation Strava et des filtres par plage de dates.
+Deux onglets :
+- « Tableau de bord » : courbes CTL/ATL/TSB et détail des activités.
+- « Coach » : chatbot qui analyse l'entraînement et propose des séances
+  (Ollama + tool calling, voir domestique_ai.llm).
 
 Lancement : `streamlit run domestique_ai/app/dashboard.py`
 """
@@ -14,7 +16,7 @@ import datetime as dt
 import pandas as pd
 import streamlit as st
 
-from domestique_ai.config import get_db_path, get_strava_credentials
+from domestique_ai.config import get_db_path, get_ollama_model, get_strava_credentials
 from domestique_ai.ingestion.strava import (
     StravaAuthError,
     StravaClient,
@@ -22,6 +24,14 @@ from domestique_ai.ingestion.strava import (
     backfill_hr_zones,
     sync_activities,
 )
+from domestique_ai.llm.coach import run_turn
+from domestique_ai.llm.conversations import (
+    append_message,
+    list_sessions,
+    load_session,
+    new_session_id,
+)
+from domestique_ai.llm.ollama_client import OllamaError
 from domestique_ai.processing.analyzer import (
     calculate_ctl_atl_tsb,
     fetch_activities_from_db,
@@ -106,83 +116,213 @@ with st.sidebar:
             except Exception as exc:  # noqa: BLE001
                 st.error(f"Erreur de backfill zones : {exc}")
 
-activities = fetch_activities_from_db()
 
-if not activities:
-    st.warning(
-        f"Aucune activité dans la base ({get_db_path()}). "
-        "Lancez d'abord `python -m domestique_ai.ingestion.strava_oauth_flow` "
-        "ou cliquez sur **Synchroniser Strava** dans la barre latérale."
-    )
-else:
-    df = pd.DataFrame(activities)
-    df["date"] = pd.to_datetime(df["date"], utc=True).dt.tz_localize(None)
+tab_dashboard, tab_coach = st.tabs(["📊 Tableau de bord", "🤖 Coach"])
 
-    curves = pd.DataFrame(calculate_ctl_atl_tsb(activities))
-    curves["date"] = pd.to_datetime(curves["date"])
+# ---- Tab Tableau de bord -----------------------------------------------------
 
-    min_date = df["date"].min().date()
-    max_date = df["date"].max().date()
-    default_start = max(min_date, max_date - dt.timedelta(days=180))
+with tab_dashboard:
+    activities = fetch_activities_from_db()
 
-    date_range = st.sidebar.date_input(
-        "Plage de dates",
-        value=(default_start, max_date),
-        min_value=min_date,
-        max_value=max_date,
-    )
-    if isinstance(date_range, tuple) and len(date_range) == 2:
-        start_date, end_date = date_range
-    else:
-        start_date, end_date = default_start, max_date
-
-    start_ts = pd.Timestamp(start_date)
-    end_ts = pd.Timestamp(end_date) + pd.Timedelta(days=1)
-    df_filtered = df[(df["date"] >= start_ts) & (df["date"] < end_ts)]
-    curves_filtered = curves[(curves["date"] >= start_ts) & (curves["date"] < end_ts)]
-
-    if not curves_filtered.empty:
-        last = curves_filtered.iloc[-1]
-        label, emoji = _tsb_zone_label(last["TSB"])
-        cols = st.columns(4)
-        cols[0].metric("CTL (forme)", f"{last['CTL']:.1f}")
-        cols[1].metric("ATL (fatigue)", f"{last['ATL']:.1f}")
-        cols[2].metric("TSB (fraîcheur)", f"{last['TSB']:.1f}")
-        cols[3].metric("Zone", f"{emoji} {label}")
-
-    st.subheader("Évolution de la charge d'entraînement")
-    if curves_filtered.empty:
-        st.info("Aucune donnée sur la plage sélectionnée.")
-    else:
-        st.line_chart(curves_filtered.set_index("date")[["CTL", "ATL", "TSB"]])
-
-    st.subheader("Détail des activités")
-    df_display = df_filtered.sort_values("date", ascending=False).copy()
-    if "duration" in df_display.columns:
-        df_display["duration"] = (
-            pd.to_numeric(df_display["duration"], errors="coerce")
-            .fillna(0)
-            .astype(int)
-            .map(lambda s: f"{s // 3600:02d}:{(s % 3600) // 60:02d}:{s % 60:02d}")
+    if not activities:
+        st.warning(
+            f"Aucune activité dans la base ({get_db_path()}). "
+            "Lancez d'abord `python -m domestique_ai.ingestion.strava_oauth_flow` "
+            "ou cliquez sur **Synchroniser Strava** dans la barre latérale."
         )
-    if "distance" in df_display.columns:
-        df_display["distance"] = (
-            pd.to_numeric(df_display["distance"], errors="coerce") / 1000
-        ).round(2)
-    for zone_col in ("hr_z1_time", "hr_z2_time", "hr_z3_time",
-                     "hr_z4_time", "hr_z5_time"):
-        if zone_col in df_display.columns:
-            df_display[zone_col] = pd.to_numeric(
-                df_display[zone_col], errors="coerce"
-            ).map(
-                lambda s: ""
-                if pd.isna(s)
-                else f"{int(s) // 3600:02d}:{(int(s) % 3600) // 60:02d}:{int(s) % 60:02d}"
+    else:
+        df = pd.DataFrame(activities)
+        df["date"] = pd.to_datetime(df["date"], utc=True).dt.tz_localize(None)
+
+        curves = pd.DataFrame(calculate_ctl_atl_tsb(activities))
+        curves["date"] = pd.to_datetime(curves["date"])
+
+        min_date = df["date"].min().date()
+        max_date = df["date"].max().date()
+        default_start = max(min_date, max_date - dt.timedelta(days=180))
+
+        date_range = st.sidebar.date_input(
+            "Plage de dates",
+            value=(default_start, max_date),
+            min_value=min_date,
+            max_value=max_date,
+        )
+        if isinstance(date_range, tuple) and len(date_range) == 2:
+            start_date, end_date = date_range
+        else:
+            start_date, end_date = default_start, max_date
+
+        start_ts = pd.Timestamp(start_date)
+        end_ts = pd.Timestamp(end_date) + pd.Timedelta(days=1)
+        df_filtered = df[(df["date"] >= start_ts) & (df["date"] < end_ts)]
+        curves_filtered = curves[(curves["date"] >= start_ts) & (curves["date"] < end_ts)]
+
+        if not curves_filtered.empty:
+            last = curves_filtered.iloc[-1]
+            label, emoji = _tsb_zone_label(last["TSB"])
+            cols = st.columns(4)
+            cols[0].metric("CTL (forme)", f"{last['CTL']:.1f}")
+            cols[1].metric("ATL (fatigue)", f"{last['ATL']:.1f}")
+            cols[2].metric("TSB (fraîcheur)", f"{last['TSB']:.1f}")
+            cols[3].metric("Zone", f"{emoji} {label}")
+
+        st.subheader("Évolution de la charge d'entraînement")
+        if curves_filtered.empty:
+            st.info("Aucune donnée sur la plage sélectionnée.")
+        else:
+            st.line_chart(curves_filtered.set_index("date")[["CTL", "ATL", "TSB"]])
+
+        st.subheader("Détail des activités")
+        df_display = df_filtered.sort_values("date", ascending=False).copy()
+        if "duration" in df_display.columns:
+            df_display["duration"] = (
+                pd.to_numeric(df_display["duration"], errors="coerce")
+                .fillna(0)
+                .astype(int)
+                .map(lambda s: f"{s // 3600:02d}:{(s % 3600) // 60:02d}:{s % 60:02d}")
             )
-    st.dataframe(
-        df_display,
-        width="stretch",
-        column_config={
-            "distance": st.column_config.NumberColumn("distance (km)", format="%.2f"),
-        },
+        if "distance" in df_display.columns:
+            df_display["distance"] = (
+                pd.to_numeric(df_display["distance"], errors="coerce") / 1000
+            ).round(2)
+        for zone_col in ("hr_z1_time", "hr_z2_time", "hr_z3_time",
+                         "hr_z4_time", "hr_z5_time"):
+            if zone_col in df_display.columns:
+                df_display[zone_col] = pd.to_numeric(
+                    df_display[zone_col], errors="coerce"
+                ).map(
+                    lambda s: ""
+                    if pd.isna(s)
+                    else f"{int(s) // 3600:02d}:{(int(s) % 3600) // 60:02d}:{int(s) % 60:02d}"
+                )
+        st.dataframe(
+            df_display,
+            width="stretch",
+            column_config={
+                "distance": st.column_config.NumberColumn("distance (km)", format="%.2f"),
+            },
+        )
+
+# ---- Tab Coach ---------------------------------------------------------------
+
+
+def _ensure_coach_state() -> None:
+    if "coach_session_id" not in st.session_state:
+        st.session_state.coach_session_id = new_session_id()
+    if "coach_history" not in st.session_state:
+        st.session_state.coach_history = []
+    if "coach_traces" not in st.session_state:
+        st.session_state.coach_traces = {}
+
+
+def _render_coach_message(idx: int, role: str, content: str) -> None:
+    with st.chat_message("assistant" if role == "assistant" else "user"):
+        if content:
+            st.markdown(content)
+        trace_data = st.session_state.coach_traces.get(idx)
+        if trace_data:
+            thinking = trace_data.get("thinking")
+            tool_trace = trace_data.get("tool_trace") or []
+            if thinking:
+                with st.expander("💡 Réflexion du modèle", expanded=False):
+                    st.markdown(thinking)
+            if tool_trace:
+                with st.expander(f"🔧 Outils appelés ({len(tool_trace)})",
+                                 expanded=False):
+                    for call in tool_trace:
+                        st.markdown(f"**{call['name']}**({call['arguments']})")
+                        st.json(call["result"])
+
+
+with tab_coach:
+    _ensure_coach_state()
+
+    st.caption(
+        f"Modèle : `{get_ollama_model()}` · "
+        f"Session : `{st.session_state.coach_session_id[:8]}…`"
     )
+
+    col_new, col_load = st.columns([1, 3])
+    with col_new:
+        if st.button("🆕 Nouvelle session", width="stretch"):
+            st.session_state.coach_session_id = new_session_id()
+            st.session_state.coach_history = []
+            st.session_state.coach_traces = {}
+            st.rerun()
+    with col_load:
+        sessions = list_sessions(limit=20)
+        labels = {
+            s["session_id"]: f"{s['started_at'][:16]} · {s['preview'] or '—'}"
+            for s in sessions
+        }
+        options = ["(session courante)"] + list(labels.keys())
+        selection = st.selectbox(
+            "Reprendre une conversation",
+            options=options,
+            format_func=lambda v: "(session courante)" if v == "(session courante)"
+            else labels.get(v, v),
+            label_visibility="collapsed",
+        )
+        if (selection != "(session courante)"
+                and selection != st.session_state.coach_session_id):
+            st.session_state.coach_session_id = selection
+            st.session_state.coach_history = [
+                {"role": m["role"], "content": m.get("content") or ""}
+                for m in load_session(selection)
+                if m.get("role") in ("user", "assistant")
+                and (m.get("content") or "").strip()
+            ]
+            st.session_state.coach_traces = {}
+            st.rerun()
+
+    for idx, msg in enumerate(st.session_state.coach_history):
+        if msg.get("role") not in ("user", "assistant"):
+            continue
+        _render_coach_message(idx, msg["role"], msg.get("content") or "")
+
+    user_input = st.chat_input("Pose une question au coach…")
+    if user_input:
+        session_id = st.session_state.coach_session_id
+        st.session_state.coach_history.append(
+            {"role": "user", "content": user_input}
+        )
+        append_message(session_id, "user", {"role": "user", "content": user_input})
+
+        try:
+            with st.spinner("Le coach réfléchit…"):
+                reply = run_turn(
+                    user_input,
+                    history=[
+                        m for m in st.session_state.coach_history[:-1]
+                        if m.get("role") in ("user", "assistant")
+                    ],
+                )
+        except OllamaError as exc:
+            st.session_state.coach_history.append(
+                {"role": "assistant",
+                 "content": f"⚠️ Coach indisponible : {exc}"}
+            )
+        else:
+            idx = len(st.session_state.coach_history)
+            st.session_state.coach_history.append(
+                {"role": "assistant", "content": reply.content}
+            )
+            st.session_state.coach_traces[idx] = {
+                "thinking": reply.thinking,
+                "tool_trace": [
+                    {
+                        "name": tc.name,
+                        "arguments": tc.arguments,
+                        "result": tc.result,
+                    }
+                    for tc in reply.tool_trace
+                ],
+            }
+            append_message(
+                session_id, "assistant",
+                {"role": "assistant", "content": reply.content,
+                 "thinking": reply.thinking,
+                 "tool_calls": st.session_state.coach_traces[idx]["tool_trace"]},
+            )
+
+        st.rerun()
