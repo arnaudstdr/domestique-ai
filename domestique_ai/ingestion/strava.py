@@ -163,6 +163,59 @@ class StravaClient:
                 return None
             return hr, ts
 
+    def fetch_streams_full(
+        self, activity_id: int, keys: list[str],
+    ) -> dict[str, list] | None:
+        """
+        Récupère un sous-ensemble configurable de streams pour une activité.
+
+        keys : liste parmi `time, latlng, altitude, heartrate, cadence, watts,
+            velocity_smooth, distance, temp, moving, grade_smooth`.
+        Retourne un dict `{key: data}` (les clés absentes côté Strava sont
+        omises). Retourne None si l'activité n'expose aucun de ces streams
+        (404 ou activité sans capteur).
+        """
+        url = f"{STRAVA_API_BASE_URL}/activities/{activity_id}/streams"
+        params = {"keys": ",".join(keys), "key_by_type": "true"}
+        while True:
+            response = requests.get(url, headers=self.headers, params=params, timeout=30)
+            if response.status_code == 401:
+                raise StravaAuthError(_AUTH_ERROR_MSG)
+            if response.status_code == 404:
+                return None
+            if response.status_code == 429:
+                retry_after = int(response.headers.get("Retry-After", "60"))
+                time.sleep(retry_after)
+                continue
+            response.raise_for_status()
+            data = response.json()
+            result: dict[str, list] = {}
+            for key in keys:
+                stream = data.get(key)
+                if stream and stream.get("data"):
+                    result[key] = stream["data"]
+            return result or None
+
+    def fetch_activity_summary(self, activity_id: int) -> dict[str, Any] | None:
+        """
+        Récupère le détail complet d'une activité (GET /activities/{id}).
+
+        Inclut nom, type, splits, lieu de départ, etc. Retourne None si 404.
+        """
+        url = f"{STRAVA_API_BASE_URL}/activities/{activity_id}"
+        while True:
+            response = requests.get(url, headers=self.headers, timeout=30)
+            if response.status_code == 401:
+                raise StravaAuthError(_AUTH_ERROR_MSG)
+            if response.status_code == 404:
+                return None
+            if response.status_code == 429:
+                retry_after = int(response.headers.get("Retry-After", "60"))
+                time.sleep(retry_after)
+                continue
+            response.raise_for_status()
+            return response.json()
+
     def fetch_activities(self, after: int | None = None,
                          per_page: int = 200) -> list[dict[str, Any]]:
         """

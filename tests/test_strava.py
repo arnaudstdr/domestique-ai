@@ -202,6 +202,107 @@ def test_snapshot_athlete_weight_returns_false_when_missing(db_path: Path):
     assert count == 0
 
 
+class _MockResponse:
+    def __init__(self, status_code: int, json_data: dict | None = None,
+                 headers: dict | None = None):
+        self.status_code = status_code
+        self._json = json_data or {}
+        self.headers = headers or {}
+
+    def json(self) -> dict:
+        return self._json
+
+    def raise_for_status(self) -> None:
+        if self.status_code >= 400:
+            import requests
+            raise requests.HTTPError(f"HTTP {self.status_code}")
+
+
+def test_fetch_streams_full_parses_keys(monkeypatch):
+    captured: dict = {}
+
+    def fake_get(url, headers=None, params=None, timeout=None):
+        captured["url"] = url
+        captured["params"] = params
+        return _MockResponse(200, {
+            "latlng": {"data": [[45.0, 4.0], [45.1, 4.1]]},
+            "altitude": {"data": [200.0, 201.0]},
+            "time": {"data": [0, 5]},
+            "heartrate": {"data": [120, 130]},
+        })
+
+    monkeypatch.setattr("domestique_ai.ingestion.strava.requests.get", fake_get)
+    client = StravaClient(access_token="x")
+    streams = client.fetch_streams_full(
+        12345, ["latlng", "altitude", "time", "heartrate", "watts"]
+    )
+
+    assert streams is not None
+    assert "12345/streams" in captured["url"]
+    assert captured["params"]["keys"] == "latlng,altitude,time,heartrate,watts"
+    assert captured["params"]["key_by_type"] == "true"
+    assert streams["latlng"] == [[45.0, 4.0], [45.1, 4.1]]
+    assert streams["altitude"] == [200.0, 201.0]
+    assert streams["time"] == [0, 5]
+    assert streams["heartrate"] == [120, 130]
+    # `watts` absent côté Strava : doit être omis du résultat
+    assert "watts" not in streams
+
+
+def test_fetch_streams_full_returns_none_on_404(monkeypatch):
+    monkeypatch.setattr(
+        "domestique_ai.ingestion.strava.requests.get",
+        lambda *a, **kw: _MockResponse(404),
+    )
+    client = StravaClient(access_token="x")
+    assert client.fetch_streams_full(1, ["latlng"]) is None
+
+
+def test_fetch_streams_full_returns_none_on_empty(monkeypatch):
+    monkeypatch.setattr(
+        "domestique_ai.ingestion.strava.requests.get",
+        lambda *a, **kw: _MockResponse(200, {}),
+    )
+    client = StravaClient(access_token="x")
+    assert client.fetch_streams_full(1, ["latlng"]) is None
+
+
+def test_fetch_streams_full_retries_on_429(monkeypatch):
+    calls = {"n": 0}
+
+    def fake_get(*a, **kw):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return _MockResponse(429, headers={"Retry-After": "0"})
+        return _MockResponse(200, {"latlng": {"data": [[1.0, 2.0]]}})
+
+    monkeypatch.setattr("domestique_ai.ingestion.strava.requests.get", fake_get)
+    monkeypatch.setattr("domestique_ai.ingestion.strava.time.sleep", lambda _s: None)
+    client = StravaClient(access_token="x")
+    streams = client.fetch_streams_full(1, ["latlng"])
+    assert calls["n"] == 2
+    assert streams == {"latlng": [[1.0, 2.0]]}
+
+
+def test_fetch_activity_summary_returns_dict(monkeypatch):
+    monkeypatch.setattr(
+        "domestique_ai.ingestion.strava.requests.get",
+        lambda *a, **kw: _MockResponse(200, {"id": 1, "name": "Sortie"}),
+    )
+    client = StravaClient(access_token="x")
+    summary = client.fetch_activity_summary(1)
+    assert summary == {"id": 1, "name": "Sortie"}
+
+
+def test_fetch_activity_summary_returns_none_on_404(monkeypatch):
+    monkeypatch.setattr(
+        "domestique_ai.ingestion.strava.requests.get",
+        lambda *a, **kw: _MockResponse(404),
+    )
+    client = StravaClient(access_token="x")
+    assert client.fetch_activity_summary(999) is None
+
+
 def test_snapshot_athlete_weight_overwrites_same_day(db_path: Path):
     snapshot_athlete_weight(_AthleteStubClient({"weight": 73.5}),
                             db_path=db_path, today="2025-04-01")
