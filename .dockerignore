@@ -1,0 +1,37 @@
+# VCS
+.git
+.gitignore
+.github
+
+# Environnements et caches
+.venv
+venv
+__pycache__
+*.egg-info
+.pytest_cache
+.ruff_cache
+.mypy_cache
+
+# Données locales (montées via volume)
+data
+*.db
+*.sqlite
+*.sqlite3
+*.db-journal
+
+# Secrets (injectés via env_file)
+.env
+.env.*
+!.env.example
+
+# Notes / divers
+tmp
+*.log
+*.csv
+icon.png
+
+# Docker
+Dockerfile
+docker-compose.yml
+.dockerignore
+DEPLOY.md
