@@ -5,8 +5,7 @@ services:
     container_name: domestique-ai
     restart: unless-stopped
     env_file: .env
-    ports:
-      - "8501:8501"
+    network_mode: host
     volumes:
       - ./data:/app/data
     healthcheck:
