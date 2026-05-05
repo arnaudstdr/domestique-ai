@@ -19,8 +19,17 @@ from urllib.parse import urlencode
 
 import requests
 
-from domestique_ai.config import get_db_path, get_tokens_path
-from domestique_ai.processing.analyzer import compute_training_load
+from domestique_ai.config import (
+    get_db_path,
+    get_hr_max,
+    get_hr_rest,
+    get_tokens_path,
+)
+from domestique_ai.processing.analyzer import (
+    HR_ZONE_KEYS,
+    calculate_hr_zones,
+    compute_training_load,
+)
 
 STRAVA_API_BASE_URL = "https://www.strava.com/api/v3"
 STRAVA_OAUTH_TOKEN_URL = "https://www.strava.com/oauth/token"
@@ -101,6 +110,38 @@ class StravaClient:
         self.access_token = data["access_token"]
         self.refresh_token = data.get("refresh_token", self.refresh_token)
         self.expires_at = data.get("expires_at", 0)
+
+    def fetch_activity_streams(
+        self, activity_id: int,
+    ) -> tuple[list[float], list[float]] | None:
+        """
+        Récupère les streams `heartrate` et `time` d'une activité.
+
+        Retourne (heartrate, time) en secondes et bpm.
+        Retourne None si l'activité n'a pas de capteur HR (404 ou stream absent).
+        Respecte le 429 Retry-After (un seul retry, suffisant pour les pics
+        ponctuels — un backfill long appellera la fonction en boucle et
+        réapplique le délai naturellement à chaque appel).
+        """
+        url = f"{STRAVA_API_BASE_URL}/activities/{activity_id}/streams"
+        params = {"keys": "heartrate,time", "key_by_type": "true"}
+        while True:
+            response = requests.get(url, headers=self.headers, params=params, timeout=30)
+            if response.status_code == 401:
+                raise StravaAuthError("Token expiré ou invalide (HTTP 401).")
+            if response.status_code == 404:
+                return None
+            if response.status_code == 429:
+                retry_after = int(response.headers.get("Retry-After", "60"))
+                time.sleep(retry_after)
+                continue
+            response.raise_for_status()
+            data = response.json()
+            hr = data.get("heartrate", {}).get("data")
+            ts = data.get("time", {}).get("data")
+            if not hr or not ts:
+                return None
+            return hr, ts
 
     def fetch_activities(self, after: int | None = None,
                          per_page: int = 200) -> list[dict[str, Any]]:
@@ -203,21 +244,34 @@ def init_db(db_path: Path | None = None) -> None:
                 avg_power REAL,
                 elevation_gain REAL,
                 distance REAL,
-                training_load REAL
+                training_load REAL,
+                hr_z1_time REAL,
+                hr_z2_time REAL,
+                hr_z3_time REAL,
+                hr_z4_time REAL,
+                hr_z5_time REAL
             )
         """)
         _ensure_column(conn, "activities", "max_heart_rate", "REAL")
+        for zone in ("hr_z1_time", "hr_z2_time", "hr_z3_time",
+                     "hr_z4_time", "hr_z5_time"):
+            _ensure_column(conn, "activities", zone, "REAL")
         conn.commit()
     finally:
         conn.close()
 
 
 def save_activity(activity: dict[str, Any], db_path: Path | None = None,
-                  ftp: float | None = None) -> bool:
+                  ftp: float | None = None,
+                  hr_zones: dict[str, float] | None = None) -> bool:
     """
     Sauvegarde une activité. Calcule la charge d'entraînement si absente
     (hr-TSS si HR configurée, sinon TSS puissance, sinon 0).
     Retourne True si insérée, False si doublon (idempotence sur strava_id).
+
+    hr_zones : dict {"z1": secondes, ..., "z5": secondes} si les streams HR
+    ont déjà été calculés en amont. None laisse les colonnes hr_zN_time à NULL
+    (signal pour le backfill).
     """
     strava_id = activity.get("id")
     if strava_id is None:
@@ -245,6 +299,11 @@ def save_activity(activity: dict[str, Any], db_path: Path | None = None,
             ftp=ftp,
         )
 
+    zone_values = (
+        tuple(hr_zones.get(key) for key in HR_ZONE_KEYS)
+        if hr_zones is not None else (None,) * 5
+    )
+
     conn = sqlite3.connect(path)
     try:
         cursor = conn.execute("SELECT 1 FROM activities WHERE strava_id = ?", (strava_id,))
@@ -253,8 +312,9 @@ def save_activity(activity: dict[str, Any], db_path: Path | None = None,
         conn.execute("""
             INSERT INTO activities (
                 strava_id, date, duration, avg_heart_rate, max_heart_rate,
-                avg_power, elevation_gain, distance, training_load
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                avg_power, elevation_gain, distance, training_load,
+                hr_z1_time, hr_z2_time, hr_z3_time, hr_z4_time, hr_z5_time
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             strava_id,
             activity.get("date"),
@@ -265,6 +325,7 @@ def save_activity(activity: dict[str, Any], db_path: Path | None = None,
             activity.get("elevation_gain"),
             activity.get("distance"),
             tss,
+            *zone_values,
         ))
         conn.commit()
         return True
@@ -273,15 +334,88 @@ def save_activity(activity: dict[str, Any], db_path: Path | None = None,
 
 
 def sync_activities(client: StravaClient, after: int | None = None) -> int:
-    """Récupère et sauvegarde les nouvelles activités. Retourne le nombre d'insertions."""
+    """Récupère et sauvegarde les nouvelles activités. Retourne le nombre d'insertions.
+
+    Si HRrepos / HRmax sont configurés, télécharge aussi les streams HR
+    pour ventiler chaque activité dans les 5 zones %HRR (1 appel API
+    supplémentaire par activité avec capteur HR).
+    """
     init_db()
     activities = client.fetch_activities(after=after)
+    hr_rest = get_hr_rest()
+    hr_max = get_hr_max()
+    can_compute_zones = bool(hr_rest and hr_max and hr_max > hr_rest)
+
     inserted = 0
     for raw in activities:
         data = client.extract_activity_data(raw)
-        if save_activity(data):
+        zones: dict[str, float] | None = None
+        if can_compute_zones and data.get("avg_heart_rate") and data.get("id"):
+            streams = client.fetch_activity_streams(data["id"])
+            if streams is not None:
+                hr_stream, time_stream = streams
+                zones = calculate_hr_zones(hr_stream, time_stream, hr_rest, hr_max)
+        if save_activity(data, hr_zones=zones):
             inserted += 1
     return inserted
+
+
+def backfill_hr_zones(client: StravaClient,
+                      db_path: Path | None = None) -> int:
+    """
+    Calcule rétroactivement les zones HR pour les activités déjà en base
+    qui ont une avg_heart_rate mais pas encore de hr_z1_time.
+
+    Idempotent : seules les lignes avec `hr_z1_time IS NULL` sont traitées,
+    donc relançable sans risque si interrompu (429 prolongé, déconnexion).
+    Coûte 1 appel API par activité — Strava limite à 100 req / 15 min.
+
+    Retourne le nombre de lignes effectivement mises à jour.
+    """
+    init_db(db_path)
+    path = Path(db_path) if db_path else get_db_path()
+    hr_rest = get_hr_rest()
+    hr_max = get_hr_max()
+    if not (hr_rest and hr_max and hr_max > hr_rest):
+        raise RuntimeError(
+            "STRAVA_HR_REST et STRAVA_HR_MAX doivent être configurés "
+            "pour calculer les zones HR."
+        )
+
+    conn = sqlite3.connect(path)
+    try:
+        rows = conn.execute(
+            "SELECT strava_id FROM activities "
+            "WHERE avg_heart_rate IS NOT NULL AND hr_z1_time IS NULL"
+        ).fetchall()
+    finally:
+        conn.close()
+
+    updated = 0
+    for (strava_id,) in rows:
+        if strava_id is None:
+            continue
+        streams = client.fetch_activity_streams(strava_id)
+        if streams is None:
+            continue
+        hr_stream, time_stream = streams
+        zones = calculate_hr_zones(hr_stream, time_stream, hr_rest, hr_max)
+        conn = sqlite3.connect(path)
+        try:
+            conn.execute(
+                "UPDATE activities SET "
+                "hr_z1_time = ?, hr_z2_time = ?, hr_z3_time = ?, "
+                "hr_z4_time = ?, hr_z5_time = ? WHERE strava_id = ?",
+                (
+                    *(zones[key] for key in HR_ZONE_KEYS),
+                    strava_id,
+                ),
+            )
+            conn.commit()
+            updated += 1
+        finally:
+            conn.close()
+    return updated
 
 
 def backfill_activity_fields(client: StravaClient,

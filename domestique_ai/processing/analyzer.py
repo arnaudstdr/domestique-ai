@@ -24,6 +24,14 @@ from domestique_ai.config import (
     get_sex,
 )
 
+# Bornes hautes des zones Z1..Z4 en %HRR (Karvonen). Z5 = reste, jusqu'à 1.0.
+_HR_ZONE_BOUNDS = (0.60, 0.70, 0.80, 0.90)
+HR_ZONE_KEYS = ("z1", "z2", "z3", "z4", "z5")
+# Au-delà, on considère qu'il y a eu une pause Strava et on ne comptabilise pas
+# le delta dans la zone (sinon une auto-pause de 90 s gonflerait artificiellement
+# la zone du dernier sample actif).
+_HR_ZONE_PAUSE_GAP_SEC = 5.0
+
 
 def fetch_activities_from_db(db_path: Path | None = None) -> list[dict[str, Any]]:
     """Charge toutes les activités depuis SQLite, triées par date croissante."""
@@ -37,7 +45,8 @@ def fetch_activities_from_db(db_path: Path | None = None) -> list[dict[str, Any]
     try:
         cursor = conn.execute(
             "SELECT date, duration, avg_heart_rate, max_heart_rate, avg_power, "
-            "elevation_gain, distance, training_load "
+            "elevation_gain, distance, training_load, "
+            "hr_z1_time, hr_z2_time, hr_z3_time, hr_z4_time, hr_z5_time "
             "FROM activities ORDER BY date ASC"
         )
         rows = cursor.fetchall()
@@ -53,6 +62,11 @@ def fetch_activities_from_db(db_path: Path | None = None) -> list[dict[str, Any]
             "elevation_gain": row[5],
             "distance": row[6],
             "training_load": row[7],
+            "hr_z1_time": row[8],
+            "hr_z2_time": row[9],
+            "hr_z3_time": row[10],
+            "hr_z4_time": row[11],
+            "hr_z5_time": row[12],
         }
         for row in rows
     ]
@@ -115,6 +129,52 @@ def calculate_hr_tss(duration_sec: int, avg_hr: float, hr_rest: float,
     k1, k2 = _trimp_coefficients(sex)
     anchor = 60 * lthr_pct * k1 * math.exp(k2 * lthr_pct)
     return round(trimp / anchor * 100, 2)
+
+
+def _zone_index(hrr: float) -> int:
+    """Retourne l'indice 0..4 de la zone correspondant à un HRR clippé sur [0, 1]."""
+    for i, bound in enumerate(_HR_ZONE_BOUNDS):
+        if hrr < bound:
+            return i
+    return 4
+
+
+def calculate_hr_zones(hr_stream: list[float] | None,
+                       time_stream: list[float] | None,
+                       hr_rest: float,
+                       hr_max: float) -> dict[str, float]:
+    """
+    Ventile une activité dans 5 zones %HRR (Karvonen) à partir des streams HR.
+
+    hr_stream : fréquence cardiaque seconde par seconde (bpm).
+    time_stream : timestamps relatifs en secondes (gère les pauses Strava
+                  via la différence entre samples consécutifs).
+    Renvoie le temps passé dans chaque zone, en secondes : {"z1": ..., "z5": ...}.
+    Les samples HR à 0 ou None sont ignorés (capteur pas encore actif).
+    """
+    zones = {key: 0.0 for key in HR_ZONE_KEYS}
+    if not hr_stream or not time_stream or len(hr_stream) != len(time_stream):
+        return zones
+    if hr_max <= hr_rest:
+        return zones
+
+    hrr_range = hr_max - hr_rest
+    n = len(hr_stream)
+    for i in range(n):
+        hr = hr_stream[i]
+        if hr is None or hr <= 0:
+            continue
+        if i < n - 1:
+            dt = float(time_stream[i + 1]) - float(time_stream[i])
+            if dt <= 0 or dt > _HR_ZONE_PAUSE_GAP_SEC:
+                continue
+        else:
+            dt = 1.0
+        hrr = (float(hr) - hr_rest) / hrr_range
+        hrr = max(0.0, min(hrr, 1.0))
+        zones[HR_ZONE_KEYS[_zone_index(hrr)]] += dt
+
+    return {key: round(value, 1) for key, value in zones.items()}
 
 
 def compute_training_load(duration_sec: int,

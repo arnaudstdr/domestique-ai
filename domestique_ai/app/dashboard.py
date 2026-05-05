@@ -19,6 +19,7 @@ from domestique_ai.ingestion.strava import (
     StravaAuthError,
     StravaClient,
     backfill_activity_fields,
+    backfill_hr_zones,
     sync_activities,
 )
 from domestique_ai.processing.analyzer import (
@@ -86,6 +87,25 @@ with st.sidebar:
             except Exception as exc:  # noqa: BLE001
                 st.error(f"Erreur de backfill : {exc}")
 
+    if st.button("📥 Backfill zones HR", width="stretch",
+                 help="Télécharge les streams HR pour ventiler chaque activité "
+                      "en 5 zones %HRR. 1 appel API par activité — peut être "
+                      "long. Idempotent : ne re-traite jamais une activité déjà "
+                      "calculée."):
+        client_id, client_secret, _ = get_strava_credentials()
+        if not (client_id and client_secret):
+            st.error("STRAVA_CLIENT_ID / STRAVA_CLIENT_SECRET absents du .env.")
+        else:
+            try:
+                with st.spinner("Calcul des zones HR…"):
+                    client = StravaClient.from_tokens_file(client_id, client_secret)
+                    updated = backfill_hr_zones(client)
+                st.success(f"{updated} activité(s) ventilée(s) en zones HR.")
+            except StravaAuthError as exc:
+                st.error(str(exc))
+            except Exception as exc:  # noqa: BLE001
+                st.error(f"Erreur de backfill zones : {exc}")
+
 activities = fetch_activities_from_db()
 
 if not activities:
@@ -149,6 +169,16 @@ else:
         df_display["distance"] = (
             pd.to_numeric(df_display["distance"], errors="coerce") / 1000
         ).round(2)
+    for zone_col in ("hr_z1_time", "hr_z2_time", "hr_z3_time",
+                     "hr_z4_time", "hr_z5_time"):
+        if zone_col in df_display.columns:
+            df_display[zone_col] = pd.to_numeric(
+                df_display[zone_col], errors="coerce"
+            ).map(
+                lambda s: ""
+                if pd.isna(s)
+                else f"{int(s) // 3600:02d}:{(int(s) % 3600) // 60:02d}:{int(s) % 60:02d}"
+            )
     st.dataframe(
         df_display,
         width="stretch",

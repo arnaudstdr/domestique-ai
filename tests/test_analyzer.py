@@ -10,6 +10,7 @@ from domestique_ai.ingestion.strava import init_db
 from domestique_ai.processing.analyzer import (
     calculate_ctl_atl_tsb,
     calculate_hr_tss,
+    calculate_hr_zones,
     calculate_trimp,
     calculate_tss,
     compute_training_load,
@@ -128,6 +129,56 @@ def test_compute_training_load_returns_zero_without_data(monkeypatch):
     assert compute_training_load(
         duration_sec=3600, avg_hr=None, avg_power=None, ftp=0,
     ) == pytest.approx(0.0)
+
+
+def test_calculate_hr_zones_distributes_time_by_zone():
+    # hr_rest=50, hr_max=150 → HRR = (hr-50)/100, soit :
+    # 70 → 0.20 (Z1), 115 → 0.65 (Z2), 125 → 0.75 (Z3),
+    # 135 → 0.85 (Z4), 145 → 0.95 (Z5)
+    time_stream = [0, 1, 2, 3, 4, 5]
+    hr_stream = [70, 115, 125, 135, 145, 145]
+    zones = calculate_hr_zones(hr_stream, time_stream, hr_rest=50, hr_max=150)
+    assert zones == {"z1": 1.0, "z2": 1.0, "z3": 1.0, "z4": 1.0, "z5": 2.0}
+
+
+def test_calculate_hr_zones_uses_time_deltas_for_pauses():
+    # Saut de 98 s entre i=2 et i=3 → la pause ne doit pas être comptée
+    # (le sample i=2 reste actif 0 s, le saut est ignoré).
+    time_stream = [0, 1, 2, 100, 101]
+    hr_stream = [70, 70, 70, 115, 115]
+    zones = calculate_hr_zones(hr_stream, time_stream, hr_rest=50, hr_max=150)
+    # i=0: dt=1 → Z1; i=1: dt=1 → Z1; i=2: dt=98 (pause) → ignoré;
+    # i=3: dt=1 → Z2; i=4 dernier: dt=1.0 → Z2
+    assert zones == {"z1": 2.0, "z2": 2.0, "z3": 0.0, "z4": 0.0, "z5": 0.0}
+
+
+def test_calculate_hr_zones_clips_hrr_extremes():
+    # HR < hr_rest → Z1 (HRR clippé à 0). HR > hr_max → Z5 (HRR clippé à 1).
+    time_stream = [0, 1, 2]
+    hr_stream = [40, 200, 200]  # 40 < 50 (rest); 200 > 150 (max)
+    zones = calculate_hr_zones(hr_stream, time_stream, hr_rest=50, hr_max=150)
+    assert zones["z1"] == pytest.approx(1.0)
+    assert zones["z5"] == pytest.approx(2.0)
+    assert zones["z2"] == zones["z3"] == zones["z4"] == 0.0
+
+
+def test_calculate_hr_zones_returns_zeros_when_invalid():
+    zeros = {"z1": 0.0, "z2": 0.0, "z3": 0.0, "z4": 0.0, "z5": 0.0}
+    assert calculate_hr_zones(None, None, 50, 150) == zeros
+    assert calculate_hr_zones([], [], 50, 150) == zeros
+    # hr_max <= hr_rest → division impossible
+    assert calculate_hr_zones([100], [0], 150, 150) == zeros
+    # listes désynchronisées
+    assert calculate_hr_zones([100, 110], [0], 50, 150) == zeros
+
+
+def test_calculate_hr_zones_skips_zero_samples():
+    # Les samples HR=0 (capteur pas encore actif) ne sont comptés dans aucune zone.
+    time_stream = [0, 1, 2, 3]
+    hr_stream = [0, 0, 115, 115]
+    zones = calculate_hr_zones(hr_stream, time_stream, hr_rest=50, hr_max=150)
+    # i=0,1: skip; i=2: dt=1 → Z2; i=3 dernier: dt=1.0 → Z2
+    assert zones == {"z1": 0.0, "z2": 2.0, "z3": 0.0, "z4": 0.0, "z5": 0.0}
 
 
 def test_recalculate_training_loads_updates_existing_rows(tmp_path):
