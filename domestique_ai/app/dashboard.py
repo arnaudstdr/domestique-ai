@@ -46,14 +46,15 @@ from domestique_ai.processing.analyzer import (
     fetch_weight_history,
     recalculate_training_loads,
 )
+from domestique_ai.processing.gpx import build_gpx
 
 _HR_ZONE_HRR_LABELS = ("< 60 %", "60–70 %", "70–80 %", "80–90 %", "≥ 90 %")
 _HR_ZONE_HRR_BOUNDS = ((0.0, 0.60), (0.60, 0.70), (0.70, 0.80),
                        (0.80, 0.90), (0.90, 1.0))
 _HR_ZONE_PCT_COL = "% du total"
 
-st.set_page_config(page_title="DomestiqueAI – Dashboard", layout="wide")
-st.title("🚴‍♂️ DomestiqueAI – Tableau de bord d'entraînement")
+st.set_page_config(page_title="DomestiqueAI", layout="wide")
+st.title("🚴‍♂️ DomestiqueAI ")
 
 
 def _tsb_zone_label(tsb: float) -> tuple[str, str]:
@@ -82,6 +83,188 @@ def _hr_zone_bpm_ranges(hr_rest: float | None,
         f"{round(hr_rest + lo * hrr)}–{round(hr_rest + hi * hrr)}"
         for lo, hi in _HR_ZONE_HRR_BOUNDS
     ]
+
+
+_DETAIL_STREAM_KEYS = [
+    "time", "latlng", "altitude", "heartrate",
+    "cadence", "watts", "velocity_smooth", "distance",
+]
+_TIME_AXIS_LABEL = "temps (min)"
+_ACTIVITY_ANALYSIS_PROMPT = (
+    "Analyse l'activité Strava avec strava_id={strava_id}. "
+    "Étape 1 : appelle `get_activity_details(strava_id={strava_id})` pour récupérer "
+    "les chiffres (durée, distance, FC, charge, zones HR). "
+    "Étape 2 : appelle `get_training_load_state` (CTL/ATL/TSB du jour) et "
+    "`get_objective` pour le contexte. "
+    "Étape 3 : conclus en 4-6 lignes en répondant explicitement à : "
+    "(1) ce que cette sortie a apporté physiologiquement (filière dominante, "
+    "stimulus principal) ; "
+    "(2) si elle a été *productive* ou *contre-productive* vu le TSB courant et "
+    "l'objectif ; "
+    "(3) la séance ou la récup à privilégier ensuite. "
+    "Sois concis, factuel, en français."
+)
+
+
+@st.cache_data(ttl=3600, show_spinner="Chargement de l'activité…")
+def _load_activity_detail(strava_id: int) -> dict | None:
+    """Fetch les streams + le résumé d'une activité Strava (caché 1h)."""
+    client_id, client_secret, _ = get_strava_credentials()
+    if not (client_id and client_secret):
+        return None
+    try:
+        client = StravaClient.from_tokens_file(client_id, client_secret)
+        streams = client.fetch_streams_full(strava_id, _DETAIL_STREAM_KEYS)
+        summary = client.fetch_activity_summary(strava_id)
+    except StravaAuthError:
+        return None
+    return {"streams": streams or {}, "summary": summary or {}}
+
+
+def _render_activity_map(latlng: list[list[float]]) -> None:
+    """Trace la trace GPS sur une carte. pydeck si dispo, sinon st.map."""
+    coords = [[pt[1], pt[0]] for pt in latlng if pt and len(pt) >= 2]
+    if not coords:
+        return
+    try:
+        import pydeck as pdk
+        lats = [c[1] for c in coords]
+        lons = [c[0] for c in coords]
+        view = pdk.ViewState(
+            latitude=(min(lats) + max(lats)) / 2,
+            longitude=(min(lons) + max(lons)) / 2,
+            zoom=12,
+            pitch=0,
+        )
+        layer = pdk.Layer(
+            "PathLayer",
+            data=[{"path": coords}],
+            get_path="path",
+            get_color=[252, 76, 2],
+            width_scale=1,
+            width_min_pixels=4,
+            pickable=False,
+        )
+        st.pydeck_chart(pdk.Deck(
+            layers=[layer], initial_view_state=view, map_style=None,
+        ))
+    except Exception:  # noqa: BLE001 — fallback robuste
+        st.map(pd.DataFrame({
+            "lat": [c[1] for c in coords],
+            "lon": [c[0] for c in coords],
+        }))
+
+
+def _render_activity_detail(strava_id: int) -> None:
+    """Vue détail d'une activité : carte GPS, courbes, export GPX."""
+    st.divider()
+    detail = _load_activity_detail(strava_id)
+    if detail is None:
+        st.warning(
+            "Impossible de charger les détails (credentials Strava absents "
+            "ou token expiré). Reconfigurez le `.env` et relancez le flow OAuth."
+        )
+        return
+
+    streams = detail.get("streams") or {}
+    summary = detail.get("summary") or {}
+    name = summary.get("name") or f"Activité {strava_id}"
+    start_iso = summary.get("start_date")
+
+    st.subheader(f"📍 {name}")
+    if summary.get("start_date_local"):
+        st.caption(summary["start_date_local"])
+
+    latlng = streams.get("latlng")
+    if latlng:
+        _render_activity_map(latlng)
+    else:
+        st.info("Pas de trace GPS pour cette activité (indoor / home-trainer).")
+
+    time_stream = streams.get("time")
+    if time_stream:
+        time_min = [t / 60 for t in time_stream]
+        if "heartrate" in streams:
+            st.markdown("**Fréquence cardiaque (bpm)**")
+            st.line_chart(pd.DataFrame(
+                {"FC": streams["heartrate"]}, index=time_min,
+            ).rename_axis(_TIME_AXIS_LABEL))
+        if "altitude" in streams:
+            st.markdown("**Altitude (m)**")
+            st.line_chart(pd.DataFrame(
+                {"altitude": streams["altitude"]}, index=time_min,
+            ).rename_axis(_TIME_AXIS_LABEL))
+        if "watts" in streams:
+            st.markdown("**Puissance (W)**")
+            st.line_chart(pd.DataFrame(
+                {"puissance": streams["watts"]}, index=time_min,
+            ).rename_axis(_TIME_AXIS_LABEL))
+
+    cols = st.columns(2)
+    with cols[0]:
+        if latlng:
+            try:
+                start_dt = dt.datetime.fromisoformat(
+                    (start_iso or "").replace("Z", "+00:00")
+                )
+            except (ValueError, TypeError):
+                start_dt = dt.datetime.now(dt.timezone.utc)
+            gpx_xml = build_gpx(name, start_dt, streams)
+            st.download_button(
+                "📥 Télécharger en GPX",
+                data=gpx_xml,
+                file_name=f"strava_{strava_id}.gpx",
+                mime="application/gpx+xml",
+                width="stretch",
+            )
+        else:
+            st.button(
+                "📥 Télécharger en GPX",
+                disabled=True,
+                width="stretch",
+                help="Trace GPS absente — export GPX impossible.",
+            )
+    with cols[1]:
+        analyze_clicked = st.button(
+            "🤖 Analyser cette sortie",
+            key=f"analyze_btn_{strava_id}",
+            type="primary",
+            width="stretch",
+        )
+
+    _render_activity_analysis(strava_id, analyze_clicked)
+
+
+def _render_activity_analysis(strava_id: int, triggered: bool) -> None:
+    """Rendu de l'analyse coach inline (lance run_turn au clic, mémorise la réponse)."""
+    state_key = f"activity_analysis_{strava_id}"
+
+    if triggered:
+        prompt = _ACTIVITY_ANALYSIS_PROMPT.format(strava_id=strava_id)
+        with st.spinner("Le coach analyse cette sortie…"):
+            try:
+                reply = run_turn(prompt)
+                st.session_state[state_key] = reply
+            except OllamaError as exc:
+                st.session_state[state_key] = None
+                st.error(f"Erreur Ollama : {exc}")
+                return
+
+    reply = st.session_state.get(state_key)
+    if reply is None:
+        return
+
+    st.markdown("### 🤖 Analyse du coach")
+    if reply.content:
+        st.markdown(reply.content)
+    if reply.thinking:
+        with st.expander("🧠 Raisonnement"):
+            st.markdown(reply.thinking)
+    if reply.tool_trace:
+        with st.expander(f"🛠 Tools appelés ({len(reply.tool_trace)})"):
+            for trace in reply.tool_trace:
+                st.markdown(f"**`{trace.name}`** — args : `{trace.arguments}`")
+                st.json(trace.result, expanded=False)
 
 
 with st.sidebar:
@@ -271,13 +454,24 @@ with tab_dashboard:
                     if pd.isna(s)
                     else f"{int(s) // 3600:02d}:{(int(s) % 3600) // 60:02d}:{int(s) % 60:02d}"
                 )
-        st.dataframe(
+        event = st.dataframe(
             df_display,
             width="stretch",
+            on_select="rerun",
+            selection_mode="single-row",
             column_config={
-                "distance": st.column_config.NumberColumn("distance (km)", format="%.2f"),
+                "distance": st.column_config.NumberColumn(
+                    "distance (km)", format="%.2f",
+                ),
+                "strava_id": None,
             },
         )
+        selected_rows = getattr(getattr(event, "selection", None), "rows", [])
+        if selected_rows:
+            selected = df_display.iloc[selected_rows[0]]
+            sid = selected.get("strava_id")
+            if sid is not None and not pd.isna(sid):
+                _render_activity_detail(int(sid))
 
 # ---- Tab Coach ---------------------------------------------------------------
 
