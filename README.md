@@ -7,8 +7,10 @@
 
 L'assistant intelligent pour cyclistes. Analyse automatique de la charge
 d'entraînement, état de forme, vue détaillée de chaque sortie (carte GPS,
-courbes FC / altitude / puissance, export GPX) et **coach conversationnel
-LLM** qui analyse vos sorties à la demande sans inventer un seul chiffre.
+courbes FC / altitude / puissance, export GPX), **détection de signaux de
+surentraînement** (TSB chronique, Monotony/Strain, HRV, FC repos) et
+**coach conversationnel LLM** qui analyse vos sorties à la demande sans
+inventer un seul chiffre.
 
 ## Architecture
 
@@ -20,15 +22,17 @@ domestique_ai/
 │   └── strava_oauth_flow.py # flow d'auth interactif initial
 ├── processing/
 │   ├── analyzer.py          # TSS / hr-TSS, CTL/ATL/TSB, zones HR (Karvonen)
-│   └── gpx.py               # export GPX 1.1 depuis les streams Strava
+│   ├── gpx.py               # export GPX 1.1 depuis les streams Strava
+│   ├── overtraining.py      # 4 indicateurs auto (TSB chronique, Monotony/Strain, jump hebdo)
+│   └── morning_metrics.py   # CRUD HRV/FC repos/sommeil/stress + baselines + alertes
 ├── llm/
 │   ├── ollama_client.py     # wrapper SDK Ollama (chat + tool calling)
-│   ├── tools.py             # 6 tools exposés au LLM (état charge, activités, etc.)
+│   ├── tools.py             # 8 tools exposés au LLM (charge, activités, surentraînement, …)
 │   ├── coach.py             # boucle agentique du coach (system prompt + tool loop)
 │   ├── objectives.py        # gestion de l'objectif YAML (data/objective.yaml)
 │   └── conversations.py     # persistance des sessions de chat (SQLite)
 └── app/
-    └── dashboard.py         # UI Streamlit (2 onglets : Tableau de bord + Coach)
+    └── dashboard.py         # UI Streamlit (3 onglets : Tableau de bord + Matin + Coach)
 ```
 
 Source de vérité : SQLite local (`data/strava_activities.db`). Une seule table
@@ -72,10 +76,43 @@ Strava :
 
 Les streams sont fetchés à la demande (cache Streamlit 1 h, pas de bloat DB).
 
+## Détection de surentraînement
+
+Deux niveaux d'analyse, exposés dans un **bandeau d'alertes** au sommet du
+tableau de bord et au coach LLM via des tools dédiés.
+
+### Indicateurs automatiques (à partir des activités)
+
+Calculés sans donnée externe — seuils issus de la littérature physio
+(Foster 2001, Banister) :
+
+- **TSB chronique** — moyenne du TSB sur 7 jours. Alerte si < -20.
+- **Monotony de Foster** — `mean / stdev` de la charge journalière sur
+  7 j. Alerte si > 2.0 (pas assez de variabilité).
+- **Strain de Foster** — `total_load × monotony`. Alerte si > 6000.
+- **Saut de volume hebdomadaire** — comparaison W vs W-1. Alerte si
+  > +30 % (risque de blessure).
+
+### Métriques matinales (saisie manuelle, onglet Matin)
+
+Pour les bracelets sans API publique (Amazfit / Zepp typiquement) :
+formulaire quotidien pour HRV (ms), FC repos, durée de sommeil, score
+de sommeil (0-100), score de stress (0-100). Persistés dans la table
+`morning_metrics` (clé = date, idempotent).
+
+Le module calcule une **baseline mobile sur 14 jours** et alerte dès
+que la dernière valeur dérive de plus de 10 % dans le sens
+défavorable :
+- HRV ↓, sommeil ↓ → fatigue / mauvaise récup.
+- FC repos ↑, stress ↑ → charge mal absorbée.
+
+Affichage : KPI baseline vs dernière valeur (delta coloré),
+courbes 90 j sur 4 panneaux.
+
 ## Coach LLM (onglet Coach)
 
 Coach conversationnel basé sur **Ollama** (modèle par défaut
-`gemma4:31b-cloud`, override via `OLLAMA_MODEL`). Tool calling avec 6 tools :
+`gemma4:31b-cloud`, override via `OLLAMA_MODEL`). Tool calling avec 8 tools :
 
 | Tool | Usage |
 |---|---|
@@ -84,6 +121,8 @@ Coach conversationnel basé sur **Ollama** (modèle par défaut
 | `get_zone_distribution` | Répartition cumulée par zone HR |
 | `get_objective` | Objectif d'entraînement courant (YAML) |
 | `get_activity_details` | Détail d'une activité par `strava_id` |
+| `get_morning_trends` | Baselines HRV/FC repos/sommeil/stress + alertes |
+| `get_overtraining_signals` | TSB chronique, Monotony/Strain, jump hebdo |
 | `propose_workout` | Squelette de séance (récup, endurance, tempo, seuil, VO2max) |
 
 **Règle d'or** : le LLM n'invente jamais de chiffre. Le system prompt impose
@@ -153,11 +192,14 @@ ollama serve
 streamlit run domestique_ai/app/dashboard.py
 ```
 
-Le dashboard expose deux onglets :
+Le dashboard expose trois onglets :
 
-- **📊 Tableau de bord** : métriques courantes CTL / ATL / TSB + zone de
-  forme, courbes d'évolution, répartition par zone HR, historique du poids,
-  et **tableau d'activités cliquable** (vue détail au clic, voir plus haut).
+- **📊 Tableau de bord** : bandeau d'alertes surentraînement, métriques
+  CTL / ATL / TSB + zone de forme, courbes d'évolution, répartition par
+  zone HR, historique du poids, et **tableau d'activités cliquable**
+  (vue détail au clic, voir plus haut).
+- **🌅 Matin** : saisie quotidienne HRV / FC repos / sommeil / stress,
+  KPI vs baseline 14 j, courbes 90 j.
 - **🤖 Coach** : chat conversationnel avec le LLM, sessions multiples,
   raisonnement et tool calls visibles en expanders.
 
@@ -180,12 +222,13 @@ pytest
 ruff check .
 ```
 
-77 tests couvrent : calcul de charge, zones HR, ingestion Strava (mocks),
-génération GPX, conversations, objectifs, tools du coach.
+100 tests couvrent : calcul de charge, zones HR, ingestion Strava
+(mocks), génération GPX, conversations, objectifs, tools du coach,
+métriques matinales et indicateurs de surentraînement.
 
 ## Roadmap
 
-- [ ] Détection automatique de signaux de surentraînement (HRV, FC repos).
+- [x] Détection automatique de signaux de surentraînement (HRV, FC repos).
 - [ ] Génération de plans d'entraînement personnalisés par le coach.
 - [ ] Support import direct Garmin (FIT files locaux, sans passer par Strava).
 - [ ] Comparaison entre activités similaires (même parcours).
