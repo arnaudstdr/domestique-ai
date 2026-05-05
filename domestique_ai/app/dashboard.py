@@ -145,7 +145,14 @@ else:
             .astype(int)
             .map(lambda s: f"{s // 3600:02d}:{(s % 3600) // 60:02d}:{s % 60:02d}")
         )
+    if "distance" in df_display.columns:
+        df_display["distance"] = (
+            pd.to_numeric(df_display["distance"], errors="coerce") / 1000
+        ).round(2)
     st.dataframe(
         df_display,
         width="stretch",
+        column_config={
+            "distance": st.column_config.NumberColumn("distance (km)", format="%.2f"),
+        },
     )
