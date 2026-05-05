@@ -44,8 +44,8 @@ def fetch_activities_from_db(db_path: Path | None = None) -> list[dict[str, Any]
     conn = sqlite3.connect(path)
     try:
         cursor = conn.execute(
-            "SELECT date, duration, avg_heart_rate, max_heart_rate, avg_power, "
-            "elevation_gain, distance, training_load, "
+            "SELECT strava_id, date, duration, avg_heart_rate, max_heart_rate, "
+            "avg_power, elevation_gain, distance, training_load, "
             "hr_z1_time, hr_z2_time, hr_z3_time, hr_z4_time, hr_z5_time "
             "FROM activities ORDER BY date ASC"
         )
@@ -54,19 +54,20 @@ def fetch_activities_from_db(db_path: Path | None = None) -> list[dict[str, Any]
         conn.close()
     return [
         {
-            "date": row[0],
-            "duration": row[1],
-            "avg_heart_rate": row[2],
-            "max_heart_rate": row[3],
-            "avg_power": row[4],
-            "elevation_gain": row[5],
-            "distance": row[6],
-            "training_load": row[7],
-            "hr_z1_time": row[8],
-            "hr_z2_time": row[9],
-            "hr_z3_time": row[10],
-            "hr_z4_time": row[11],
-            "hr_z5_time": row[12],
+            "strava_id": row[0],
+            "date": row[1],
+            "duration": row[2],
+            "avg_heart_rate": row[3],
+            "max_heart_rate": row[4],
+            "avg_power": row[5],
+            "elevation_gain": row[6],
+            "distance": row[7],
+            "training_load": row[8],
+            "hr_z1_time": row[9],
+            "hr_z2_time": row[10],
+            "hr_z3_time": row[11],
+            "hr_z4_time": row[12],
+            "hr_z5_time": row[13],
         }
         for row in rows
     ]
