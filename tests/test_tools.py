@@ -60,6 +60,8 @@ def test_tool_schemas_have_required_shape():
         "get_zone_distribution",
         "get_objective",
         "get_activity_details",
+        "get_morning_trends",
+        "get_overtraining_signals",
         "propose_workout",
     }
     for schema in TOOL_SCHEMAS:

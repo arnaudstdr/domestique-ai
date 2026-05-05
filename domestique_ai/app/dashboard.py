@@ -48,6 +48,14 @@ from domestique_ai.processing.analyzer import (
     recalculate_training_loads,
 )
 from domestique_ai.processing.gpx import build_gpx
+from domestique_ai.processing.morning_metrics import (
+    compute_baselines,
+    detect_morning_alerts,
+    fetch_morning_entry,
+    fetch_morning_history,
+    save_morning_entry,
+)
+from domestique_ai.processing.overtraining import detect_overtraining_signals
 
 _ICON_PATH = Path(__file__).resolve().parents[2] / "icon.png"
 
@@ -344,9 +352,33 @@ with st.sidebar:
                 st.error(f"Erreur de backfill zones : {exc}")
 
 
-tab_dashboard, tab_coach = st.tabs(["📊 Tableau de bord", "🤖 Coach"])
+tab_dashboard, tab_morning, tab_coach = st.tabs(
+    ["📊 Tableau de bord", "🌅 Matin", "🤖 Coach"]
+)
 
 # ---- Tab Tableau de bord -----------------------------------------------------
+
+def _render_global_alerts() -> None:
+    """Bandeau d'alertes agrégées : surentraînement auto + dérive matinale."""
+    overtraining = detect_overtraining_signals()
+    morning_alerts = detect_morning_alerts()
+    ot_alerts = overtraining.get("alerts") or []
+    if not ot_alerts and not morning_alerts:
+        return
+    with st.container(border=True):
+        st.markdown("### 🚨 Signaux d'alerte")
+        for alert in ot_alerts:
+            st.warning(f"**{alert['indicator']}** — {alert['message']}")
+        for alert in morning_alerts:
+            metric = alert["metric"]
+            severity = alert["severity"]
+            arrow = "⬇️" if alert["delta_pct"] < 0 else "⬆️"
+            msg = (
+                f"**{metric}** {arrow} {alert['delta_pct']:+.1f}% vs baseline "
+                f"({alert['latest']:.1f} le {alert['latest_date']})"
+            )
+            (st.error if severity == "critical" else st.warning)(msg)
+
 
 with tab_dashboard:
     activities = fetch_activities_from_db()
@@ -358,6 +390,7 @@ with tab_dashboard:
             "ou cliquez sur **Synchroniser Strava** dans la barre latérale."
         )
     else:
+        _render_global_alerts()
         df = pd.DataFrame(activities)
         df["date"] = pd.to_datetime(df["date"], utc=True).dt.tz_localize(None)
 
@@ -485,6 +518,125 @@ with tab_dashboard:
             sid = selected.get("strava_id")
             if sid is not None and not pd.isna(sid):
                 _render_activity_detail(int(sid))
+
+# ---- Tab Matin ---------------------------------------------------------------
+
+
+def _render_morning_form(target_date: dt.date) -> None:
+    """Formulaire de saisie quotidienne. Pré-remplit si la date a déjà été saisie."""
+    iso = target_date.isoformat()
+    existing = fetch_morning_entry(iso) or {}
+
+    with st.form(key=f"morning_form_{iso}"):
+        c1, c2, c3 = st.columns(3)
+        with c1:
+            hrv = st.number_input(
+                "HRV (ms)", min_value=0.0, max_value=300.0,
+                value=float(existing.get("hrv_ms") or 0.0),
+                step=0.5, help="RMSSD au repos (Zepp / mesure manuelle).",
+            )
+            resting_hr = st.number_input(
+                "FC repos (bpm)", min_value=0.0, max_value=120.0,
+                value=float(existing.get("resting_hr") or 0.0),
+                step=1.0,
+            )
+        with c2:
+            sleep_hours = st.number_input(
+                "Sommeil (h)", min_value=0.0, max_value=14.0,
+                value=float(existing.get("sleep_hours") or 0.0),
+                step=0.25,
+            )
+            sleep_score = st.number_input(
+                "Score sommeil Zepp (0-100)", min_value=0, max_value=100,
+                value=int(existing.get("sleep_score") or 0), step=1,
+            )
+        with c3:
+            stress_score = st.number_input(
+                "Stress matinal Zepp (0-100)", min_value=0, max_value=100,
+                value=int(existing.get("stress_score") or 0), step=1,
+            )
+            notes = st.text_input(
+                "Notes (optionnel)", value=existing.get("notes") or "",
+            )
+
+        submitted = st.form_submit_button("💾 Enregistrer", type="primary")
+        if submitted:
+            save_morning_entry(
+                iso,
+                hrv_ms=hrv or None,
+                resting_hr=resting_hr or None,
+                sleep_hours=sleep_hours or None,
+                sleep_score=sleep_score or None,
+                stress_score=stress_score or None,
+                notes=notes.strip() or None,
+            )
+            st.success(f"Entrée du {iso} enregistrée.")
+            st.rerun()
+
+
+def _render_morning_baselines() -> None:
+    """4 metrics avec baseline 14j et delta % de la dernière valeur."""
+    metrics_meta = [
+        ("hrv_ms", "HRV", "ms"),
+        ("resting_hr", "FC repos", "bpm"),
+        ("sleep_score", "Score sommeil", "/100"),
+        ("stress_score", "Stress", "/100"),
+    ]
+    cols = st.columns(4)
+    for col, (key, label, unit) in zip(cols, metrics_meta, strict=True):
+        b = compute_baselines(key)
+        if not b.get("available"):
+            col.metric(label, "—", help=b.get("reason", ""))
+            continue
+        delta = f"{b['delta_pct']:+.1f}% vs baseline {b['baseline']:.1f}{unit}"
+        col.metric(label, f"{b['latest']:.1f}{unit}", delta=delta,
+                   delta_color="inverse" if key in ("resting_hr",
+                                                    "stress_score") else "normal")
+
+
+def _render_morning_charts() -> None:
+    """Courbes d'évolution sur 90 jours."""
+    history = fetch_morning_history(days=90)
+    if not history:
+        st.info("Pas encore d'historique. Saisis ta première entrée ci-dessus.")
+        return
+    df = pd.DataFrame(history)
+    df["date"] = pd.to_datetime(df["date"])
+    df = df.set_index("date")
+
+    pairs = [
+        ("hrv_ms", "HRV (ms)"),
+        ("resting_hr", "FC repos (bpm)"),
+        ("sleep_score", "Score sommeil (0-100)"),
+        ("stress_score", "Stress matinal (0-100)"),
+    ]
+    cols = st.columns(2)
+    for i, (col_name, title) in enumerate(pairs):
+        if col_name in df.columns and df[col_name].notna().any():
+            with cols[i % 2]:
+                st.markdown(f"**{title}**")
+                st.line_chart(df[[col_name]].dropna())
+
+
+with tab_morning:
+    st.subheader("🌅 Métriques matinales")
+    st.caption(
+        "Saisis chaque matin tes valeurs Zepp / Amazfit pour détecter une "
+        "dérive vs ta baseline 14 j (signal classique de surentraînement). "
+        "Tous les champs sont optionnels."
+    )
+
+    target = st.date_input(
+        "Date", value=dt.date.today(), max_value=dt.date.today(),
+        key="morning_target_date",
+    )
+    _render_morning_form(target if isinstance(target, dt.date) else dt.date.today())
+
+    st.divider()
+    st.markdown("### Tendances")
+    _render_morning_baselines()
+    _render_morning_charts()
+
 
 # ---- Tab Coach ---------------------------------------------------------------
 

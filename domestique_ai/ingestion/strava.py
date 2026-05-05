@@ -348,6 +348,17 @@ def init_db(db_path: Path | None = None) -> None:
                 weight REAL NOT NULL
             )
         """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS morning_metrics (
+                date TEXT PRIMARY KEY,
+                hrv_ms REAL,
+                resting_hr REAL,
+                sleep_hours REAL,
+                sleep_score INTEGER,
+                stress_score INTEGER,
+                notes TEXT
+            )
+        """)
         conn.commit()
     finally:
         conn.close()

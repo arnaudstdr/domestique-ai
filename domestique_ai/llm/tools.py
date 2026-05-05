@@ -180,6 +180,53 @@ def get_activity_details(strava_id: int) -> dict[str, Any]:
     }
 
 
+def get_morning_trends(days: int = 30) -> dict[str, Any]:
+    """
+    Tendances des métriques matinales (HRV, FC repos, sommeil, stress) avec
+    baselines mobiles sur 14 jours et alertes si dérive vs baseline.
+    """
+    from domestique_ai.processing.morning_metrics import (
+        METRIC_COLUMNS,
+        compute_baselines,
+        detect_morning_alerts,
+        fetch_morning_history,
+    )
+    history = fetch_morning_history(days=days)
+    if not history:
+        return {
+            "available": False,
+            "reason": "Aucune métrique matinale saisie. "
+                      "Onglet « 🌅 Matin » du dashboard pour les enregistrer.",
+        }
+    baselines = {}
+    for metric in METRIC_COLUMNS:
+        b = compute_baselines(metric)
+        if b.get("available"):
+            baselines[metric] = {
+                "baseline_14d": round(b["baseline"], 2),
+                "latest": b["latest"],
+                "latest_date": b["latest_date"],
+                "delta_pct": round(b["delta_pct"], 1),
+                "sample_size": b["sample_size"],
+            }
+    return {
+        "available": True,
+        "days": days,
+        "entries_count": len(history),
+        "baselines": baselines,
+        "alerts": detect_morning_alerts(),
+    }
+
+
+def get_overtraining_signals() -> dict[str, Any]:
+    """
+    Indicateurs auto de surentraînement : TSB chronique, monotony de Foster,
+    strain de Foster, saut de volume hebdo. Alertes agrégées.
+    """
+    from domestique_ai.processing.overtraining import detect_overtraining_signals
+    return detect_overtraining_signals()
+
+
 _WORKOUT_TEMPLATES = {
     "recovery": {
         "kind": "recovery",
@@ -366,6 +413,37 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
     {
         "type": "function",
         "function": {
+            "name": "get_morning_trends",
+            "description": "Tendances HRV, FC repos, sommeil, stress saisies "
+                           "manuellement chaque matin. Renvoie baselines 14 j "
+                           "et alertes si dérive (HRV ↓, FC repos ↑, etc.).",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "days": {
+                        "type": "integer",
+                        "description": "Fenêtre d'historique en jours (défaut 30).",
+                        "minimum": 7, "maximum": 365,
+                    },
+                },
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_overtraining_signals",
+            "description": "Détecte les signaux de surentraînement à partir "
+                           "des activités : TSB chronique, monotony et strain "
+                           "de Foster, saut de volume hebdo. Renvoie alertes "
+                           "agrégées avec messages explicites.",
+            "parameters": {"type": "object", "properties": {}, "required": []},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "propose_workout",
             "description": "Génère un squelette de séance (échauffement, corps, "
                            "retour au calme) selon une zone cible et une durée.",
@@ -402,6 +480,8 @@ TOOLS: dict[str, Callable[..., dict[str, Any]]] = {
     "get_zone_distribution": get_zone_distribution,
     "get_objective": get_objective,
     "get_activity_details": get_activity_details,
+    "get_morning_trends": get_morning_trends,
+    "get_overtraining_signals": get_overtraining_signals,
     "propose_workout": propose_workout,
 }
 
