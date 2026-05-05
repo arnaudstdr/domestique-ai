@@ -19,8 +19,8 @@ from urllib.parse import urlencode
 
 import requests
 
-from domestique_ai.config import get_db_path, get_ftp, get_tokens_path
-from domestique_ai.processing.analyzer import calculate_tss
+from domestique_ai.config import get_db_path, get_tokens_path
+from domestique_ai.processing.analyzer import compute_training_load
 
 STRAVA_API_BASE_URL = "https://www.strava.com/api/v3"
 STRAVA_OAUTH_TOKEN_URL = "https://www.strava.com/oauth/token"
@@ -140,6 +140,7 @@ class StravaClient:
             "date": activity.get("start_date"),
             "duration": activity.get("elapsed_time"),
             "avg_heart_rate": activity.get("average_heartrate"),
+            "max_heart_rate": activity.get("max_heartrate"),
             "avg_power": activity.get("average_watts"),
             "elevation_gain": activity.get("total_elevation_gain"),
             "distance": activity.get("distance"),
@@ -177,8 +178,16 @@ class StravaClient:
         return response.json()
 
 
+def _ensure_column(conn: sqlite3.Connection, table: str, column: str,
+                   ddl: str) -> None:
+    """Ajoute une colonne si absente. Migration douce SQLite."""
+    cols = {row[1] for row in conn.execute(f"PRAGMA table_info({table})")}
+    if column not in cols:
+        conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {ddl}")
+
+
 def init_db(db_path: Path | None = None) -> None:
-    """Crée la table `activities` si elle n'existe pas."""
+    """Crée la table `activities` et applique les migrations idempotentes."""
     path = Path(db_path) if db_path else get_db_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(path)
@@ -190,12 +199,14 @@ def init_db(db_path: Path | None = None) -> None:
                 date TEXT,
                 duration INTEGER,
                 avg_heart_rate REAL,
+                max_heart_rate REAL,
                 avg_power REAL,
                 elevation_gain REAL,
                 distance REAL,
                 training_load REAL
             )
         """)
+        _ensure_column(conn, "activities", "max_heart_rate", "REAL")
         conn.commit()
     finally:
         conn.close()
@@ -204,14 +215,14 @@ def init_db(db_path: Path | None = None) -> None:
 def save_activity(activity: dict[str, Any], db_path: Path | None = None,
                   ftp: float | None = None) -> bool:
     """
-    Sauvegarde une activité. Calcule le TSS si absent (à partir de avg_power et FTP).
+    Sauvegarde une activité. Calcule la charge d'entraînement si absente
+    (hr-TSS si HR configurée, sinon TSS puissance, sinon 0).
     Retourne True si insérée, False si doublon (idempotence sur strava_id).
     """
     strava_id = activity.get("id")
     if strava_id is None:
         return False
     path = Path(db_path) if db_path else get_db_path()
-    ftp_value = ftp if ftp is not None else get_ftp()
 
     tss = activity.get("training_load")
     if tss is None:
@@ -223,7 +234,16 @@ def save_activity(activity: dict[str, Any], db_path: Path | None = None,
             avg_power = float(activity.get("avg_power") or 0.0)
         except (TypeError, ValueError):
             avg_power = 0.0
-        tss = calculate_tss(duration, avg_power, ftp_value)
+        try:
+            avg_hr = float(activity.get("avg_heart_rate") or 0.0)
+        except (TypeError, ValueError):
+            avg_hr = 0.0
+        tss = compute_training_load(
+            duration_sec=duration,
+            avg_hr=avg_hr or None,
+            avg_power=avg_power or None,
+            ftp=ftp,
+        )
 
     conn = sqlite3.connect(path)
     try:
@@ -232,14 +252,15 @@ def save_activity(activity: dict[str, Any], db_path: Path | None = None,
             return False
         conn.execute("""
             INSERT INTO activities (
-                strava_id, date, duration, avg_heart_rate,
+                strava_id, date, duration, avg_heart_rate, max_heart_rate,
                 avg_power, elevation_gain, distance, training_load
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             strava_id,
             activity.get("date"),
             activity.get("duration"),
             activity.get("avg_heart_rate"),
+            activity.get("max_heart_rate"),
             activity.get("avg_power"),
             activity.get("elevation_gain"),
             activity.get("distance"),
@@ -261,3 +282,47 @@ def sync_activities(client: StravaClient, after: int | None = None) -> int:
         if save_activity(data):
             inserted += 1
     return inserted
+
+
+def backfill_activity_fields(client: StravaClient,
+                             db_path: Path | None = None) -> int:
+    """
+    Re-fetch tout l'historique Strava et complète les colonnes manquantes
+    (max_heart_rate notamment) sur les activités déjà en base.
+
+    Idempotent : ne touche aux lignes que si la valeur change.
+    Retourne le nombre de lignes mises à jour.
+    """
+    init_db(db_path)
+    path = Path(db_path) if db_path else get_db_path()
+    activities = client.fetch_activities()
+    conn = sqlite3.connect(path)
+    try:
+        existing = {
+            row[0]
+            for row in conn.execute("SELECT strava_id FROM activities")
+        }
+        updated = 0
+        for raw in activities:
+            data = client.extract_activity_data(raw)
+            strava_id = data.get("id")
+            if strava_id is None or strava_id not in existing:
+                continue
+            cursor = conn.execute(
+                "SELECT max_heart_rate FROM activities WHERE strava_id = ?",
+                (strava_id,),
+            )
+            row = cursor.fetchone()
+            current_max_hr = row[0] if row else None
+            new_max_hr = data.get("max_heart_rate")
+            if new_max_hr is not None and current_max_hr != new_max_hr:
+                conn.execute(
+                    "UPDATE activities SET max_heart_rate = ? "
+                    "WHERE strava_id = ?",
+                    (new_max_hr, strava_id),
+                )
+                updated += 1
+        conn.commit()
+        return updated
+    finally:
+        conn.close()

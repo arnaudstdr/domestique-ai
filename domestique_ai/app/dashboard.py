@@ -15,8 +15,17 @@ import pandas as pd
 import streamlit as st
 
 from domestique_ai.config import get_db_path, get_strava_credentials
-from domestique_ai.ingestion.strava import StravaAuthError, StravaClient, sync_activities
-from domestique_ai.processing.analyzer import calculate_ctl_atl_tsb, fetch_activities_from_db
+from domestique_ai.ingestion.strava import (
+    StravaAuthError,
+    StravaClient,
+    backfill_activity_fields,
+    sync_activities,
+)
+from domestique_ai.processing.analyzer import (
+    calculate_ctl_atl_tsb,
+    fetch_activities_from_db,
+    recalculate_training_loads,
+)
 
 st.set_page_config(page_title="DomestiqueAI – Dashboard", layout="wide")
 st.title("🚴‍♂️ DomestiqueAI – Tableau de bord d'entraînement")
@@ -49,6 +58,33 @@ with st.sidebar:
                 st.error(str(exc))
             except Exception as exc:  # noqa: BLE001
                 st.error(f"Erreur de synchronisation : {exc}")
+
+    if st.button("🔁 Recalculer la charge", width="stretch",
+                 help="Recalcule training_load pour toute la base "
+                      "(utile après modification de FTP / HRrepos / HRmax)."):
+        try:
+            with st.spinner("Recalcul en cours…"):
+                updated = recalculate_training_loads()
+            st.success(f"{updated} activité(s) mise(s) à jour.")
+        except Exception as exc:  # noqa: BLE001
+            st.error(f"Erreur de recalcul : {exc}")
+
+    if st.button("📥 Backfill HR max", width="stretch",
+                 help="Re-télécharge l'historique Strava pour compléter "
+                      "max_heart_rate sur les activités déjà en base."):
+        client_id, client_secret, _ = get_strava_credentials()
+        if not (client_id and client_secret):
+            st.error("STRAVA_CLIENT_ID / STRAVA_CLIENT_SECRET absents du .env.")
+        else:
+            try:
+                with st.spinner("Récupération de l'historique…"):
+                    client = StravaClient.from_tokens_file(client_id, client_secret)
+                    updated = backfill_activity_fields(client)
+                st.success(f"{updated} activité(s) complétée(s).")
+            except StravaAuthError as exc:
+                st.error(str(exc))
+            except Exception as exc:  # noqa: BLE001
+                st.error(f"Erreur de backfill : {exc}")
 
 activities = fetch_activities_from_db()
 
