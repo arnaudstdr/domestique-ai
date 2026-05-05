@@ -1,0 +1,45 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "domestique-ai"
+version = "0.1.0"
+description = "Assistant intelligent pour cyclistes — analyse de charge d'entraînement et recommandations."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { file = "LICENSE" }
+authors = [{ name = "Arnaud Stadler" }]
+dependencies = [
+    "pandas>=2.2",
+    "requests>=2.32",
+    "python-dotenv>=1.1",
+    "streamlit>=1.45",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8",
+    "pytest-mock>=3.12",
+    "ruff>=0.5",
+]
+
+[project.urls]
+Homepage = "https://github.com/arnaudstdr/domestique-ai"
+Issues = "https://github.com/arnaudstdr/domestique-ai/issues"
+
+[tool.setuptools.packages.find]
+include = ["domestique_ai*"]
+exclude = ["tests*"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+ignore = ["E501"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra -q"

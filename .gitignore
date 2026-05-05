@@ -1,15 +1,35 @@
-checklist_domestiqueai.md
-copilot-context.md
+# Secrets et configuration locale
+.env
+.env.*
+!.env.example
 
-example_analyze.py
+# Données locales (DB, tokens, exports)
+data/
+!data/.gitkeep
 
-screenshots/
+# Environnements virtuels
+.venv/
+venv/
 
+# Caches Python / outils
+__pycache__/
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# Bases de données
 *.db
 *.sqlite
 *.sqlite3
 *.db-journal
+
+# Logs et exports
 *.log
 *.csv
 
-__pycache__/
+# Notes locales
+checklist_domestiqueai.md
+copilot-context.md
+example_analyze.py
+screenshots/

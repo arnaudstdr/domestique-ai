@@ -1,29 +1,37 @@
 """
-Module d'analyse des charges d'entraînement pour cyclistes.
-Calcule TSS, CTL, ATL, TSB à partir des activités stockées.
+Analyse des charges d'entraînement.
+
+Calcule TSS (Training Stress Score), CTL (Chronic Training Load),
+ATL (Acute Training Load), TSB (Training Stress Balance) à partir
+des activités stockées dans SQLite.
 """
-import sqlite3
-from typing import List, Dict, Any
+
+from __future__ import annotations
+
 import datetime
-import math
-import os
+import sqlite3
+from pathlib import Path
+from typing import Any
 
-DB_PATH = os.path.join(os.path.dirname(__file__), '../data/strava_activities.db')
+from domestique_ai.config import get_db_path
 
-# --- Fonctions principales ---
 
-def fetch_activities_from_db(db_path: str = DB_PATH) -> List[Dict[str, Any]]:
-    """
-    Récupère toutes les activités depuis la base SQLite.
-    """
-    conn = sqlite3.connect(db_path)
-    cursor = conn.cursor()
-    cursor.execute("SELECT date, duration, avg_heart_rate, avg_power, elevation_gain, distance, training_load FROM activities ORDER BY date ASC")
-    rows = cursor.fetchall()
-    conn.close()
-    activities = []
-    for row in rows:
-        activities.append({
+def fetch_activities_from_db(db_path: Path | None = None) -> list[dict[str, Any]]:
+    """Charge toutes les activités depuis SQLite, triées par date croissante."""
+    path = Path(db_path) if db_path else get_db_path()
+    if not path.exists():
+        return []
+    conn = sqlite3.connect(path)
+    try:
+        cursor = conn.execute(
+            "SELECT date, duration, avg_heart_rate, avg_power, elevation_gain, "
+            "distance, training_load FROM activities ORDER BY date ASC"
+        )
+        rows = cursor.fetchall()
+    finally:
+        conn.close()
+    return [
+        {
             "date": row[0],
             "duration": row[1],
             "avg_heart_rate": row[2],
@@ -31,49 +39,64 @@ def fetch_activities_from_db(db_path: str = DB_PATH) -> List[Dict[str, Any]]:
             "elevation_gain": row[4],
             "distance": row[5],
             "training_load": row[6],
-        })
-    return activities
+        }
+        for row in rows
+    ]
+
 
 def calculate_tss(duration_sec: int, avg_power: float, ftp: float) -> float:
     """
-    Calcule le TSS (Training Stress Score) d'une activité.
-    duration_sec : durée en secondes
-    avg_power : puissance moyenne (watts)
-    ftp : puissance seuil fonctionnelle (watts)
+    Calcule le TSS d'une activité.
+
+    duration_sec : durée en secondes.
+    avg_power : puissance moyenne en watts.
+    ftp : Functional Threshold Power en watts.
     """
-    if not avg_power or not ftp or ftp == 0:
+    if not avg_power or not ftp:
         return 0.0
     duration_hr = duration_sec / 3600
     intensity_factor = avg_power / ftp
-    tss = duration_hr * intensity_factor**2 * 100
-    return round(tss, 2)
+    return round(duration_hr * intensity_factor**2 * 100, 2)
 
-def calculate_ctl_atl_tsb(activities: List[Dict[str, Any]], ctl_constant: float = 42, atl_constant: float = 7) -> List[Dict[str, Any]]:
+
+def calculate_ctl_atl_tsb(activities: list[dict[str, Any]],
+                          ctl_constant: float = 42,
+                          atl_constant: float = 7) -> list[dict[str, Any]]:
     """
-    Calcule CTL, ATL et TSB pour chaque jour à partir des activités.
-    Retourne une liste de dicts avec date, CTL, ATL, TSB.
+    Calcule CTL/ATL/TSB jour par jour à partir des activités.
+
+    CTL : moyenne mobile exponentielle du TSS sur ~42 jours (forme à long terme).
+    ATL : moyenne mobile exponentielle du TSS sur ~7 jours (fatigue récente).
+    TSB : CTL − ATL (positif = frais, négatif = fatigué).
     """
-    # Préparation : regrouper les TSS par date
-    tss_by_date = {}
+    tss_by_date: dict[str, float] = {}
     for act in activities:
-        date = act["date"][:10]  # YYYY-MM-DD
-        tss = act["training_load"] or 0
-        tss_by_date.setdefault(date, 0)
-        tss_by_date[date] += tss
-    # Générer la liste de dates continues
+        if not act.get("date"):
+            continue
+        date_key = act["date"][:10]
+        tss_by_date[date_key] = tss_by_date.get(date_key, 0) + (act.get("training_load") or 0)
+
     if not tss_by_date:
         return []
+
     dates = sorted(tss_by_date.keys())
     start = datetime.datetime.strptime(dates[0], "%Y-%m-%d")
     end = datetime.datetime.strptime(dates[-1], "%Y-%m-%d")
-    all_dates = [(start + datetime.timedelta(days=i)).strftime("%Y-%m-%d") for i in range((end-start).days+1)]
-    # Calculs exponentiels
+    all_dates = [
+        (start + datetime.timedelta(days=i)).strftime("%Y-%m-%d")
+        for i in range((end - start).days + 1)
+    ]
+
     ctl, atl = 0.0, 0.0
-    result = []
+    result: list[dict[str, Any]] = []
     for d in all_dates:
         tss = tss_by_date.get(d, 0)
-        ctl = ctl + (tss - ctl) * (1/ctl_constant)
-        atl = atl + (tss - atl) * (1/atl_constant)
-        tsb = ctl - atl
-        result.append({"date": d, "CTL": round(ctl,2), "ATL": round(atl,2), "TSB": round(tsb,2)})
+        ctl = ctl + (tss - ctl) * (1 / ctl_constant)
+        atl = atl + (tss - atl) * (1 / atl_constant)
+        result.append({
+            "date": d,
+            "CTL": round(ctl, 2),
+            "ATL": round(atl, 2),
+            "TSB": round(ctl - atl, 2),
+        })
     return result
