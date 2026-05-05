@@ -8,145 +8,148 @@
 ![Ollama](https://img.shields.io/badge/Ollama-LLM-blueviolet?logo=ollama&logoColor=white)
 ![Docker](https://img.shields.io/badge/docker-ready-blue?logo=docker&logoColor=white)
 
-L'assistant intelligent pour cyclistes. Analyse automatique de la charge
-d'entraînement, état de forme, vue détaillée de chaque sortie (carte GPS,
-courbes FC / altitude / puissance, export GPX), **détection de signaux de
-surentraînement** (TSB chronique, Monotony/Strain, HRV, FC repos) et
-**coach conversationnel LLM** qui analyse vos sorties à la demande sans
-inventer un seul chiffre.
+The smart assistant for cyclists. Automatic training load analysis,
+fitness state, detailed view of each ride (GPS map, HR / elevation /
+power charts, GPX export), **overtraining signal detection** (chronic
+TSB, Monotony/Strain, HRV, resting HR) and a **conversational LLM
+coach** that analyzes your rides on demand without making up a single
+number.
 
 ## Architecture
 
 ```text
 domestique_ai/
-├── config.py                # chemins de données, FTP, profil HR, secrets via .env
+├── config.py                # data paths, FTP, HR profile, secrets via .env
 ├── ingestion/
-│   ├── strava.py            # client OAuth2 + persistance SQLite (refresh, streams)
-│   └── strava_oauth_flow.py # flow d'auth interactif initial
+│   ├── strava.py            # OAuth2 client + SQLite persistence (refresh, streams)
+│   └── strava_oauth_flow.py # initial interactive auth flow
 ├── processing/
-│   ├── analyzer.py          # TSS / hr-TSS, CTL/ATL/TSB, zones HR (Karvonen)
-│   ├── gpx.py               # export GPX 1.1 depuis les streams Strava
-│   ├── overtraining.py      # 4 indicateurs auto (TSB chronique, Monotony/Strain, jump hebdo)
-│   └── morning_metrics.py   # CRUD HRV/FC repos/sommeil/stress + baselines + alertes
+│   ├── analyzer.py          # TSS / hr-TSS, CTL/ATL/TSB, HR zones (Karvonen)
+│   ├── gpx.py               # GPX 1.1 export from Strava streams
+│   ├── overtraining.py      # 4 auto indicators (chronic TSB, Monotony/Strain, weekly jump)
+│   └── morning_metrics.py   # CRUD HRV/resting HR/sleep/stress + baselines + alerts
 ├── llm/
-│   ├── ollama_client.py     # wrapper SDK Ollama (chat + tool calling)
-│   ├── tools.py             # 8 tools exposés au LLM (charge, activités, surentraînement, …)
-│   ├── coach.py             # boucle agentique du coach (system prompt + tool loop)
-│   ├── objectives.py        # gestion de l'objectif YAML (data/objective.yaml)
-│   └── conversations.py     # persistance des sessions de chat (SQLite)
+│   ├── ollama_client.py     # Ollama SDK wrapper (chat + tool calling)
+│   ├── tools.py             # 8 tools exposed to the LLM (load, activities, overtraining, …)
+│   ├── coach.py             # coach agentic loop (system prompt + tool loop)
+│   ├── objectives.py        # YAML objective handling (data/objective.yaml)
+│   └── conversations.py     # chat session persistence (SQLite)
 └── app/
-    └── dashboard.py         # UI Streamlit (3 onglets : Tableau de bord + Matin + Coach)
+    └── dashboard.py         # Streamlit UI (3 tabs: Dashboard + Morning + Coach)
 ```
 
-Source de vérité : SQLite local (`data/strava_activities.db`). Une seule table
-`activities` avec `strava_id` UNIQUE — ingestion idempotente.
+Source of truth: local SQLite (`data/strava_activities.db`). A single
+`activities` table with `strava_id` UNIQUE — idempotent ingestion.
 
-## Calcul de la charge d'entraînement
+## Training load computation
 
-Deux modes au choix, automatiquement sélectionnés selon les données disponibles :
+Two modes, automatically selected based on available data:
 
-- **TSS puissance** — via `STRAVA_FTP` et la puissance moyenne de l'activité.
-- **hr-TSS (TRIMP normalisé)** — via la HR moyenne, `STRAVA_HR_REST` et
-  `STRAVA_HR_MAX`. TRIMP exponentiel de Banister, normalisé pour qu'1 h passé à
-  `STRAVA_LTHR_PCT` (88 % de la HRR par défaut) vaille 100 points : même
-  échelle que le TSS power.
+- **Power TSS** — via `STRAVA_FTP` and the activity's average power.
+- **hr-TSS (normalized TRIMP)** — via average HR, `STRAVA_HR_REST` and
+  `STRAVA_HR_MAX`. Banister exponential TRIMP, normalized so that 1 h
+  spent at `STRAVA_LTHR_PCT` (88 % of HRR by default) is worth 100
+  points: same scale as power TSS.
 
-**Priorité** : si HR + HRrepos + HRmax sont configurés, hr-TSS prend le pas
-sur la puissance — pratique sans FTP fiable. Bouton « 🔁 Recalculer la
-charge » dans le dashboard pour rejouer le score sur tout l'historique après
-changement de profil.
+**Priority**: if HR + HRrest + HRmax are configured, hr-TSS takes
+precedence over power — handy without a reliable FTP. Use the
+« 🔁 Recalculate load » button in the dashboard to replay the score
+across the whole history after a profile change.
 
-### Zones HR (%HRR Karvonen)
+### HR zones (%HRR Karvonen)
 
-Chaque activité avec stream HR est ventilée en 5 zones :
+Each activity with an HR stream is split into 5 zones:
 Z1 (<60 %) · Z2 (60-70 %) · Z3 (70-80 %) · Z4 (80-90 %) · Z5 (≥90 %).
-Bouton « 📥 Backfill zones HR » dans la barre latérale pour rattraper
-l'historique (1 appel API Strava par activité, idempotent).
+Use the « 📥 Backfill HR zones » button in the sidebar to backfill
+history (1 Strava API call per activity, idempotent).
 
-## Vue détail d'une activité
+## Activity detail view
 
-Cliquer sur une ligne du tableau d'activités ouvre une vue détaillée façon
-Strava :
+Clicking a row in the activities table opens a Strava-like detailed
+view:
 
-- **Carte GPS** de la trace (pydeck PathLayer, fallback `st.map`).
-- **Courbes** FC, altitude, puissance dans le temps.
-- **Export GPX** (1.1 + extensions Garmin TrackPoint pour HR/cadence/puissance)
-  importable dans Garmin Connect, Komoot, Zwift, RideWithGPS, etc.
-- **🤖 Analyser cette sortie** : bouton qui interroge le coach LLM. Le modèle
-  appelle `get_activity_details`, `get_training_load_state` et `get_objective`
-  pour évaluer si la séance a été *productive* ou *contre-productive* vu le
-  TSB courant et l'objectif, puis recommande la suite.
+- **GPS map** of the track (pydeck PathLayer, fallback to `st.map`).
+- **Charts** for HR, elevation, power over time.
+- **GPX export** (1.1 + Garmin TrackPoint extensions for HR/cadence/power)
+  importable into Garmin Connect, Komoot, Zwift, RideWithGPS, etc.
+- **🤖 Analyze this ride**: button that queries the LLM coach. The
+  model calls `get_activity_details`, `get_training_load_state` and
+  `get_objective` to assess whether the session was *productive* or
+  *counter-productive* given current TSB and the objective, then
+  recommends what's next.
 
-Les streams sont fetchés à la demande (cache Streamlit 1 h, pas de bloat DB).
+Streams are fetched on demand (1 h Streamlit cache, no DB bloat).
 
-## Détection de surentraînement
+## Overtraining detection
 
-Deux niveaux d'analyse, exposés dans un **bandeau d'alertes** au sommet du
-tableau de bord et au coach LLM via des tools dédiés.
+Two analysis levels, exposed in an **alert banner** at the top of the
+dashboard and to the LLM coach via dedicated tools.
 
-### Indicateurs automatiques (à partir des activités)
+### Automatic indicators (from activities)
 
-Calculés sans donnée externe — seuils issus de la littérature physio
-(Foster 2001, Banister) :
+Computed without external data — thresholds drawn from the physio
+literature (Foster 2001, Banister):
 
-- **TSB chronique** — moyenne du TSB sur 7 jours. Alerte si < -20.
-- **Monotony de Foster** — `mean / stdev` de la charge journalière sur
-  7 j. Alerte si > 2.0 (pas assez de variabilité).
-- **Strain de Foster** — `total_load × monotony`. Alerte si > 6000.
-- **Saut de volume hebdomadaire** — comparaison W vs W-1. Alerte si
-  > +30 % (risque de blessure).
+- **Chronic TSB** — 7-day TSB average. Alert if < -20.
+- **Foster Monotony** — `mean / stdev` of daily load over 7 d. Alert
+  if > 2.0 (not enough variability).
+- **Foster Strain** — `total_load × monotony`. Alert if > 6000.
+- **Weekly volume jump** — W vs W-1 comparison. Alert if > +30 %
+  (injury risk).
 
-### Métriques matinales (saisie manuelle, onglet Matin)
+### Morning metrics (manual entry, Morning tab)
 
-Pour les bracelets sans API publique (Amazfit / Zepp typiquement) :
-formulaire quotidien pour HRV (ms), FC repos, durée de sommeil, score
-de sommeil (0-100), score de stress (0-100). Persistés dans la table
-`morning_metrics` (clé = date, idempotent).
+For wristbands without a public API (typically Amazfit / Zepp): a
+daily form for HRV (ms), resting HR, sleep duration, sleep score
+(0-100), stress score (0-100). Stored in the `morning_metrics` table
+(key = date, idempotent).
 
-Le module calcule une **baseline mobile sur 14 jours** et alerte dès
-que la dernière valeur dérive de plus de 10 % dans le sens
-défavorable :
-- HRV ↓, sommeil ↓ → fatigue / mauvaise récup.
-- FC repos ↑, stress ↑ → charge mal absorbée.
+The module computes a **14-day rolling baseline** and alerts as soon
+as the latest value drifts more than 10 % in the unfavorable
+direction:
 
-Affichage : KPI baseline vs dernière valeur (delta coloré),
-courbes 90 j sur 4 panneaux.
+- HRV ↓, sleep ↓ → fatigue / poor recovery.
+- Resting HR ↑, stress ↑ → load not absorbed.
 
-## Coach LLM (onglet Coach)
+Display: KPI baseline vs latest value (colored delta), 90-day charts
+across 4 panels.
 
-Coach conversationnel basé sur **Ollama** (modèle par défaut
-`gemma4:31b-cloud`, override via `OLLAMA_MODEL`). Tool calling avec 8 tools :
+## LLM coach (Coach tab)
+
+Conversational coach powered by **Ollama** (default model
+`gemma4:31b-cloud`, override via `OLLAMA_MODEL`). Tool calling with 8
+tools:
 
 | Tool | Usage |
 |---|---|
-| `get_training_load_state` | CTL/ATL/TSB du jour + zone interprétative |
-| `get_recent_activities` | Activités sur N derniers jours |
-| `get_zone_distribution` | Répartition cumulée par zone HR |
-| `get_objective` | Objectif d'entraînement courant (YAML) |
-| `get_activity_details` | Détail d'une activité par `strava_id` |
-| `get_morning_trends` | Baselines HRV/FC repos/sommeil/stress + alertes |
-| `get_overtraining_signals` | TSB chronique, Monotony/Strain, jump hebdo |
-| `propose_workout` | Squelette de séance (récup, endurance, tempo, seuil, VO2max) |
+| `get_training_load_state` | Today's CTL/ATL/TSB + interpretive zone |
+| `get_recent_activities` | Activities over the last N days |
+| `get_zone_distribution` | Cumulative breakdown by HR zone |
+| `get_objective` | Current training objective (YAML) |
+| `get_activity_details` | Activity detail by `strava_id` |
+| `get_morning_trends` | HRV/resting HR/sleep/stress baselines + alerts |
+| `get_overtraining_signals` | Chronic TSB, Monotony/Strain, weekly jump |
+| `propose_workout` | Workout skeleton (recovery, endurance, tempo, threshold, VO2max) |
 
-**Règle d'or** : le LLM n'invente jamais de chiffre. Le system prompt impose
-un appel de tool avant toute affirmation chiffrée.
+**Golden rule**: the LLM never makes up a number. The system prompt
+requires a tool call before any quantitative claim.
 
-Sessions persistées en SQLite (table `conversations`) — reprise via le
-selectbox du dashboard. Mode `thinking` activé : le raisonnement est exposé
-dans un expander pour le debug.
+Sessions persisted to SQLite (`conversations` table) — resume via the
+dashboard selectbox. `thinking` mode enabled: reasoning is exposed in
+an expander for debugging.
 
-### Objectif d'entraînement
+### Training objective
 
-Optionnel : `data/objective.yaml` (gitignoré, template
+Optional: `data/objective.yaml` (gitignored, template
 `data/objective.yaml.example`).
 
 ```yaml
-type: cyclosportive          # cyclosportive / course / cyclo / maintenance
+type: cyclosportive          # cyclosportive / race / leisure / maintenance
 date: 2026-09-15
 distance_km: 150
 elevation_m: 2800
-target_ftp: 270              # optionnel
-notes: "Étape du Tour, départ Megève"
+target_ftp: 270              # optional
+notes: "Étape du Tour, start in Megève"
 ```
 
 ## Installation
@@ -156,31 +159,33 @@ git clone https://github.com/arnaudstdr/domestique-ai.git
 cd domestique-ai
 python -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev]"
-cp .env.example .env  # remplissez les valeurs
+cp .env.example .env  # fill in the values
 ```
 
-## Configuration Strava OAuth
+## Strava OAuth setup
 
-1. Créer une app sur <https://www.strava.com/settings/api> (note : `client_id`
-   et `client_secret`).
-2. Renseigner `STRAVA_CLIENT_ID`, `STRAVA_CLIENT_SECRET` et au moins l'un de :
-   - `STRAVA_FTP` (TSS basé puissance), et/ou
-   - `STRAVA_HR_REST` + `STRAVA_HR_MAX` (hr-TSS, prioritaire si renseignés).
-3. Lancer le flow d'autorisation (une seule fois) :
+1. Create an app at <https://www.strava.com/settings/api> (note the
+   `client_id` and `client_secret`).
+2. Fill in `STRAVA_CLIENT_ID`, `STRAVA_CLIENT_SECRET` and at least one
+   of:
+   - `STRAVA_FTP` (power-based TSS), and/or
+   - `STRAVA_HR_REST` + `STRAVA_HR_MAX` (hr-TSS, takes precedence if
+     set).
+3. Run the authorization flow (once):
 
    ```bash
    python -m domestique_ai.ingestion.strava_oauth_flow
    ```
 
-4. Ouvrir l'URL affichée, autoriser, copier le `code` depuis l'URL de
-   redirection, le coller.
-5. Les tokens sont persistés dans `data/.strava_tokens.json` (jamais commité),
-   avec rafraîchissement automatique.
+4. Open the printed URL, authorize, copy the `code` from the
+   redirect URL, paste it.
+5. Tokens are persisted in `data/.strava_tokens.json` (never
+   committed), with automatic refresh.
 
-## Configuration Ollama (coach LLM)
+## Ollama setup (LLM coach)
 
-Le coach utilise [Ollama](https://ollama.com). Démarrer le serveur localement
-ou pointer vers un endpoint distant via `OLLAMA_HOST`. Modèle par défaut :
+The coach uses [Ollama](https://ollama.com). Run the server locally
+or point to a remote endpoint via `OLLAMA_HOST`. Default model:
 `gemma4:31b-cloud` (override via `OLLAMA_MODEL`).
 
 ```bash
@@ -189,30 +194,30 @@ ollama pull gemma4:31b-cloud
 ollama serve
 ```
 
-## Utilisation
+## Usage
 
 ```bash
 streamlit run domestique_ai/app/dashboard.py
 ```
 
-Le dashboard expose trois onglets :
+The dashboard exposes three tabs:
 
-- **📊 Tableau de bord** : bandeau d'alertes surentraînement, métriques
-  CTL / ATL / TSB + zone de forme, courbes d'évolution, répartition par
-  zone HR, historique du poids, et **tableau d'activités cliquable**
-  (vue détail au clic, voir plus haut).
-- **🌅 Matin** : saisie quotidienne HRV / FC repos / sommeil / stress,
-  KPI vs baseline 14 j, courbes 90 j.
-- **🤖 Coach** : chat conversationnel avec le LLM, sessions multiples,
-  raisonnement et tool calls visibles en expanders.
+- **📊 Dashboard**: overtraining alert banner, CTL / ATL / TSB
+  metrics + form zone, evolution charts, HR zone breakdown, weight
+  history, and **clickable activities table** (detail view on click,
+  see above).
+- **🌅 Morning**: daily HRV / resting HR / sleep / stress entry, KPI
+  vs 14-day baseline, 90-day charts.
+- **🤖 Coach**: conversational chat with the LLM, multiple sessions,
+  reasoning and tool calls visible in expanders.
 
-Boutons utilitaires en barre latérale : 🔄 Synchroniser Strava, 🔁
-Recalculer la charge, 📥 Backfill HR max, 📥 Backfill zones HR.
+Sidebar utility buttons: 🔄 Sync Strava, 🔁 Recalculate load,
+📥 Backfill HR max, 📥 Backfill HR zones.
 
-## Déploiement
+## Deployment
 
-Image Docker prête pour Raspberry Pi (mode `network=host` pour joindre un
-Ollama sur le même réseau). Voir [DEPLOY.md](DEPLOY.md).
+Docker image ready for Raspberry Pi (`network=host` mode to reach an
+Ollama on the same network). See [DEPLOY.md](DEPLOY.md).
 
 ```bash
 docker compose up -d
@@ -225,20 +230,20 @@ pytest
 ruff check .
 ```
 
-100 tests couvrent : calcul de charge, zones HR, ingestion Strava
-(mocks), génération GPX, conversations, objectifs, tools du coach,
-métriques matinales et indicateurs de surentraînement.
+100 tests cover: load computation, HR zones, Strava ingestion (mocks),
+GPX generation, conversations, objectives, coach tools, morning
+metrics and overtraining indicators.
 
 ## Roadmap
 
-- [x] Détection automatique de signaux de surentraînement (HRV, FC repos).
-- [ ] Génération de plans d'entraînement personnalisés par le coach.
-- [ ] Support import direct Garmin (FIT files locaux, sans passer par Strava).
-- [ ] Comparaison entre activités similaires (même parcours).
-- [ ] Stocker `hr_rest` (et `hr_max`) par activité plutôt qu'en variable
-  d'environnement globale, pour figer l'historique CTL/ATL/TSB et le
-  rendre comparable dans le temps même quand le profil HR évolue.
+- [x] Automatic overtraining signal detection (HRV, resting HR).
+- [ ] Personalized training plan generation by the coach.
+- [ ] Direct Garmin import (local FIT files, no Strava round-trip).
+- [ ] Comparison between similar activities (same route).
+- [ ] Store `hr_rest` (and `hr_max`) per activity rather than as a
+  global environment variable, to freeze the CTL/ATL/TSB history and
+  keep it comparable over time even as the HR profile evolves.
 
-## Licence
+## License
 
-MIT — voir [LICENSE](LICENSE).
+MIT — see [LICENSE](LICENSE).
