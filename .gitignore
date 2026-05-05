@@ -29,7 +29,4 @@ __pycache__/
 *.csv
 
 # Notes locales
-checklist_domestiqueai.md
-copilot-context.md
-example_analyze.py
-screenshots/
+tmp/

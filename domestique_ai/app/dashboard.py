@@ -35,7 +35,7 @@ def _tsb_zone_label(tsb: float) -> tuple[str, str]:
 
 with st.sidebar:
     st.header("Synchronisation")
-    if st.button("🔄 Synchroniser Strava", use_container_width=True):
+    if st.button("🔄 Synchroniser Strava", width="stretch"):
         client_id, client_secret, _ = get_strava_credentials()
         if not (client_id and client_secret):
             st.error("STRAVA_CLIENT_ID / STRAVA_CLIENT_SECRET absents du .env.")
@@ -60,7 +60,7 @@ if not activities:
     )
 else:
     df = pd.DataFrame(activities)
-    df["date"] = pd.to_datetime(df["date"])
+    df["date"] = pd.to_datetime(df["date"], utc=True).dt.tz_localize(None)
 
     curves = pd.DataFrame(calculate_ctl_atl_tsb(activities))
     curves["date"] = pd.to_datetime(curves["date"])
@@ -103,5 +103,5 @@ else:
     st.subheader("Détail des activités")
     st.dataframe(
         df_filtered.sort_values("date", ascending=False),
-        use_container_width=True,
+        width="stretch",
     )
