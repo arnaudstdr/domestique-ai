@@ -10,6 +10,7 @@ Gère :
 
 from __future__ import annotations
 
+import datetime as dt
 import json
 import sqlite3
 import time
@@ -34,6 +35,8 @@ from domestique_ai.processing.analyzer import (
 STRAVA_API_BASE_URL = "https://www.strava.com/api/v3"
 STRAVA_OAUTH_TOKEN_URL = "https://www.strava.com/oauth/token"
 STRAVA_OAUTH_AUTHORIZE_URL = "https://www.strava.com/oauth/authorize"
+
+_AUTH_ERROR_MSG = "Token expiré ou invalide (HTTP 401)."
 
 
 class StravaAuthError(RuntimeError):
@@ -111,6 +114,23 @@ class StravaClient:
         self.refresh_token = data.get("refresh_token", self.refresh_token)
         self.expires_at = data.get("expires_at", 0)
 
+    def fetch_athlete(self) -> dict[str, Any]:
+        """Récupère le profil de l'athlète authentifié (`/athlete`).
+
+        Respecte 401 (StravaAuthError) et 429 (Retry-After + retry).
+        """
+        url = f"{STRAVA_API_BASE_URL}/athlete"
+        while True:
+            response = requests.get(url, headers=self.headers, timeout=30)
+            if response.status_code == 401:
+                raise StravaAuthError(_AUTH_ERROR_MSG)
+            if response.status_code == 429:
+                retry_after = int(response.headers.get("Retry-After", "60"))
+                time.sleep(retry_after)
+                continue
+            response.raise_for_status()
+            return response.json()
+
     def fetch_activity_streams(
         self, activity_id: int,
     ) -> tuple[list[float], list[float]] | None:
@@ -128,7 +148,7 @@ class StravaClient:
         while True:
             response = requests.get(url, headers=self.headers, params=params, timeout=30)
             if response.status_code == 401:
-                raise StravaAuthError("Token expiré ou invalide (HTTP 401).")
+                raise StravaAuthError(_AUTH_ERROR_MSG)
             if response.status_code == 404:
                 return None
             if response.status_code == 429:
@@ -159,7 +179,7 @@ class StravaClient:
                 params["after"] = after
             response = requests.get(url, headers=self.headers, params=params, timeout=30)
             if response.status_code == 401:
-                raise StravaAuthError("Token expiré ou invalide (HTTP 401).")
+                raise StravaAuthError(_AUTH_ERROR_MSG)
             if response.status_code == 429:
                 retry_after = int(response.headers.get("Retry-After", "60"))
                 time.sleep(retry_after)
@@ -269,6 +289,12 @@ def init_db(db_path: Path | None = None) -> None:
             "CREATE INDEX IF NOT EXISTS idx_conversations_session "
             "ON conversations(session_id, id)"
         )
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS weight_history (
+                date TEXT PRIMARY KEY,
+                weight REAL NOT NULL
+            )
+        """)
         conn.commit()
     finally:
         conn.close()
@@ -346,12 +372,47 @@ def save_activity(activity: dict[str, Any], db_path: Path | None = None,
         conn.close()
 
 
+def snapshot_athlete_weight(client: StravaClient,
+                            db_path: Path | None = None,
+                            today: str | None = None) -> bool:
+    """
+    Enregistre le poids actuel de l'athlète Strava avec la date du jour.
+
+    Idempotent : si une ligne existe déjà pour la date, elle est mise à jour
+    avec la dernière valeur connue (utile si l'utilisateur ajuste son poids
+    sur Strava et resynchronise dans la foulée).
+    Retourne True si une ligne a été insérée/mise à jour, False si Strava ne
+    fournit pas de poids (champ vide ou nul côté profil).
+    """
+    init_db(db_path)
+    path = Path(db_path) if db_path else get_db_path()
+    athlete = client.fetch_athlete()
+    weight = athlete.get("weight")
+    if not weight or weight <= 0:
+        return False
+    day = today or dt.date.today().isoformat()
+    conn = sqlite3.connect(path)
+    try:
+        conn.execute(
+            "INSERT INTO weight_history(date, weight) VALUES (?, ?) "
+            "ON CONFLICT(date) DO UPDATE SET weight = excluded.weight",
+            (day, float(weight)),
+        )
+        conn.commit()
+        return True
+    finally:
+        conn.close()
+
+
 def sync_activities(client: StravaClient, after: int | None = None) -> int:
     """Récupère et sauvegarde les nouvelles activités. Retourne le nombre d'insertions.
 
     Si HRrepos / HRmax sont configurés, télécharge aussi les streams HR
     pour ventiler chaque activité dans les 5 zones %HRR (1 appel API
     supplémentaire par activité avec capteur HR).
+
+    Snapshot également le poids courant de l'athlète (`weight_history`) —
+    silencieux si Strava ne renvoie pas de poids.
     """
     init_db()
     activities = client.fetch_activities(after=after)
@@ -374,6 +435,8 @@ def sync_activities(client: StravaClient, after: int | None = None) -> int:
                 zones = calculate_hr_zones(hr_stream, time_stream, *zone_params)
         if save_activity(data, hr_zones=zones):
             inserted += 1
+
+    snapshot_athlete_weight(client)
     return inserted
 
 

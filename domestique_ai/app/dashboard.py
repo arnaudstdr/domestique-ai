@@ -16,7 +16,13 @@ import datetime as dt
 import pandas as pd
 import streamlit as st
 
-from domestique_ai.config import get_db_path, get_ollama_model, get_strava_credentials
+from domestique_ai.config import (
+    get_db_path,
+    get_hr_max,
+    get_hr_rest,
+    get_ollama_model,
+    get_strava_credentials,
+)
 from domestique_ai.ingestion.strava import (
     StravaAuthError,
     StravaClient,
@@ -33,10 +39,17 @@ from domestique_ai.llm.conversations import (
 )
 from domestique_ai.llm.ollama_client import OllamaError
 from domestique_ai.processing.analyzer import (
+    HR_ZONE_KEYS,
     calculate_ctl_atl_tsb,
     fetch_activities_from_db,
+    fetch_weight_history,
     recalculate_training_loads,
 )
+
+_HR_ZONE_HRR_LABELS = ("< 60 %", "60–70 %", "70–80 %", "80–90 %", "≥ 90 %")
+_HR_ZONE_HRR_BOUNDS = ((0.0, 0.60), (0.60, 0.70), (0.70, 0.80),
+                       (0.80, 0.90), (0.90, 1.0))
+_HR_ZONE_PCT_COL = "% du total"
 
 st.set_page_config(page_title="DomestiqueAI – Dashboard", layout="wide")
 st.title("🚴‍♂️ DomestiqueAI – Tableau de bord d'entraînement")
@@ -51,6 +64,23 @@ def _tsb_zone_label(tsb: float) -> tuple[str, str]:
     if tsb >= -20:
         return "Fatigué", "🟠"
     return "Surentraîné", "🔴"
+
+
+def _format_hms(seconds: float) -> str:
+    s = int(seconds)
+    return f"{s // 3600:02d}:{(s % 3600) // 60:02d}:{s % 60:02d}"
+
+
+def _hr_zone_bpm_ranges(hr_rest: float | None,
+                        hr_max: float | None) -> list[str] | None:
+    """Plages BPM par zone (Karvonen). None si HRrepos/HRmax non configurés."""
+    if not (hr_rest and hr_max and hr_max > hr_rest):
+        return None
+    hrr = hr_max - hr_rest
+    return [
+        f"{round(hr_rest + lo * hrr)}–{round(hr_rest + hi * hrr)}"
+        for lo, hi in _HR_ZONE_HRR_BOUNDS
+    ]
 
 
 with st.sidebar:
@@ -171,6 +201,51 @@ with tab_dashboard:
             st.info("Aucune donnée sur la plage sélectionnée.")
         else:
             st.line_chart(curves_filtered.set_index("date")[["CTL", "ATL", "TSB"]])
+
+        zone_cols = [f"hr_{key}_time" for key in HR_ZONE_KEYS]
+        if all(col in df_filtered.columns for col in zone_cols):
+            zone_totals = [
+                float(pd.to_numeric(df_filtered[col], errors="coerce")
+                      .fillna(0).sum())
+                for col in zone_cols
+            ]
+            zone_grand_total = sum(zone_totals)
+            if zone_grand_total > 0:
+                st.subheader("Répartition par zone HR")
+                bpm_ranges = _hr_zone_bpm_ranges(get_hr_rest(), get_hr_max())
+                summary = {
+                    "Zone": ["Z1", "Z2", "Z3", "Z4", "Z5"],
+                    "%HRR": list(_HR_ZONE_HRR_LABELS),
+                    "Temps": [_format_hms(t) for t in zone_totals],
+                    _HR_ZONE_PCT_COL: [
+                        f"{(t / zone_grand_total * 100):.1f} %"
+                        for t in zone_totals
+                    ],
+                }
+                if bpm_ranges:
+                    summary["Plage BPM"] = bpm_ranges
+                    columns = ["Zone", "%HRR", "Plage BPM",
+                               "Temps", _HR_ZONE_PCT_COL]
+                else:
+                    columns = ["Zone", "%HRR", "Temps", _HR_ZONE_PCT_COL]
+                st.dataframe(
+                    pd.DataFrame(summary)[columns],
+                    width="stretch", hide_index=True,
+                )
+
+        weights = fetch_weight_history()
+        if weights:
+            weights_df = pd.DataFrame(weights)
+            weights_df["date"] = pd.to_datetime(weights_df["date"])
+            weights_filtered = weights_df[
+                (weights_df["date"] >= start_ts)
+                & (weights_df["date"] < end_ts)
+            ]
+            if not weights_filtered.empty:
+                st.subheader("Évolution du poids")
+                st.line_chart(
+                    weights_filtered.set_index("date")[["weight"]]
+                )
 
         st.subheader("Détail des activités")
         df_display = df_filtered.sort_values("date", ascending=False).copy()

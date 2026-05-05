@@ -14,6 +14,7 @@ from domestique_ai.processing.analyzer import (
     calculate_trimp,
     calculate_tss,
     compute_training_load,
+    fetch_weight_history,
     recalculate_training_loads,
 )
 
@@ -201,3 +202,29 @@ def test_recalculate_training_loads_updates_existing_rows(tmp_path):
     # Sans HRrepos/HRmax dans la config courante, le score peut rester 0 :
     # on vérifie au moins que la fonction ne plante pas et retourne un entier.
     assert isinstance(updated, int)
+
+
+def test_fetch_weight_history_returns_empty_for_missing_db(tmp_path):
+    assert fetch_weight_history(tmp_path / "missing.db") == []
+
+
+def test_fetch_weight_history_sorted_by_date(tmp_path):
+    db_path = tmp_path / "weights.db"
+    init_db(db_path)
+    conn = sqlite3.connect(db_path)
+    try:
+        conn.executemany(
+            "INSERT INTO weight_history(date, weight) VALUES (?, ?)",
+            [("2025-04-03", 73.8), ("2025-04-01", 74.2), ("2025-04-02", 74.0)],
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    history = fetch_weight_history(db_path)
+    assert [row["date"] for row in history] == [
+        "2025-04-01", "2025-04-02", "2025-04-03",
+    ]
+    assert [row["weight"] for row in history] == pytest.approx(
+        [74.2, 74.0, 73.8]
+    )

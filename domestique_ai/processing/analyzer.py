@@ -72,6 +72,27 @@ def fetch_activities_from_db(db_path: Path | None = None) -> list[dict[str, Any]
     ]
 
 
+def fetch_weight_history(db_path: Path | None = None) -> list[dict[str, Any]]:
+    """Charge l'historique du poids depuis SQLite, trié par date croissante.
+
+    Retourne une liste de `{"date": "YYYY-MM-DD", "weight": kg}`.
+    """
+    path = Path(db_path) if db_path else get_db_path()
+    if not path.exists():
+        return []
+    from domestique_ai.ingestion.strava import init_db
+    init_db(path)
+    conn = sqlite3.connect(path)
+    try:
+        cursor = conn.execute(
+            "SELECT date, weight FROM weight_history ORDER BY date ASC"
+        )
+        rows = cursor.fetchall()
+    finally:
+        conn.close()
+    return [{"date": row[0], "weight": row[1]} for row in rows]
+
+
 def calculate_tss(duration_sec: int, avg_power: float, ftp: float) -> float:
     """
     Calcule le TSS d'une activité à partir de la puissance.
