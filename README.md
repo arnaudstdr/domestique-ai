@@ -2,8 +2,11 @@
 
 ![Python](https://img.shields.io/badge/python-3.12-slim.svg)
 ![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)
-![Dernier commit](https://img.shields.io/github/last-commit/arnaudstdr/domestique-ai)
-![Stars](https://img.shields.io/github/stars/arnaudstdr/domestique-ai?style=social)
+![CI](https://github.com/arnaudstdr/domestique-ai/actions/workflows/ci.yml/badge.svg)
+[![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
+![Streamlit](https://img.shields.io/badge/Streamlit-FF4B4B?logo=streamlit&logoColor=white)
+![Ollama](https://img.shields.io/badge/Ollama-LLM-blueviolet?logo=ollama&logoColor=white)
+![Docker](https://img.shields.io/badge/docker-ready-blue?logo=docker&logoColor=white)
 
 L'assistant intelligent pour cyclistes. Analyse automatique de la charge
 d'entraînement, état de forme, vue détaillée de chaque sortie (carte GPS,
@@ -232,6 +235,9 @@ métriques matinales et indicateurs de surentraînement.
 - [ ] Génération de plans d'entraînement personnalisés par le coach.
 - [ ] Support import direct Garmin (FIT files locaux, sans passer par Strava).
 - [ ] Comparaison entre activités similaires (même parcours).
+- [ ] Stocker `hr_rest` (et `hr_max`) par activité plutôt qu'en variable
+  d'environnement globale, pour figer l'historique CTL/ATL/TSB et le
+  rendre comparable dans le temps même quand le profil HR évolue.
 
 ## Licence
 
