@@ -12,6 +12,7 @@ Lancement : `streamlit run domestique_ai/app/dashboard.py`
 from __future__ import annotations
 
 import datetime as dt
+from pathlib import Path
 
 import pandas as pd
 import streamlit as st
@@ -48,13 +49,25 @@ from domestique_ai.processing.analyzer import (
 )
 from domestique_ai.processing.gpx import build_gpx
 
+_ICON_PATH = Path(__file__).resolve().parents[2] / "icon.png"
+
 _HR_ZONE_HRR_LABELS = ("< 60 %", "60–70 %", "70–80 %", "80–90 %", "≥ 90 %")
 _HR_ZONE_HRR_BOUNDS = ((0.0, 0.60), (0.60, 0.70), (0.70, 0.80),
                        (0.80, 0.90), (0.90, 1.0))
 _HR_ZONE_PCT_COL = "% du total"
 
-st.set_page_config(page_title="DomestiqueAI", layout="wide")
-st.title("🚴‍♂️ DomestiqueAI ")
+st.set_page_config(
+    page_title="DomestiqueAI",
+    page_icon=str(_ICON_PATH) if _ICON_PATH.exists() else "🚴‍♂️",
+    layout="wide",
+)
+
+_title_col, _icon_col = st.columns([6, 1])
+with _title_col:
+    st.title("🚴‍♂️ DomestiqueAI")
+with _icon_col:
+    if _ICON_PATH.exists():
+        st.image(str(_ICON_PATH), width=110)
 
 
 def _tsb_zone_label(tsb: float) -> tuple[str, str]:
