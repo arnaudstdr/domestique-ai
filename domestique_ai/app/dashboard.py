@@ -101,7 +101,15 @@ else:
         st.line_chart(curves_filtered.set_index("date")[["CTL", "ATL", "TSB"]])
 
     st.subheader("Détail des activités")
+    df_display = df_filtered.sort_values("date", ascending=False).copy()
+    if "duration" in df_display.columns:
+        df_display["duration"] = (
+            pd.to_numeric(df_display["duration"], errors="coerce")
+            .fillna(0)
+            .astype(int)
+            .map(lambda s: f"{s // 3600:02d}:{(s % 3600) // 60:02d}:{s % 60:02d}")
+        )
     st.dataframe(
-        df_filtered.sort_values("date", ascending=False),
+        df_display,
         width="stretch",
     )
