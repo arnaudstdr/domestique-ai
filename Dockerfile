@@ -16,7 +16,7 @@ COPY pyproject.toml README.md LICENSE ./
 COPY domestique_ai ./domestique_ai
 
 RUN pip install --upgrade pip \
- && pip install .
+ && pip install -e .
 
 RUN mkdir -p /app/data && chown -R app:app /app
 USER app
