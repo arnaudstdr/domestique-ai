@@ -258,6 +258,9 @@ class StravaClient:
             "avg_power": activity.get("average_watts"),
             "elevation_gain": activity.get("total_elevation_gain"),
             "distance": activity.get("distance"),
+            # `sport_type` est le champ moderne (Ride, VirtualRide, MountainBikeRide,
+            # Walk, Swim, …). `type` est l'ancien — fallback de robustesse.
+            "sport_type": activity.get("sport_type") or activity.get("type"),
         }
 
     @staticmethod
@@ -322,13 +325,15 @@ def init_db(db_path: Path | None = None) -> None:
                 hr_z2_time REAL,
                 hr_z3_time REAL,
                 hr_z4_time REAL,
-                hr_z5_time REAL
+                hr_z5_time REAL,
+                sport_type TEXT
             )
         """)
         _ensure_column(conn, "activities", "max_heart_rate", "REAL")
         for zone in ("hr_z1_time", "hr_z2_time", "hr_z3_time",
                      "hr_z4_time", "hr_z5_time"):
             _ensure_column(conn, "activities", zone, "REAL")
+        _ensure_column(conn, "activities", "sport_type", "TEXT")
         conn.execute("""
             CREATE TABLE IF NOT EXISTS conversations (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -416,8 +421,9 @@ def save_activity(activity: dict[str, Any], db_path: Path | None = None,
             INSERT INTO activities (
                 strava_id, date, duration, avg_heart_rate, max_heart_rate,
                 avg_power, elevation_gain, distance, training_load,
-                hr_z1_time, hr_z2_time, hr_z3_time, hr_z4_time, hr_z5_time
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                hr_z1_time, hr_z2_time, hr_z3_time, hr_z4_time, hr_z5_time,
+                sport_type
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             strava_id,
             activity.get("date"),
@@ -429,6 +435,7 @@ def save_activity(activity: dict[str, Any], db_path: Path | None = None,
             activity.get("distance"),
             tss,
             *zone_values,
+            activity.get("sport_type"),
         ))
         conn.commit()
         return True
@@ -560,6 +567,55 @@ def backfill_hr_zones(client: StravaClient,
         finally:
             conn.close()
     return updated
+
+
+def backfill_sport_types(client: StravaClient,
+                         db_path: Path | None = None) -> int:
+    """
+    Complète la colonne `sport_type` sur les activités existantes en base
+    qui ne l'ont pas (lignes ajoutées avant l'introduction du champ).
+
+    Idempotent : ne fait l'appel API que s'il reste au moins une activité
+    sans sport_type. Met à jour uniquement les lignes WHERE sport_type IS NULL.
+    Retourne le nombre de lignes mises à jour.
+    """
+    init_db(db_path)
+    path = Path(db_path) if db_path else get_db_path()
+    conn = sqlite3.connect(path)
+    try:
+        missing = {
+            row[0]
+            for row in conn.execute(
+                "SELECT strava_id FROM activities WHERE sport_type IS NULL"
+            )
+        }
+    finally:
+        conn.close()
+
+    if not missing:
+        return 0
+
+    activities = client.fetch_activities()
+    conn = sqlite3.connect(path)
+    try:
+        updated = 0
+        for raw in activities:
+            data = client.extract_activity_data(raw)
+            strava_id = data.get("id")
+            if strava_id not in missing:
+                continue
+            sport_type = data.get("sport_type")
+            if not sport_type:
+                continue
+            conn.execute(
+                "UPDATE activities SET sport_type = ? WHERE strava_id = ?",
+                (sport_type, strava_id),
+            )
+            updated += 1
+        conn.commit()
+        return updated
+    finally:
+        conn.close()
 
 
 def backfill_activity_fields(client: StravaClient,

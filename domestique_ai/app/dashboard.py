@@ -29,6 +29,7 @@ from domestique_ai.ingestion.strava import (
     StravaClient,
     backfill_activity_fields,
     backfill_hr_zones,
+    backfill_sport_types,
     sync_activities,
 )
 from domestique_ai.llm.coach import run_turn
@@ -92,6 +93,27 @@ def _tsb_zone_label(tsb: float) -> tuple[str, str]:
 def _format_hms(seconds: float) -> str:
     s = int(seconds)
     return f"{s // 3600:02d}:{(s % 3600) // 60:02d}:{s % 60:02d}"
+
+
+def _is_ride(sport_type: str | None) -> bool:
+    """Filtre vélo : tout sport_type Strava contenant "Ride".
+
+    Couvre Ride, VirtualRide, MountainBikeRide, GravelRide, EBikeRide, etc.
+    Exclut Walk, Run, Swim, Hike, Workout.
+    """
+    return bool(sport_type) and "Ride" in sport_type
+
+
+def _format_km(meters: float) -> str:
+    """Format français : `1 247,3 km`."""
+    return f"{meters / 1000:,.1f} km".replace(",", " ").replace(".", ",")
+
+
+def _format_hours(seconds: float) -> str:
+    """Format compact : `12h 34`."""
+    s = int(seconds)
+    h, m = s // 3600, (s % 3600) // 60
+    return f"{h}h {m:02d}"
 
 
 def _hr_zone_bpm_ranges(hr_rest: float | None,
@@ -380,6 +402,32 @@ def _render_global_alerts() -> None:
             (st.error if severity == "critical" else st.warning)(msg)
 
 
+def _auto_backfill_sport_types(activities: list[dict]) -> list[dict]:
+    """Au premier lancement après l'ajout du champ `sport_type`, complète
+    silencieusement la colonne pour les activités historiques. Idempotent
+    (la fonction backfill ne fait rien s'il n'y a plus de NULL). Protégé
+    par session_state pour ne pas re-tenter à chaque rerun Streamlit.
+    """
+    needs = any(a.get("sport_type") is None for a in activities)
+    if not needs or st.session_state.get("sport_type_backfill_done"):
+        return activities
+
+    client_id, client_secret, _ = get_strava_credentials()
+    if not (client_id and client_secret):
+        st.session_state["sport_type_backfill_done"] = True
+        return activities
+
+    try:
+        with st.spinner("Migration : récupération des sport_type…"):
+            client = StravaClient.from_tokens_file(client_id, client_secret)
+            backfill_sport_types(client)
+        st.session_state["sport_type_backfill_done"] = True
+        return fetch_activities_from_db()
+    except Exception:  # noqa: BLE001 — fallback silencieux : le dashboard reste utilisable
+        st.session_state["sport_type_backfill_done"] = True
+        return activities
+
+
 with tab_dashboard:
     activities = fetch_activities_from_db()
 
@@ -390,6 +438,7 @@ with tab_dashboard:
             "ou cliquez sur **Synchroniser Strava** dans la barre latérale."
         )
     else:
+        activities = _auto_backfill_sport_types(activities)
         _render_global_alerts()
         df = pd.DataFrame(activities)
         df["date"] = pd.to_datetime(df["date"], utc=True).dt.tz_localize(None)
@@ -416,6 +465,30 @@ with tab_dashboard:
         end_ts = pd.Timestamp(end_date) + pd.Timedelta(days=1)
         df_filtered = df[(df["date"] >= start_ts) & (df["date"] < end_ts)]
         curves_filtered = curves[(curves["date"] >= start_ts) & (curves["date"] < end_ts)]
+
+        # Volume cyclisme : année civile et semaine ISO en cours.
+        # Indépendant du filtre « Plage de dates » (sinon « année en cours »
+        # n'aurait plus de sens).
+        if "sport_type" in df.columns:
+            today = pd.Timestamp.now().normalize()
+            year_start = pd.Timestamp(today.year, 1, 1)
+            week_start = today - pd.Timedelta(days=today.weekday())
+            rides = df[df["sport_type"].apply(_is_ride)]
+            year_rides = rides[rides["date"] >= year_start]
+            week_rides = rides[rides["date"] >= week_start]
+            year_distance = float(pd.to_numeric(
+                year_rides["distance"], errors="coerce").fillna(0).sum())
+            year_duration = float(pd.to_numeric(
+                year_rides["duration"], errors="coerce").fillna(0).sum())
+            week_distance = float(pd.to_numeric(
+                week_rides["distance"], errors="coerce").fillna(0).sum())
+            week_duration = float(pd.to_numeric(
+                week_rides["duration"], errors="coerce").fillna(0).sum())
+            ride_cols = st.columns(4)
+            ride_cols[0].metric("Km vélo (année)", _format_km(year_distance))
+            ride_cols[1].metric("Temps vélo (année)", _format_hours(year_duration))
+            ride_cols[2].metric("Km vélo (semaine)", _format_km(week_distance))
+            ride_cols[3].metric("Temps vélo (semaine)", _format_hours(week_duration))
 
         if not curves_filtered.empty:
             last = curves_filtered.iloc[-1]

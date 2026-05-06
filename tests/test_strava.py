@@ -10,6 +10,7 @@ import pytest
 from domestique_ai.ingestion.strava import (
     StravaClient,
     backfill_activity_fields,
+    backfill_sport_types,
     init_db,
     save_activity,
     snapshot_athlete_weight,
@@ -44,6 +45,8 @@ def test_extract_activity_data():
         "average_watts": 220.0,
         "total_elevation_gain": 500.0,
         "distance": 35000.0,
+        "sport_type": "Ride",
+        "type": "Ride",
     }
     client = StravaClient(access_token="x")
     extracted = client.extract_activity_data(raw)
@@ -56,7 +59,18 @@ def test_extract_activity_data():
         "avg_power": 220.0,
         "elevation_gain": 500.0,
         "distance": 35000.0,
+        "sport_type": "Ride",
     }
+
+
+def test_extract_activity_data_falls_back_to_legacy_type():
+    """Si `sport_type` est absent, on retombe sur le champ legacy `type`."""
+    client = StravaClient(access_token="x")
+    extracted = client.extract_activity_data({
+        "id": 1, "start_date": "2025-04-01T08:00:00Z",
+        "elapsed_time": 0, "type": "Walk",
+    })
+    assert extracted["sport_type"] == "Walk"
 
 
 def test_save_activity_inserts_and_is_idempotent(db_path: Path, monkeypatch):
@@ -151,6 +165,104 @@ def test_backfill_is_idempotent(db_path: Path):
         "total_elevation_gain": 0, "distance": 30000,
     }])
     assert backfill_activity_fields(client, db_path=db_path) == 0
+
+
+def test_save_activity_persists_sport_type(db_path: Path):
+    """`save_activity` doit écrire le champ sport_type en base."""
+    save_activity({
+        "id": 42, "date": "2025-04-01T08:00:00Z", "duration": 3600,
+        "avg_heart_rate": 145.0, "max_heart_rate": 182.0,
+        "avg_power": 220.0, "elevation_gain": 0, "distance": 30000,
+        "sport_type": "MountainBikeRide",
+    }, db_path=db_path, ftp=250.0)
+
+    conn = sqlite3.connect(db_path)
+    try:
+        row = conn.execute(
+            "SELECT sport_type FROM activities WHERE strava_id = 42"
+        ).fetchone()
+    finally:
+        conn.close()
+    assert row == ("MountainBikeRide",)
+
+
+def test_backfill_sport_types_fills_missing(db_path: Path):
+    """Une activité sans sport_type doit être complétée par le backfill."""
+    # save_activity sans sport_type → la colonne reste NULL
+    save_activity({
+        "id": 1, "date": "2025-04-01T08:00:00Z", "duration": 3600,
+        "avg_heart_rate": 150.0, "max_heart_rate": 185.0,
+        "avg_power": 200.0, "elevation_gain": 0, "distance": 30000,
+    }, db_path=db_path, ftp=250.0)
+
+    client = _StubClient([{
+        "id": 1, "start_date": "2025-04-01T08:00:00Z",
+        "elapsed_time": 3600, "average_heartrate": 150.0,
+        "max_heartrate": 185.0, "average_watts": 200.0,
+        "total_elevation_gain": 0, "distance": 30000,
+        "sport_type": "Ride",
+    }])
+    assert backfill_sport_types(client, db_path=db_path) == 1
+
+    conn = sqlite3.connect(db_path)
+    try:
+        row = conn.execute(
+            "SELECT sport_type FROM activities WHERE strava_id = 1"
+        ).fetchone()
+    finally:
+        conn.close()
+    assert row == ("Ride",)
+
+
+def test_backfill_sport_types_is_idempotent(db_path: Path):
+    """Si toutes les activités ont déjà un sport_type, le backfill ne fait rien
+    (pas d'appel Strava : `_StubClient` lèverait si on l'appelait à vide)."""
+    save_activity({
+        "id": 1, "date": "2025-04-01T08:00:00Z", "duration": 3600,
+        "avg_heart_rate": 150.0, "max_heart_rate": 185.0,
+        "avg_power": 200.0, "elevation_gain": 0, "distance": 30000,
+        "sport_type": "Ride",
+    }, db_path=db_path, ftp=250.0)
+
+    class _NoFetchClient(_StubClient):
+        def fetch_activities(self, *args, **kwargs):
+            raise AssertionError("fetch_activities ne doit pas être appelé")
+
+    assert backfill_sport_types(_NoFetchClient([]), db_path=db_path) == 0
+
+
+def test_backfill_sport_types_does_not_overwrite_existing(db_path: Path):
+    """Une activité ayant déjà un sport_type ne doit pas être réécrite."""
+    save_activity({
+        "id": 1, "date": "2025-04-01T08:00:00Z", "duration": 3600,
+        "avg_heart_rate": 150.0, "max_heart_rate": 185.0,
+        "avg_power": 200.0, "elevation_gain": 0, "distance": 30000,
+        "sport_type": "Ride",
+    }, db_path=db_path, ftp=250.0)
+    save_activity({
+        "id": 2, "date": "2025-04-02T08:00:00Z", "duration": 3600,
+        "avg_heart_rate": 140.0, "max_heart_rate": 175.0,
+        "avg_power": 180.0, "elevation_gain": 0, "distance": 25000,
+    }, db_path=db_path, ftp=250.0)
+
+    client = _StubClient([
+        # Si Strava renvoyait par erreur "Walk" pour l'activité 1, on ne
+        # doit pas écraser sa valeur "Ride" existante.
+        {"id": 1, "start_date": "2025-04-01T08:00:00Z",
+         "elapsed_time": 3600, "sport_type": "Walk"},
+        {"id": 2, "start_date": "2025-04-02T08:00:00Z",
+         "elapsed_time": 3600, "sport_type": "Run"},
+    ])
+    assert backfill_sport_types(client, db_path=db_path) == 1
+
+    conn = sqlite3.connect(db_path)
+    try:
+        rows = conn.execute(
+            "SELECT strava_id, sport_type FROM activities ORDER BY strava_id"
+        ).fetchall()
+    finally:
+        conn.close()
+    assert rows == [(1, "Ride"), (2, "Run")]
 
 
 def test_get_authorization_url_contains_required_params():
