@@ -273,13 +273,18 @@ def recalculate_training_loads(db_path: Path | None = None) -> int:
 
 def calculate_ctl_atl_tsb(activities: list[dict[str, Any]],
                           ctl_constant: float = 42,
-                          atl_constant: float = 7) -> list[dict[str, Any]]:
+                          atl_constant: float = 7,
+                          end_date: datetime.date | None = None) -> list[dict[str, Any]]:
     """
     Calcule CTL/ATL/TSB jour par jour à partir des activités.
 
     CTL : moyenne mobile exponentielle du TSS sur ~42 jours (forme à long terme).
     ATL : moyenne mobile exponentielle du TSS sur ~7 jours (fatigue récente).
     TSB : CTL − ATL (positif = frais, négatif = fatigué).
+
+    Si ``end_date`` est fourni et postérieur à la dernière activité, la grille
+    est prolongée jusqu'à cette date avec un TSS=0 sur les jours sans activité —
+    permettant de suivre la décroissance de l'ATL/CTL pendant une période de repos.
     """
     tss_by_date: dict[str, float] = {}
     for act in activities:
@@ -294,6 +299,10 @@ def calculate_ctl_atl_tsb(activities: list[dict[str, Any]],
     dates = sorted(tss_by_date.keys())
     start = datetime.datetime.strptime(dates[0], "%Y-%m-%d")
     end = datetime.datetime.strptime(dates[-1], "%Y-%m-%d")
+    if end_date is not None:
+        end_dt = datetime.datetime.combine(end_date, datetime.time())
+        if end_dt > end:
+            end = end_dt
     all_dates = [
         (start + datetime.timedelta(days=i)).strftime("%Y-%m-%d")
         for i in range((end - start).days + 1)

@@ -61,7 +61,7 @@ def _daily_loads(activities: list[dict[str, Any]],
 def compute_chronic_tsb(activities: list[dict[str, Any]],
                         days: int = 7) -> dict[str, Any]:
     """Moyenne du TSB sur les N derniers jours du calendrier CTL/ATL/TSB."""
-    curves = calculate_ctl_atl_tsb(activities)
+    curves = calculate_ctl_atl_tsb(activities, end_date=dt.date.today())
     if len(curves) < days:
         return {"available": False, "reason": "Pas assez d'historique."}
     window = curves[-days:]

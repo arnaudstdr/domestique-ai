@@ -443,23 +443,24 @@ with tab_dashboard:
         df = pd.DataFrame(activities)
         df["date"] = pd.to_datetime(df["date"], utc=True).dt.tz_localize(None)
 
-        curves = pd.DataFrame(calculate_ctl_atl_tsb(activities))
+        today = dt.date.today()
+        curves = pd.DataFrame(calculate_ctl_atl_tsb(activities, end_date=today))
         curves["date"] = pd.to_datetime(curves["date"])
 
         min_date = df["date"].min().date()
-        max_date = df["date"].max().date()
-        default_start = max(min_date, max_date - dt.timedelta(days=180))
+        max_date = max(df["date"].max().date(), today)
+        default_start = max(min_date, today - dt.timedelta(days=180))
 
         date_range = st.sidebar.date_input(
             "Plage de dates",
-            value=(default_start, max_date),
+            value=(default_start, today),
             min_value=min_date,
             max_value=max_date,
         )
         if isinstance(date_range, tuple) and len(date_range) == 2:
             start_date, end_date = date_range
         else:
-            start_date, end_date = default_start, max_date
+            start_date, end_date = default_start, today
 
         start_ts = pd.Timestamp(start_date)
         end_ts = pd.Timestamp(end_date) + pd.Timedelta(days=1)

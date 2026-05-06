@@ -12,6 +12,7 @@ peut pas inventer des chiffres (CTL, TSB, zones), seulement les commenter.
 
 from __future__ import annotations
 
+import datetime as dt
 from collections.abc import Callable
 from typing import Any
 
@@ -39,7 +40,6 @@ def _filter_recent(activities: list[dict[str, Any]], days: int) -> list[dict[str
     last_date = activities[-1].get("date") or ""
     if not last_date:
         return []
-    import datetime as dt
     end = dt.datetime.fromisoformat(last_date.replace("Z", "+00:00"))
     start = end - dt.timedelta(days=days)
     out = []
@@ -56,7 +56,7 @@ def _filter_recent(activities: list[dict[str, Any]], days: int) -> list[dict[str
 def get_training_load_state() -> dict[str, Any]:
     """État courant CTL/ATL/TSB + zone interprétative (Frais/Optimal/Fatigué/Surentraîné)."""
     activities = fetch_activities_from_db()
-    curves = calculate_ctl_atl_tsb(activities)
+    curves = calculate_ctl_atl_tsb(activities, end_date=dt.date.today())
     if not curves:
         return {"available": False, "reason": "Aucune activité en base."}
     last = curves[-1]

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import datetime
 import sqlite3
 
 import pytest
@@ -66,6 +67,34 @@ def test_calculate_ctl_atl_tsb_fills_gap_dates():
     assert [c["date"] for c in curves] == [
         "2025-01-01", "2025-01-02", "2025-01-03", "2025-01-04", "2025-01-05"
     ]
+
+
+def test_calculate_ctl_atl_tsb_extends_to_end_date():
+    """Une période de repos après la dernière activité doit faire remonter le TSB."""
+    activities = [
+        {"date": "2025-01-01T08:00:00Z", "training_load": 100},
+        {"date": "2025-01-02T08:00:00Z", "training_load": 100},
+        {"date": "2025-01-03T08:00:00Z", "training_load": 100},
+    ]
+    curves = calculate_ctl_atl_tsb(activities, end_date=datetime.date(2025, 1, 10))
+    assert len(curves) == 10
+    assert curves[0]["date"] == "2025-01-01"
+    assert curves[-1]["date"] == "2025-01-10"
+    # ATL décroît plus vite que CTL pendant le repos → TSB remonte vers le positif.
+    last_active = next(c for c in curves if c["date"] == "2025-01-03")
+    assert curves[-1]["ATL"] < last_active["ATL"]
+    assert curves[-1]["TSB"] > last_active["TSB"]
+
+
+def test_calculate_ctl_atl_tsb_end_date_before_last_activity_is_ignored():
+    """Si end_date est antérieur à la dernière activité, la grille n'est pas tronquée."""
+    activities = [
+        {"date": "2025-01-01T08:00:00Z", "training_load": 100},
+        {"date": "2025-01-05T08:00:00Z", "training_load": 100},
+    ]
+    curves = calculate_ctl_atl_tsb(activities, end_date=datetime.date(2025, 1, 3))
+    assert curves[-1]["date"] == "2025-01-05"
+    assert len(curves) == 5
 
 
 def test_calculate_trimp_zero_when_data_missing():
