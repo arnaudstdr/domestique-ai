@@ -89,6 +89,30 @@ def get_objective_path() -> Path:
     return REPO_ROOT / "data" / "objective.yaml"
 
 
+def get_garmin_credentials() -> tuple[str | None, str | None]:
+    """Identifiants Garmin Connect lus depuis l'env (.env).
+
+    Retourne ``(email, password)``. Les deux sont ``None`` si non configurés —
+    auquel cas le push vers Connect est désactivé côté UI.
+    """
+    return (
+        os.getenv("GARMIN_EMAIL") or None,
+        os.getenv("GARMIN_PASSWORD") or None,
+    )
+
+
+def get_garmin_token_dir() -> Path:
+    """Répertoire où ``garth`` cache les tokens Garmin Connect.
+
+    Override possible via ``GARMIN_TOKEN_DIR`` (utile pour les tests). Défaut :
+    ``data/.garmin_tokens`` (gitignoré comme le reste de ``data/``).
+    """
+    custom = os.getenv("GARMIN_TOKEN_DIR")
+    if custom:
+        return Path(custom).expanduser().resolve()
+    return REPO_ROOT / "data" / ".garmin_tokens"
+
+
 def get_ollama_model() -> str:
     """Modèle Ollama utilisé par le coach. Override via OLLAMA_MODEL."""
     return os.getenv("OLLAMA_MODEL", "gemma4:31b-cloud")

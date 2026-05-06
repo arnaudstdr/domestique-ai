@@ -295,6 +295,106 @@ def _kind_for_target(target_zone: str) -> str:
     }.get(target_zone, "endurance")
 
 
+def generate_training_plan(sessions_per_week: int = 4,
+                           focus: str | None = None) -> dict[str, Any]:
+    """
+    Génère un plan d'entraînement multi-semaines jusqu'à la date inscrite dans
+    ``data/objective.yaml`` (fallback : 4 semaines à partir d'aujourd'hui).
+
+    Persiste le plan en base et retourne un summary structuré que le coach
+    peut commenter. Les fichiers `.FIT` sont produits à la demande côté UI
+    (téléchargement) — pas dans ce tool, qui reste rapide pour le LLM.
+    """
+    from domestique_ai.config import get_hr_max, get_hr_rest
+    from domestique_ai.llm.objectives import load_objective
+    from domestique_ai.llm.plan_storage import save_plan
+    from domestique_ai.processing.plan_builder import build_training_plan
+
+    if sessions_per_week not in (2, 3, 4, 5, 6, 7):
+        return {
+            "available": False,
+            "reason": f"sessions_per_week doit être entre 2 et 7, reçu {sessions_per_week}.",
+        }
+
+    activities = fetch_activities_from_db()
+    today = dt.date.today()
+    curves = calculate_ctl_atl_tsb(activities, end_date=today)
+    ctl_current = float(curves[-1]["CTL"]) if curves else 0.0
+
+    objective = load_objective()
+    target_date: dt.date | None = None
+    target_event_type = "cyclosportive"
+    if objective is not None:
+        target_event_type = objective.type
+        if objective.date:
+            try:
+                target_date = dt.date.fromisoformat(objective.date)
+            except ValueError:
+                target_date = None
+
+    plan = build_training_plan(
+        target_date=target_date,
+        ctl_current=ctl_current,
+        sessions_per_week=sessions_per_week,
+        target_event_type=target_event_type,
+        focus=focus,
+        start_date=today,
+    )
+
+    if not plan:
+        return {
+            "available": False,
+            "reason": "Aucune séance générée (date cible déjà passée ?).",
+        }
+
+    plan_id = save_plan(
+        plan,
+        target_date=target_date,
+        target_event_type=target_event_type,
+        sessions_per_week=sessions_per_week,
+    )
+
+    # Synthèse hebdomadaire : TSS prévu, durée totale, nb de séances par semaine.
+    weekly: dict[str, dict[str, float]] = {}
+    for w in plan:
+        d = dt.date.fromisoformat(w.date)
+        # Clé = lundi de la semaine ISO de la séance.
+        monday = d - dt.timedelta(days=d.weekday())
+        key = monday.isoformat()
+        bucket = weekly.setdefault(key, {"tss": 0.0, "duration_min": 0, "sessions": 0})
+        bucket["tss"] += w.estimated_tss
+        bucket["duration_min"] += w.duration_min
+        bucket["sessions"] += 1
+
+    weekly_summary = [
+        {
+            "week_starting": key,
+            "tss": round(bucket["tss"], 1),
+            "duration_min": int(bucket["duration_min"]),
+            "sessions": int(bucket["sessions"]),
+        }
+        for key, bucket in sorted(weekly.items())
+    ]
+    peak_week = max(weekly_summary, key=lambda w: w["tss"]) if weekly_summary else None
+    custom_hr = bool(get_hr_rest() and get_hr_max())
+
+    return {
+        "available": True,
+        "plan_id": plan_id,
+        "sessions_count": len(plan),
+        "total_weeks": len(weekly_summary),
+        "target_date": target_date.isoformat() if target_date else None,
+        "target_event_type": target_event_type,
+        "ctl_current": round(ctl_current, 1),
+        "weekly": weekly_summary,
+        "peak_week": peak_week,
+        "first_session": plan[0].to_dict(),
+        "last_session": plan[-1].to_dict(),
+        "fit_export_mode": "bpm_custom" if custom_hr else "garmin_zones",
+        "note": "Téléchargement .ZIP des fichiers .FIT depuis l'onglet « 📋 Plan ».",
+    }
+
+
 def propose_workout(target_zone: str, duration_min: int,
                     kind: str | None = None) -> dict[str, Any]:
     """
@@ -444,6 +544,34 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
     {
         "type": "function",
         "function": {
+            "name": "generate_training_plan",
+            "description": "Génère et persiste un plan d'entraînement multi-semaines "
+                           "jusqu'à la date d'objectif (lue depuis objective.yaml ; "
+                           "fallback 4 semaines). Retourne un summary structuré "
+                           "(TSS hebdo, semaine pic, première et dernière séance). "
+                           "L'export `.FIT` se fait depuis l'onglet « 📋 Plan » du "
+                           "dashboard.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "sessions_per_week": {
+                        "type": "integer",
+                        "description": "Nombre de séances hebdomadaires (défaut 4).",
+                        "minimum": 2, "maximum": 7,
+                    },
+                    "focus": {
+                        "type": "string",
+                        "description": "Focus pédagogique optionnel "
+                                       "(ex: 'endurance', 'puissance').",
+                    },
+                },
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "propose_workout",
             "description": "Génère un squelette de séance (échauffement, corps, "
                            "retour au calme) selon une zone cible et une durée.",
@@ -482,6 +610,7 @@ TOOLS: dict[str, Callable[..., dict[str, Any]]] = {
     "get_activity_details": get_activity_details,
     "get_morning_trends": get_morning_trends,
     "get_overtraining_signals": get_overtraining_signals,
+    "generate_training_plan": generate_training_plan,
     "propose_workout": propose_workout,
 }
 

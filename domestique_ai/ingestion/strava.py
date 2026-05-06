@@ -364,6 +364,21 @@ def init_db(db_path: Path | None = None) -> None:
                 notes TEXT
             )
         """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS training_plans (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                created_at TEXT NOT NULL,
+                target_date TEXT,
+                target_event_type TEXT,
+                sessions_per_week INTEGER,
+                weeks INTEGER,
+                payload TEXT NOT NULL
+            )
+        """)
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_training_plans_created "
+            "ON training_plans(created_at DESC)"
+        )
         conn.commit()
     finally:
         conn.close()

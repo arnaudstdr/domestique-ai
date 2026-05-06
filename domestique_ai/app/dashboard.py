@@ -24,6 +24,12 @@ from domestique_ai.config import (
     get_ollama_model,
     get_strava_credentials,
 )
+from domestique_ai.export.fit import plan_to_zip
+from domestique_ai.export.garmin_connect import GarminPushError
+from domestique_ai.export.garmin_connect import credentials_present as garmin_credentials_present
+from domestique_ai.export.garmin_connect import get_client as get_garmin_client
+from domestique_ai.export.garmin_connect import push_plan as garmin_push_plan
+from domestique_ai.export.garmin_connect import token_cache_present as garmin_token_cache_present
 from domestique_ai.ingestion.strava import (
     StravaAuthError,
     StravaClient,
@@ -40,7 +46,14 @@ from domestique_ai.llm.conversations import (
     load_session,
     new_session_id,
 )
+from domestique_ai.llm.objectives import load_objective
 from domestique_ai.llm.ollama_client import OllamaError
+from domestique_ai.llm.plan_storage import (
+    delete_plan,
+    list_plans,
+    load_plan,
+    save_plan,
+)
 from domestique_ai.processing.analyzer import (
     HR_ZONE_KEYS,
     calculate_ctl_atl_tsb,
@@ -57,6 +70,7 @@ from domestique_ai.processing.morning_metrics import (
     save_morning_entry,
 )
 from domestique_ai.processing.overtraining import detect_overtraining_signals
+from domestique_ai.processing.plan_builder import build_training_plan
 
 _ICON_PATH = Path(__file__).resolve().parents[2] / "icon.png"
 
@@ -374,8 +388,8 @@ with st.sidebar:
                 st.error(f"Erreur de backfill zones : {exc}")
 
 
-tab_dashboard, tab_morning, tab_coach = st.tabs(
-    ["📊 Tableau de bord", "🌅 Matin", "🤖 Coach"]
+tab_dashboard, tab_morning, tab_coach, tab_plan = st.tabs(
+    ["📊 Tableau de bord", "🌅 Matin", "🤖 Coach", "📋 Plan"]
 )
 
 # ---- Tab Tableau de bord -----------------------------------------------------
@@ -863,3 +877,261 @@ with tab_coach:
             )
 
         st.rerun()
+
+
+# ---- Tab Plan ----------------------------------------------------------------
+
+_PLAN_KIND_EMOJI = {
+    "recovery": "💆",
+    "endurance": "🚴",
+    "tempo": "⚡",
+    "intervals": "🔥",
+}
+
+
+def _format_plan_label(record: dict) -> str:
+    created = record["created_at"][:16].replace("T", " ")
+    target = record.get("target_date") or "sans objectif"
+    weeks = record.get("weeks") or "?"
+    return f"{created} · {weeks} sem · objectif {target}"
+
+
+def _render_plan_calendar(plan: list, hr_rest: float | None,
+                          hr_max: float | None) -> None:
+    """Affiche le plan sous forme de calendrier hebdomadaire + détails."""
+    if not plan:
+        st.info("Plan vide.")
+        return
+
+    rows = []
+    for w in plan:
+        d = dt.date.fromisoformat(w.date)
+        monday = d - dt.timedelta(days=d.weekday())
+        rows.append({
+            "Semaine": monday.isoformat(),
+            "Date": w.date,
+            "Jour": d.strftime("%a"),
+            "Type": f"{_PLAN_KIND_EMOJI.get(w.kind, '•')} {w.kind}",
+            "Nom": w.name,
+            "Durée (min)": w.duration_min,
+            "Zone": w.target_zone.upper(),
+            "TSS": w.estimated_tss,
+        })
+    df_plan = pd.DataFrame(rows)
+    st.dataframe(df_plan, hide_index=True, width="stretch")
+
+    weekly_tss = df_plan.groupby("Semaine", as_index=False)["TSS"].sum()
+    weekly_tss.rename(columns={"TSS": "TSS prévu"}, inplace=True)
+    st.markdown("**TSS prévu par semaine**")
+    st.bar_chart(weekly_tss.set_index("Semaine"))
+
+    with st.expander("🔍 Voir le détail des séances"):
+        for w in plan:
+            d = dt.date.fromisoformat(w.date)
+            st.markdown(
+                f"**{d.strftime('%a %d %b')}** — {w.name} "
+                f"(_{w.duration_min} min, {w.target_zone.upper()}, ~{w.estimated_tss} TSS_)"
+            )
+            for step in w.structure:
+                minutes = step.duration_sec // 60
+                seconds = step.duration_sec % 60
+                duration_label = f"{minutes}'{seconds:02d}\"" if seconds else f"{minutes}'"
+                st.markdown(
+                    f"  - `{step.phase}` · {step.zone.upper()} · {duration_label}"
+                )
+
+    zip_bytes = plan_to_zip(plan, hr_rest=hr_rest, hr_max=hr_max)
+    col_dl, col_push = st.columns([1, 1])
+    with col_dl:
+        st.download_button(
+            "📥 Télécharger en `.zip`",
+            data=zip_bytes,
+            file_name=f"plan_{plan[0].date}_{plan[-1].date}.zip",
+            mime="application/zip",
+            width="stretch",
+            help="Archive locale (fichiers `.FIT` Workout, 1 par séance).",
+        )
+    with col_push:
+        creds_ok = garmin_credentials_present()
+        cache_ok = garmin_token_cache_present()
+        push_disabled = not creds_ok
+        push_help = (
+            "Identifiants Garmin absents : ajouter `GARMIN_EMAIL` et "
+            "`GARMIN_PASSWORD` dans `.env`."
+            if not creds_ok
+            else (
+                "Aucun cache token : la 1ʳᵉ connexion (avec MFA si activé) "
+                "doit être faite en CLI : "
+                "`python -m domestique_ai.export.garmin_connect`."
+                if not cache_ok
+                else "Crée les séances dans Garmin Connect et planifie le calendrier."
+            )
+        )
+        schedule_workouts = st.checkbox(
+            "Planifier sur le calendrier",
+            value=True,
+            help=(
+                "Si coché, chaque séance est ajoutée à la date prévue dans le "
+                "calendrier Garmin Connect, sinon elle reste seulement dans la "
+                "bibliothèque d'entraînements."
+            ),
+        )
+        if st.button(
+            "☁️ Pousser sur Garmin Connect",
+            disabled=push_disabled,
+            help=push_help,
+            width="stretch",
+            type="secondary",
+        ):
+            progress_bar = st.progress(0.0, text="Initialisation…")
+
+            def _on_progress(idx, total, workout):
+                progress_bar.progress(
+                    (idx + 1) / max(1, total),
+                    text=f"Upload {idx + 1}/{total} — {workout.name}",
+                )
+
+            try:
+                client = get_garmin_client()
+                results = garmin_push_plan(
+                    plan,
+                    schedule=schedule_workouts,
+                    hr_rest=hr_rest,
+                    hr_max=hr_max,
+                    client=client,
+                    progress=_on_progress,
+                )
+            except GarminPushError as exc:
+                progress_bar.empty()
+                st.error(str(exc))
+            else:
+                progress_bar.empty()
+                st.session_state["plan_push_results"] = results
+
+    if st.session_state.get("plan_push_results"):
+        results = st.session_state["plan_push_results"]
+        ok_count = sum(1 for r in results if r.get("workout_id") and "error" not in r)
+        scheduled_count = sum(1 for r in results if r.get("scheduled"))
+        failed = [r for r in results if not r.get("workout_id") or r.get("error")]
+        if failed:
+            st.warning(
+                f"{ok_count}/{len(results)} séances créées, "
+                f"{scheduled_count} planifiées · {len(failed)} en erreur."
+            )
+        else:
+            st.success(
+                f"{ok_count}/{len(results)} séances créées · "
+                f"{scheduled_count} planifiées sur le calendrier Garmin Connect."
+            )
+        with st.expander("Détail des uploads"):
+            for r in results:
+                line = f"**{r['date']}** — {r['workout']}"
+                if r.get("workout_id"):
+                    line += f" → [voir sur Garmin]({r['url']})"
+                    if r.get("scheduled"):
+                        line += " · 📅 planifié"
+                if r.get("error"):
+                    line += f" · ⚠️ {r['error']}"
+                st.markdown(line)
+
+
+with tab_plan:
+    st.markdown(
+        "Génère un plan d'entraînement multi-semaines, archive-le en `.zip` "
+        "(fichiers `.FIT` Workout) ou pousse-le directement sur **Garmin "
+        "Connect** (les séances apparaissent dans la bibliothèque + le calendrier)."
+    )
+
+    objective = load_objective()
+    if objective is None:
+        st.warning(
+            "Aucun objectif déclaré : le plan se limitera à 4 semaines. "
+            "Copier `data/objective.yaml.example` vers `data/objective.yaml` "
+            "pour cibler une date d'épreuve."
+        )
+    else:
+        target_label = objective.date or "(pas de date)"
+        st.caption(
+            f"Objectif courant : **{objective.type}** · cible **{target_label}** · "
+            f"{objective.distance_km or '?'} km / "
+            f"{objective.elevation_m or '?'} m D+"
+        )
+
+    with st.container(border=True):
+        st.markdown("### Générer un nouveau plan")
+        col_sessions, col_focus, col_btn = st.columns([1, 2, 1])
+        with col_sessions:
+            sessions_per_week = st.number_input(
+                "Séances / semaine", min_value=2, max_value=7, value=4, step=1,
+                key="plan_sessions_per_week",
+            )
+        with col_focus:
+            focus = st.text_input(
+                "Focus (optionnel)",
+                placeholder="ex: endurance fond, sprint, montagnes…",
+                key="plan_focus",
+            )
+        with col_btn:
+            st.markdown("&nbsp;")
+            generate = st.button("Générer", type="primary", width="stretch")
+
+        if generate:
+            target_date: dt.date | None = None
+            target_event_type = "cyclosportive"
+            if objective and objective.date:
+                try:
+                    target_date = dt.date.fromisoformat(objective.date)
+                except ValueError:
+                    target_date = None
+                target_event_type = objective.type
+            try:
+                with st.spinner("Calcul de la périodisation…"):
+                    activities_for_ctl = fetch_activities_from_db()
+                    curves_for_ctl = calculate_ctl_atl_tsb(
+                        activities_for_ctl, end_date=dt.date.today()
+                    )
+                    ctl_now = float(curves_for_ctl[-1]["CTL"]) if curves_for_ctl else 0.0
+                    plan = build_training_plan(
+                        target_date=target_date,
+                        ctl_current=ctl_now,
+                        sessions_per_week=int(sessions_per_week),
+                        target_event_type=target_event_type,
+                        focus=focus or None,
+                    )
+                    plan_id = save_plan(
+                        plan,
+                        target_date=target_date,
+                        target_event_type=target_event_type,
+                        sessions_per_week=int(sessions_per_week),
+                    )
+                st.success(f"Plan #{plan_id} généré : {len(plan)} séances.")
+                st.session_state["plan_selected_id"] = plan_id
+            except Exception as exc:  # noqa: BLE001
+                st.error(f"Échec de la génération : {exc}")
+
+    plans = list_plans(limit=20)
+    if not plans:
+        st.info("Aucun plan généré pour l'instant.")
+    else:
+        default_id = st.session_state.get("plan_selected_id") or plans[0]["id"]
+        plan_ids = [p["id"] for p in plans]
+        if default_id not in plan_ids:
+            default_id = plan_ids[0]
+        selected_id = st.selectbox(
+            "Plan à afficher",
+            options=plan_ids,
+            index=plan_ids.index(default_id),
+            format_func=lambda pid: _format_plan_label(
+                next(p for p in plans if p["id"] == pid)
+            ),
+        )
+        col_show, col_delete = st.columns([4, 1])
+        with col_delete:
+            if st.button("🗑️ Supprimer ce plan", width="stretch"):
+                delete_plan(int(selected_id))
+                st.session_state.pop("plan_selected_id", None)
+                st.rerun()
+
+        plan_obj = load_plan(int(selected_id))
+        if plan_obj:
+            _render_plan_calendar(plan_obj, get_hr_rest(), get_hr_max())

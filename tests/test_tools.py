@@ -62,6 +62,7 @@ def test_tool_schemas_have_required_shape():
         "get_activity_details",
         "get_morning_trends",
         "get_overtraining_signals",
+        "generate_training_plan",
         "propose_workout",
     }
     for schema in TOOL_SCHEMAS:
@@ -195,3 +196,36 @@ def test_dispatch_with_invalid_args():
 def test_dispatch_routes_to_correct_function(seeded_db):
     result = dispatch("get_recent_activities", {"days": 7})
     assert result["count"] >= 1
+
+
+def test_generate_training_plan_with_objective(seeded_db, tmp_path, monkeypatch):
+    obj_path = tmp_path / "objective.yaml"
+    obj_path.write_text(
+        "type: cyclosportive\ndate: 2026-09-01\ndistance_km: 100\n"
+    )
+    monkeypatch.setenv("DOMESTIQUE_AI_OBJECTIVE_PATH", str(obj_path))
+
+    result = dispatch("generate_training_plan", {"sessions_per_week": 4})
+    assert result["available"] is True
+    assert result["sessions_count"] > 0
+    assert result["target_date"] == "2026-09-01"
+    assert isinstance(result["weekly"], list) and result["weekly"]
+    assert result["peak_week"]["tss"] >= 0
+    assert "first_session" in result and "structure" in result["first_session"]
+
+
+def test_generate_training_plan_fallback_no_objective(seeded_db, tmp_path,
+                                                     monkeypatch):
+    # Pas de fichier objective.yaml → fallback 4 semaines.
+    monkeypatch.setenv(
+        "DOMESTIQUE_AI_OBJECTIVE_PATH", str(tmp_path / "missing.yaml")
+    )
+    result = dispatch("generate_training_plan", {"sessions_per_week": 3})
+    assert result["available"] is True
+    assert result["sessions_count"] > 0
+    assert result["target_date"] is None
+
+
+def test_generate_training_plan_invalid_sessions(seeded_db):
+    result = dispatch("generate_training_plan", {"sessions_per_week": 1})
+    assert result["available"] is False
