@@ -38,6 +38,11 @@ from domestique_ai.ingestion.strava import (
     backfill_sport_types,
     sync_activities,
 )
+from domestique_ai.llm.availability import (
+    Availability,
+    AvailabilityError,
+    load_availability,
+)
 from domestique_ai.llm.coach import run_turn
 from domestique_ai.llm.conversations import (
     append_message,
@@ -1057,6 +1062,25 @@ with tab_plan:
             f"{objective.elevation_m or '?'} m D+"
         )
 
+    availability: Availability | None = None
+    try:
+        availability = load_availability()
+    except AvailabilityError as exc:
+        st.error(f"`data/availability.yaml` invalide : {exc}")
+    if availability is None:
+        st.warning(
+            "Aucune disponibilité déclarée : le plan utilise la grille par "
+            "défaut Lun/Mer/Ven/Dim. Copier "
+            "`data/availability.yaml.example` vers `data/availability.yaml` "
+            "pour personnaliser jours, durées max et indoor/outdoor."
+        )
+    else:
+        bullets = " · ".join(
+            f"**{d.name}** {d.max_duration_min} min ({d.context})"
+            for d in availability.days
+        )
+        st.info(f"Disponibilité chargée : {bullets}")
+
     with st.container(border=True):
         st.markdown("### Générer un nouveau plan")
         col_sessions, col_focus, col_btn = st.columns([1, 2, 1])
@@ -1095,6 +1119,7 @@ with tab_plan:
                         target_date=target_date,
                         ctl_current=ctl_now,
                         sessions_per_week=int(sessions_per_week),
+                        availability=availability,
                         target_event_type=target_event_type,
                         focus=focus or None,
                     )

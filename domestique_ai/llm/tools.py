@@ -306,9 +306,16 @@ def generate_training_plan(sessions_per_week: int = 4,
     (téléchargement) — pas dans ce tool, qui reste rapide pour le LLM.
     """
     from domestique_ai.config import get_hr_max, get_hr_rest
+    from domestique_ai.llm.availability import (
+        AvailabilityError,
+        load_availability,
+    )
     from domestique_ai.llm.objectives import load_objective
     from domestique_ai.llm.plan_storage import save_plan
-    from domestique_ai.processing.plan_builder import build_training_plan
+    from domestique_ai.processing.plan_builder import (
+        build_training_plan,
+        days_used,
+    )
 
     if sessions_per_week not in (2, 3, 4, 5, 6, 7):
         return {
@@ -332,10 +339,19 @@ def generate_training_plan(sessions_per_week: int = 4,
             except ValueError:
                 target_date = None
 
+    try:
+        availability = load_availability()
+    except AvailabilityError as exc:
+        return {
+            "available": False,
+            "reason": f"availability.yaml invalide: {exc}",
+        }
+
     plan = build_training_plan(
         target_date=target_date,
         ctl_current=ctl_current,
         sessions_per_week=sessions_per_week,
+        availability=availability,
         target_event_type=target_event_type,
         focus=focus,
         start_date=today,
@@ -391,6 +407,8 @@ def generate_training_plan(sessions_per_week: int = 4,
         "first_session": plan[0].to_dict(),
         "last_session": plan[-1].to_dict(),
         "fit_export_mode": "bpm_custom" if custom_hr else "garmin_zones",
+        "availability_loaded": availability is not None,
+        "days_used": days_used(plan),
         "note": "Téléchargement .ZIP des fichiers .FIT depuis l'onglet « 📋 Plan ».",
     }
 

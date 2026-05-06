@@ -8,11 +8,14 @@ Périodisation appliquée :
 - Cycle 3:1 (3 semaines de charge progressive + 1 semaine de récupération).
 - Taper sur les 2 dernières semaines avant la date cible (volume −30 % puis −50 %,
   intensité maintenue).
-- Distribution hebdo type pour 4 séances :
+- Distribution hebdo par défaut pour 4 séances (si pas de ``Availability``) :
     * Lundi    — récupération active Z1
     * Mercredi — tempo / sweetspot Z3
     * Vendredi — intervalles seuil/VO2max Z4-Z5
     * Dimanche — endurance longue Z2 (volume croissant)
+- Si une ``Availability`` est fournie, les jours et durées max sont lus depuis
+  ``data/availability.yaml`` et l'allocation type→jour devient dynamique
+  (endurance longue → outdoor le plus dispo, intervalles → indoor, etc.).
 - Z4-Z5 borné à ≤ 25 % du temps hebdomadaire (polarisation 80/20).
 """
 
@@ -22,6 +25,7 @@ import datetime as _dt
 from dataclasses import asdict, dataclass, field
 from typing import Any
 
+from domestique_ai.llm.availability import Availability, DayAvailability
 from domestique_ai.processing.analyzer import HR_ZONE_KEYS
 
 # Indices de jour (0 = lundi … 6 = dimanche). On précise un jour par séance pour
@@ -217,11 +221,158 @@ def _ctl_progression_cap(ctl_current: float, weeks_into_plan: int) -> float:
     return target_ctl * 7.0
 
 
+# ---------------------------------------------------------------------------
+# Allocation jour → type de séance
+# ---------------------------------------------------------------------------
+
+
+def _pick_long_endurance(
+    pool: list[DayAvailability], preferred_weekday: int | None
+) -> DayAvailability | None:
+    """Sélectionne le jour de l'endurance longue.
+
+    Priorités : préférence explicite → outdoor le plus dispo (tie-break weekday
+    le plus tardif) → fallback jour le plus dispo.
+    """
+    if preferred_weekday is not None:
+        for d in pool:
+            if d.weekday == preferred_weekday:
+                return d
+    outdoor = [d for d in pool if d.context == "outdoor"]
+    candidates = outdoor if outdoor else list(pool)
+    if not candidates:
+        return None
+    candidates.sort(key=lambda d: (-d.max_duration_min, -d.weekday))
+    return candidates[0]
+
+
+def _pick_intervals(
+    pool: list[DayAvailability], preferred_weekday: int | None
+) -> DayAvailability | None:
+    """Sélectionne le jour des intervalles.
+
+    Priorités : préférence explicite → indoor avec ≥ 60 min (HT plus précis) →
+    fallback jour libre avec ≥ 60 min.
+    """
+    if preferred_weekday is not None:
+        for d in pool:
+            if d.weekday == preferred_weekday:
+                return d
+    indoor = sorted(
+        (d for d in pool if d.context == "indoor" and d.max_duration_min >= 60),
+        key=lambda d: d.weekday,
+    )
+    if indoor:
+        return indoor[0]
+    libre = sorted(
+        (d for d in pool if d.max_duration_min >= 60),
+        key=lambda d: d.weekday,
+    )
+    return libre[0] if libre else None
+
+
+def _allocate_days(
+    availability: Availability,
+    sessions_per_week: int,
+) -> list[tuple[DayAvailability, str]]:
+    """Alloue chaque jour disponible à un type de séance.
+
+    Retourne une liste ``[(DayAvailability, kind), ...]`` triée par weekday.
+    ``kind`` ∈ {recovery, endurance, tempo, intervals}.
+
+    Si ``sessions_per_week`` dépasse le nombre de jours dispo, on plafonne au
+    nombre de jours dispo (best-effort sans erreur).
+    """
+    days = sorted(availability.days, key=lambda d: d.weekday)
+    n = min(max(0, sessions_per_week), len(days))
+    if n == 0:
+        return []
+
+    pool = list(days)
+    selected: dict[int, str] = {}
+
+    # 1. Endurance longue (si on a au moins 1 séance).
+    long_day = _pick_long_endurance(pool, availability.long_endurance_day)
+    if long_day is not None:
+        selected[long_day.weekday] = "endurance"
+        pool = [d for d in pool if d.weekday != long_day.weekday]
+
+    # 2. Intervals (si on a au moins 2 séances).
+    if len(selected) < n and n >= 2:
+        intervals_day = _pick_intervals(pool, availability.intervals_day)
+        if intervals_day is not None:
+            selected[intervals_day.weekday] = "intervals"
+            pool = [d for d in pool if d.weekday != intervals_day.weekday]
+
+    # 3. Récupération (si on a au moins 4 séances) — jour le plus court restant.
+    if len(selected) < n and n >= 4 and pool:
+        recovery_day = min(pool, key=lambda d: (d.max_duration_min, d.weekday))
+        selected[recovery_day.weekday] = "recovery"
+        pool = [d for d in pool if d.weekday != recovery_day.weekday]
+
+    # 4. Tempo : on remplit les slots restants avec les jours restants (plus
+    #    proches de la fin de semaine en priorité, pour laisser des jours off
+    #    avant l'endurance longue).
+    remaining_slots = n - len(selected)
+    if remaining_slots > 0 and pool:
+        for d in sorted(pool, key=lambda x: x.weekday)[:remaining_slots]:
+            selected[d.weekday] = "tempo"
+
+    by_weekday = {d.weekday: d for d in days}
+    return [
+        (by_weekday[w], selected[w]) for w in sorted(selected.keys())
+    ]
+
+
+def _legacy_schedule(
+    sessions_per_week: int,
+) -> list[tuple[int, str, int | None, str | None]]:
+    """Renvoie l'allocation legacy (sans Availability) au même format.
+
+    Format : ``[(weekday, kind, max_duration_min, context), ...]``. Les deux
+    derniers sont ``None`` → pas de plafond, pas de contexte.
+    """
+    if sessions_per_week not in _WEEKDAY_PROFILES:
+        raise ValueError(
+            f"sessions_per_week doit être dans {sorted(_WEEKDAY_PROFILES)}, "
+            f"reçu {sessions_per_week}"
+        )
+    slots = _WEEKDAY_PROFILES[sessions_per_week]
+    kinds = _SLOT_KINDS[sessions_per_week]
+    return [(w, k, None, None) for w, k in zip(slots, kinds, strict=True)]
+
+
+def _resolve_schedule(
+    availability: Availability | None,
+    sessions_per_week: int,
+) -> list[tuple[int, str, int | None, str | None]]:
+    """Renvoie l'allocation hebdomadaire à appliquer chaque semaine."""
+    if availability is None:
+        return _legacy_schedule(sessions_per_week)
+    allocations = _allocate_days(availability, sessions_per_week)
+    return [
+        (day.weekday, kind, day.max_duration_min, day.context)
+        for day, kind in allocations
+    ]
+
+
+def _compose_notes(focus: str | None, context: str | None) -> str:
+    parts: list[str] = []
+    if context == "indoor":
+        parts.append("Indoor (home trainer)")
+    elif context == "outdoor":
+        parts.append("Outdoor")
+    if focus:
+        parts.append(focus)
+    return " — ".join(parts)
+
+
 def build_training_plan(
     *,
     target_date: _dt.date | None,
     ctl_current: float = 0.0,
     sessions_per_week: int = 4,
+    availability: Availability | None = None,
     target_event_type: str = "cyclosportive",
     focus: str | None = None,
     start_date: _dt.date | None = None,
@@ -231,15 +382,17 @@ def build_training_plan(
 
     Si ``target_date`` est absent, génère ``fallback_weeks`` semaines à partir
     de ``start_date`` (ou aujourd'hui).
-    Les paramètres ``target_event_type`` et ``focus`` sont conservés pour pilotage
-    futur (taper plus court pour cyclo, plus d'intervalles pour course, etc.) —
-    ils n'altèrent pas la structure de base aujourd'hui.
-    """
-    if sessions_per_week not in _WEEKDAY_PROFILES:
-        raise ValueError(
-            f"sessions_per_week doit être dans {sorted(_WEEKDAY_PROFILES)}, reçu {sessions_per_week}"
-        )
 
+    Si ``availability`` est fournie (lue depuis ``data/availability.yaml``),
+    le builder n'utilise plus la grille Lun/Mer/Ven/Dim mais alloue
+    intelligemment les jours de la semaine selon les contraintes (durée max,
+    indoor/outdoor). Sinon, comportement legacy basé sur les profils internes.
+
+    Les paramètres ``target_event_type`` et ``focus`` sont conservés pour
+    pilotage futur (taper plus court pour cyclo, plus d'intervalles pour
+    course, etc.) — ils n'altèrent pas la structure de base aujourd'hui.
+    """
+    schedule = _resolve_schedule(availability, sessions_per_week)
     today = start_date or _dt.date.today()
     if target_date is None:
         total_weeks = max(1, fallback_weeks)
@@ -254,9 +407,6 @@ def build_training_plan(
     # les jours de séance sur le calendrier hebdo.
     week_start = today - _dt.timedelta(days=today.weekday())
 
-    weekday_slots = _WEEKDAY_PROFILES[sessions_per_week]
-    slot_kinds = _SLOT_KINDS[sessions_per_week]
-
     plan: list[Workout] = []
     for week_idx in range(total_weeks):
         factor, is_recovery, is_taper = _week_factor(week_idx, total_weeks, taper_weeks)
@@ -265,14 +415,12 @@ def build_training_plan(
 
         sessions_this_week: list[Workout] = []
         weekly_tss = 0.0
-        weekly_intensity_sec = 0.0
-        weekly_total_sec = 0.0
-        for slot_idx, weekday in enumerate(weekday_slots):
+        for weekday, base_kind, day_max_min, day_context in schedule:
             session_date = week_start + _dt.timedelta(days=week_idx * 7 + weekday)
             if session_date < today:
                 # On saute les jours déjà passés dans la semaine en cours.
                 continue
-            kind = slot_kinds[slot_idx]
+            kind = base_kind
             # En semaine de récup ou taper, on bascule les intervalles vers tempo léger.
             if (is_recovery or is_taper) and kind == "intervals":
                 kind = "tempo"
@@ -281,17 +429,15 @@ def build_training_plan(
             if kind == "endurance" and not (is_recovery or is_taper):
                 base_min = int(base_min + 5 * (week_idx % 4))
             duration_min = max(20, int(base_min * factor))
+            # Plafonnement par la dispo du jour si renseignée.
+            if day_max_min is not None:
+                duration_min = min(duration_min, day_max_min)
+                duration_min = max(20, duration_min)
 
             target_zone = _TARGET_ZONE[kind]
             structure = _structure_for(kind, duration_min)
             tss = round(_TSS_PER_MIN[kind] * duration_min, 1)
-
             weekly_tss += tss
-            weekly_total_sec += duration_min * 60
-            if kind == "intervals":
-                weekly_intensity_sec += sum(
-                    s.duration_sec for s in structure if s.zone in ("z4", "z5")
-                )
 
             workout = Workout(
                 date=session_date.isoformat(),
@@ -302,7 +448,7 @@ def build_training_plan(
                 target_zone=target_zone,
                 structure=structure,
                 estimated_tss=tss,
-                notes=focus or "",
+                notes=_compose_notes(focus, day_context),
             )
             sessions_this_week.append(workout)
 
@@ -313,6 +459,14 @@ def build_training_plan(
             for w in sessions_this_week:
                 if w.kind == "endurance":
                     new_min = max(45, int(w.duration_min * scale))
+                    # Le plafond de la dispo s'applique aussi au scaling.
+                    day_cap = next(
+                        (cap for wd, _k, cap, _c in schedule
+                         if wd == _dt.date.fromisoformat(w.date).weekday() and cap),
+                        None,
+                    )
+                    if day_cap is not None:
+                        new_min = min(new_min, day_cap)
                     new_struct = _structure_for("endurance", new_min)
                     scaled.append(Workout(
                         date=w.date,
@@ -332,6 +486,18 @@ def build_training_plan(
         plan.extend(sessions_this_week)
 
     return plan
+
+
+def days_used(plan: list[Workout]) -> list[str]:
+    """Liste unique des noms de jours (anglais lowercase) utilisés par le plan."""
+    from domestique_ai.llm.availability import _WEEKDAY_BY_INDEX
+
+    seen: dict[int, str] = {}
+    for w in plan:
+        wd = _dt.date.fromisoformat(w.date).weekday()
+        if wd not in seen:
+            seen[wd] = _WEEKDAY_BY_INDEX[wd]
+    return [seen[w] for w in sorted(seen)]
 
 
 def assert_zones_valid(plan: list[Workout]) -> None:

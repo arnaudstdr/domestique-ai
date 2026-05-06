@@ -229,3 +229,58 @@ def test_generate_training_plan_fallback_no_objective(seeded_db, tmp_path,
 def test_generate_training_plan_invalid_sessions(seeded_db):
     result = dispatch("generate_training_plan", {"sessions_per_week": 1})
     assert result["available"] is False
+
+
+def test_generate_training_plan_uses_availability_when_present(
+    seeded_db, tmp_path, monkeypatch
+):
+    avail_path = tmp_path / "availability.yaml"
+    avail_path.write_text(
+        "days:\n"
+        "  wednesday:\n    max_duration_min: 90\n    context: indoor\n"
+        "  thursday:\n    max_duration_min: 90\n    context: indoor\n"
+        "  saturday:\n    max_duration_min: 240\n    context: outdoor\n"
+        "  sunday:\n    max_duration_min: 240\n    context: outdoor\n"
+    )
+    monkeypatch.setenv("DOMESTIQUE_AI_AVAILABILITY_PATH", str(avail_path))
+    monkeypatch.setenv(
+        "DOMESTIQUE_AI_OBJECTIVE_PATH", str(tmp_path / "missing.yaml")
+    )
+
+    result = dispatch("generate_training_plan", {"sessions_per_week": 4})
+    assert result["available"] is True
+    assert result["availability_loaded"] is True
+    assert set(result["days_used"]) <= {
+        "wednesday", "thursday", "saturday", "sunday",
+    }
+    # Aucun jour Lundi/Mardi/Vendredi → exclusion vérifiée.
+    assert "monday" not in result["days_used"]
+    assert "friday" not in result["days_used"]
+
+
+def test_generate_training_plan_falls_back_without_availability(
+    seeded_db, tmp_path, monkeypatch
+):
+    monkeypatch.setenv(
+        "DOMESTIQUE_AI_AVAILABILITY_PATH", str(tmp_path / "missing-avail.yaml")
+    )
+    monkeypatch.setenv(
+        "DOMESTIQUE_AI_OBJECTIVE_PATH", str(tmp_path / "missing-obj.yaml")
+    )
+    result = dispatch("generate_training_plan", {"sessions_per_week": 4})
+    assert result["available"] is True
+    assert result["availability_loaded"] is False
+    # Comportement legacy : on retombe sur Lun/Mer/Ven/Dim au moins en partie.
+    assert "monday" in result["days_used"] or "wednesday" in result["days_used"]
+
+
+def test_generate_training_plan_invalid_availability_yaml_returns_error(
+    seeded_db, tmp_path, monkeypatch
+):
+    bad = tmp_path / "availability.yaml"
+    bad.write_text("days:\n  mondai:\n    max_duration_min: 60\n    context: indoor\n")
+    monkeypatch.setenv("DOMESTIQUE_AI_AVAILABILITY_PATH", str(bad))
+
+    result = dispatch("generate_training_plan", {"sessions_per_week": 4})
+    assert result["available"] is False
+    assert "availability.yaml" in result["reason"]

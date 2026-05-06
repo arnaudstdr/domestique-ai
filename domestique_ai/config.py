@@ -89,6 +89,17 @@ def get_objective_path() -> Path:
     return REPO_ROOT / "data" / "objective.yaml"
 
 
+def get_availability_path() -> Path:
+    """Chemin vers le fichier YAML de disponibilité hebdomadaire (gitignoré).
+
+    Override possible via DOMESTIQUE_AI_AVAILABILITY_PATH (utile pour les tests).
+    """
+    custom = os.getenv("DOMESTIQUE_AI_AVAILABILITY_PATH")
+    if custom:
+        return Path(custom).expanduser().resolve()
+    return REPO_ROOT / "data" / "availability.yaml"
+
+
 def get_garmin_credentials() -> tuple[str | None, str | None]:
     """Identifiants Garmin Connect lus depuis l'env (.env).
 
