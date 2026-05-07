@@ -413,6 +413,59 @@ def generate_training_plan(sessions_per_week: int = 4,
     }
 
 
+def get_planned_workout(date: str) -> dict[str, Any]:
+    """
+    Séance prévue à une date donnée (ISO YYYY-MM-DD) dans le plan en cours.
+
+    Stratégie multi-plans : on parcourt les plans du plus récent au plus ancien
+    et on retient le premier dont la fenêtre [première séance ; dernière séance]
+    couvre ``date``. Cela privilégie la dernière intention de l'athlète
+    (régénération de plan = ancien plan obsolète).
+    """
+    from domestique_ai.llm.plan_storage import list_plans, load_plan
+
+    try:
+        target = dt.date.fromisoformat(date)
+    except (TypeError, ValueError):
+        return {
+            "available": False,
+            "reason": f"date invalide: {date!r}. Format attendu: YYYY-MM-DD.",
+        }
+
+    # Tri par id DESC : la précision seconde de `created_at` peut produire des
+    # égalités quand on enchaîne plusieurs sauvegardes (cf. load_latest_plan).
+    plans = sorted(list_plans(limit=50), key=lambda m: m["id"], reverse=True)
+    total_considered = len(plans)
+    for meta in plans:
+        workouts = load_plan(meta["id"])
+        if not workouts:
+            continue
+        first = dt.date.fromisoformat(workouts[0].date)
+        last = dt.date.fromisoformat(workouts[-1].date)
+        if not (first <= target <= last):
+            continue
+        match = next((w for w in workouts if w.date == target.isoformat()), None)
+        base = {
+            "available": True,
+            "plan_id": meta["id"],
+            "plan_target_date": meta.get("target_date"),
+            "plan_target_event_type": meta.get("target_event_type"),
+            "total_plans_considered": total_considered,
+        }
+        if match is None:
+            base["planned_workout"] = None
+            base["note"] = "Jour de repos / non programmé dans le plan."
+            return base
+        base["planned_workout"] = match.to_dict()
+        return base
+
+    return {
+        "available": False,
+        "reason": "Date hors fenêtre des plans connus.",
+        "total_plans_considered": total_considered,
+    }
+
+
 def propose_workout(target_zone: str, duration_min: int,
                     kind: str | None = None) -> dict[str, Any]:
     """
@@ -590,6 +643,29 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
     {
         "type": "function",
         "function": {
+            "name": "get_planned_workout",
+            "description": "Renvoie la séance prévue à une date donnée dans le "
+                           "plan d'entraînement en cours. En cas de plans "
+                           "multiples, sélectionne le plus récent dont la fenêtre "
+                           "couvre la date. Retourne `planned_workout=None` si "
+                           "jour de repos, `available=False` si date hors plan.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "date": {
+                        "type": "string",
+                        "description": "Date ISO YYYY-MM-DD de la séance à "
+                                       "récupérer (typiquement la date d'une "
+                                       "activité analysée).",
+                    },
+                },
+                "required": ["date"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "propose_workout",
             "description": "Génère un squelette de séance (échauffement, corps, "
                            "retour au calme) selon une zone cible et une durée.",
@@ -629,6 +705,7 @@ TOOLS: dict[str, Callable[..., dict[str, Any]]] = {
     "get_morning_trends": get_morning_trends,
     "get_overtraining_signals": get_overtraining_signals,
     "generate_training_plan": generate_training_plan,
+    "get_planned_workout": get_planned_workout,
     "propose_workout": propose_workout,
 }
 
