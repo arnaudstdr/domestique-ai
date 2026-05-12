@@ -51,6 +51,16 @@ class OvertrainingResponse(BaseModel):
     indicators: OvertrainingIndicators
 
 
+class VolumePeriod(BaseModel):
+    distance_km: float
+    duration_sec: int
+
+
+class RideVolumeResponse(BaseModel):
+    year: VolumePeriod
+    week: VolumePeriod
+
+
 # ---- Activities --------------------------------------------------------------
 
 

@@ -4,6 +4,7 @@ import type {
   LoadResponse,
   OvertrainingResponse,
   ActivitiesList,
+  RideVolumeResponse,
 } from "../api/types";
 import LoadChart from "../components/LoadChart";
 import MetricCard from "../components/MetricCard";
@@ -25,10 +26,24 @@ function zoneTone(zone: string | undefined) {
   }
 }
 
+function formatKm(km: number): string {
+  return `${km.toLocaleString("fr-FR", {
+    minimumFractionDigits: 1,
+    maximumFractionDigits: 1,
+  })} km`;
+}
+
+function formatHours(seconds: number): string {
+  const h = Math.floor(seconds / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  return `${h}h ${m.toString().padStart(2, "0")}`;
+}
+
 export default function Dashboard() {
   const [load, setLoad] = useState<LoadResponse | null>(null);
   const [ot, setOt] = useState<OvertrainingResponse | null>(null);
   const [activities, setActivities] = useState<ActivitiesList | null>(null);
+  const [volume, setVolume] = useState<RideVolumeResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState<string | null>(null);
   const { push } = useToast();
@@ -36,14 +51,16 @@ export default function Dashboard() {
   async function refresh() {
     setLoading(true);
     try {
-      const [l, o, acts] = await Promise.all([
+      const [l, o, acts, vol] = await Promise.all([
         api.metrics.load(90),
         api.metrics.overtraining(),
         api.activities.list(1, 50, 28),
+        api.metrics.rideVolume(),
       ]);
       setLoad(l);
       setOt(o);
       setActivities(acts);
+      setVolume(vol);
     } catch (err) {
       const msg = err instanceof ApiError ? err.message : String(err);
       push(`Erreur de chargement : ${msg}`, "error");
@@ -126,6 +143,21 @@ export default function Dashboard() {
           }
         />
       </div>
+
+      {volume && (
+        <div className="grid grid-cols-2 gap-3">
+          <MetricCard
+            label="Km vélo (année)"
+            value={formatKm(volume.year.distance_km)}
+            hint={formatHours(volume.year.duration_sec)}
+          />
+          <MetricCard
+            label="Km vélo (semaine)"
+            value={formatKm(volume.week.distance_km)}
+            hint={formatHours(volume.week.duration_sec)}
+          />
+        </div>
+      )}
 
       <LoadChart data={load?.history || []} />
 

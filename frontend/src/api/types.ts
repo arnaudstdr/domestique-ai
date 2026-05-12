@@ -40,6 +40,16 @@ export interface OvertrainingResponse {
   indicators: OvertrainingIndicators;
 }
 
+export interface VolumePeriod {
+  distance_km: number;
+  duration_sec: number;
+}
+
+export interface RideVolumeResponse {
+  year: VolumePeriod;
+  week: VolumePeriod;
+}
+
 export interface ActivitySummary {
   strava_id: number;
   name: string | null;

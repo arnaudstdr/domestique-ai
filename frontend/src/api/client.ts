@@ -10,6 +10,7 @@ import type {
   MorningResponse,
   Objective,
   OvertrainingResponse,
+  RideVolumeResponse,
   SyncResult,
   SyncStatus,
 } from "./types";
@@ -52,6 +53,7 @@ export const api = {
     load: (days = 90) =>
       http<LoadResponse>(`/api/metrics/load?days=${days}`),
     overtraining: () => http<OvertrainingResponse>(`/api/metrics/overtraining`),
+    rideVolume: () => http<RideVolumeResponse>(`/api/metrics/ride-volume`),
   },
   activities: {
     list: (page = 1, page_size = 20, days?: number) => {

@@ -13,6 +13,8 @@ from domestique_ai.api.schemas import (
     LoadResponse,
     OvertrainingIndicators,
     OvertrainingResponse,
+    RideVolumeResponse,
+    VolumePeriod,
 )
 from domestique_ai.processing.analyzer import (
     calculate_ctl_atl_tsb,
@@ -115,3 +117,56 @@ def get_overtraining() -> OvertrainingResponse:
         weekly_jump_pct=weekly.get("delta_pct") if weekly.get("available") else None,
     )
     return OvertrainingResponse(alerts=alerts, indicators=indicators)
+
+
+def _is_ride(sport_type: str | None) -> bool:
+    """Filtre vélo — même règle que le dashboard Streamlit (sport_type contient 'Ride')."""
+    return bool(sport_type) and "Ride" in sport_type
+
+
+@router.get("/ride-volume", response_model=RideVolumeResponse)
+def get_ride_volume() -> RideVolumeResponse:
+    """Volume cyclisme (distance + temps) sur l'année civile + la semaine ISO en cours.
+
+    N'inclut que les activités dont `sport_type` contient "Ride" (Ride,
+    VirtualRide, MountainBikeRide, GravelRide, EBikeRide…), comme le faisait
+    le dashboard Streamlit.
+    """
+    today = dt.date.today()
+    year_start = dt.date(today.year, 1, 1)
+    week_start = today - dt.timedelta(days=today.weekday())
+
+    year = {"distance_m": 0.0, "duration_sec": 0}
+    week = {"distance_m": 0.0, "duration_sec": 0}
+
+    for act in fetch_activities_from_db():
+        if not _is_ride(act.get("sport_type")):
+            continue
+        date_str = act.get("date")
+        if not date_str:
+            continue
+        try:
+            act_date = dt.datetime.fromisoformat(
+                date_str.replace("Z", "+00:00")
+            ).date()
+        except ValueError:
+            continue
+        distance = float(act.get("distance") or 0)
+        duration = int(act.get("duration") or 0)
+        if act_date >= year_start:
+            year["distance_m"] += distance
+            year["duration_sec"] += duration
+        if act_date >= week_start:
+            week["distance_m"] += distance
+            week["duration_sec"] += duration
+
+    return RideVolumeResponse(
+        year=VolumePeriod(
+            distance_km=round(year["distance_m"] / 1000, 1),
+            duration_sec=int(year["duration_sec"]),
+        ),
+        week=VolumePeriod(
+            distance_km=round(week["distance_m"] / 1000, 1),
+            duration_sec=int(week["duration_sec"]),
+        ),
+    )
