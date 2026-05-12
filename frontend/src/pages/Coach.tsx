@@ -150,6 +150,17 @@ export default function Coach() {
     setPending(EMPTY_PENDING);
   }
 
+  async function deleteCurrentSession() {
+    if (!sessionId) return;
+    try {
+      await api.coach.deleteSession(sessionId);
+      startNew();
+      api.coach.sessions().then(setSessions).catch(() => undefined);
+    } catch {
+      push("Impossible de supprimer la session.", "error");
+    }
+  }
+
   return (
     <div className="space-y-3">
       <div className="card">
@@ -167,8 +178,16 @@ export default function Coach() {
               </option>
             ))}
           </select>
-          <button onClick={startNew} className="btn-ghost">
+          <button onClick={startNew} className="btn-ghost" title="Nouvelle session">
             🆕
+          </button>
+          <button
+            onClick={deleteCurrentSession}
+            disabled={!sessionId || streaming}
+            className="btn-ghost disabled:opacity-40"
+            title="Supprimer cette session"
+          >
+            🗑️
           </button>
         </div>
       </div>
