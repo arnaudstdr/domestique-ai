@@ -137,7 +137,9 @@ async function consumeSseStream(
   while (true) {
     const { value, done } = await reader.read();
     if (done) break;
-    buffer += decoder.decode(value, { stream: true });
+    // sse-starlette utilise des fins de ligne CRLF par défaut. On normalise
+    // pour que les délimiteurs marchent peu importe la convention serveur.
+    buffer += decoder.decode(value, { stream: true }).replace(/\r\n/g, "\n");
     let idx;
     while ((idx = buffer.indexOf("\n\n")) !== -1) {
       const chunk = buffer.slice(0, idx);
