@@ -1,17 +1,15 @@
 import { useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import StreamingPhaseBar, { type StreamPhases } from "./StreamingPhaseBar";
 
 interface Props {
   role: "user" | "assistant";
   content: string;
   thinking?: string | null;
   toolCalls?: { name: string; arguments: unknown; result: unknown }[] | null;
-  streamingPhases?: StreamPhases | null;
 }
 
-export default function ChatBubble({ role, content, thinking, toolCalls, streamingPhases }: Props) {
+export default function ChatBubble({ role, content, thinking, toolCalls }: Props) {
   const [openThinking, setOpenThinking] = useState(false);
   const [openTools, setOpenTools] = useState(false);
   const isUser = role === "user";
@@ -25,14 +23,13 @@ export default function ChatBubble({ role, content, thinking, toolCalls, streami
             : "bg-card border border-white/5 text-gray-100"
         }`}
       >
-        {!isUser && streamingPhases && <StreamingPhaseBar {...streamingPhases} />}
         {isUser ? (
           content || <span className="italic text-muted">…</span>
         ) : content ? (
           <MarkdownBody content={content} />
-        ) : !streamingPhases ? (
+        ) : (
           <span className="italic text-muted">…</span>
-        ) : null}
+        )}
         {!isUser && thinking && (
           <details
             open={openThinking}

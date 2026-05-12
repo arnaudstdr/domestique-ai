@@ -3,7 +3,6 @@ import { useSearchParams } from "react-router-dom";
 import { api, ApiError, streamCoachChat } from "../api/client";
 import type { CoachMessage, CoachSession } from "../api/types";
 import ChatBubble from "../components/ChatBubble";
-import type { StreamPhases } from "../components/StreamingPhaseBar";
 import { useToast } from "../hooks/useToast";
 
 interface PendingAssistant {
@@ -18,6 +17,22 @@ const EMPTY_PENDING: PendingAssistant = {
   toolCalls: [],
 };
 
+function TypingDots() {
+  return (
+    <div className="flex justify-start">
+      <div className="bg-card border border-white/5 rounded-2xl px-4 py-3 flex items-center gap-1.5">
+        {[0, 150, 300].map((delay) => (
+          <span
+            key={delay}
+            className="w-2 h-2 rounded-full bg-gray-500 animate-bounce"
+            style={{ animationDelay: `${delay}ms` }}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export default function Coach() {
   const [searchParams, setSearchParams] = useSearchParams();
   const [sessions, setSessions] = useState<CoachSession[]>([]);
@@ -26,7 +41,6 @@ export default function Coach() {
   const [draft, setDraft] = useState("");
   const [streaming, setStreaming] = useState(false);
   const [pending, setPending] = useState<PendingAssistant>(EMPTY_PENDING);
-  const [streamPhases, setStreamPhases] = useState<StreamPhases | null>(null);
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
   const pendingRef = useRef<PendingAssistant>(EMPTY_PENDING);
   // Flag levé quand on vient de recevoir un session_id du serveur (premier tour
@@ -82,15 +96,12 @@ export default function Coach() {
     if (!message || streaming) return;
     setDraft("");
     setStreaming(true);
-    setStreamPhases({ thinking: "active", tools: "idle", generating: "idle" });
     pendingRef.current = EMPTY_PENDING;
     setPending(EMPTY_PENDING);
     setMessages((prev) => [
       ...prev,
       { role: "user", content: message, thinking: null, tool_calls: null },
     ]);
-
-    let firstToken = true;
 
     try {
       await streamCoachChat({ session_id: sessionId, message }, (event) => {
@@ -102,12 +113,9 @@ export default function Coach() {
           setSessionId(event.value);
         } else if (event.type === "thinking") {
           updatePending((p) => ({ ...p, thinking: event.value }));
+        } else if (event.type === "token") {
+          updatePending((p) => ({ ...p, content: p.content + event.value }));
         } else if (event.type === "tool_call") {
-          setStreamPhases((p) =>
-            p
-              ? { thinking: p.thinking !== "idle" ? "done" : "idle", tools: "active", generating: "idle" }
-              : p,
-          );
           updatePending((p) => ({
             ...p,
             toolCalls: [
@@ -124,20 +132,6 @@ export default function Coach() {
                 : tc,
             ),
           }));
-        } else if (event.type === "token") {
-          if (firstToken) {
-            firstToken = false;
-            setStreamPhases((p) =>
-              p
-                ? {
-                    thinking: p.thinking !== "idle" ? "done" : "idle",
-                    tools: p.tools !== "idle" ? "done" : "idle",
-                    generating: "active",
-                  }
-                : p,
-            );
-          }
-          updatePending((p) => ({ ...p, content: p.content + event.value }));
         } else if (event.type === "error") {
           push(event.value, "error");
         }
@@ -158,7 +152,6 @@ export default function Coach() {
       ]);
       pendingRef.current = EMPTY_PENDING;
       setPending(EMPTY_PENDING);
-      setStreamPhases(null);
       setStreaming(false);
       api.coach.sessions().then(setSessions).catch(() => undefined);
     }
@@ -225,13 +218,13 @@ export default function Coach() {
             toolCalls={m.tool_calls}
           />
         ))}
-        {(streaming || pending.content || pending.thinking) && (
+        {streaming && !pending.content && <TypingDots />}
+        {(streaming && pending.content) && (
           <ChatBubble
             role="assistant"
-            content={pending.content || ""}
+            content={pending.content}
             thinking={pending.thinking}
             toolCalls={pending.toolCalls}
-            streamingPhases={streaming ? streamPhases : null}
           />
         )}
         <div ref={messagesEndRef} />
