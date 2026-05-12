@@ -1,4 +1,6 @@
 import { useState } from "react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 
 interface Props {
   role: "user" | "assistant";
@@ -15,11 +17,17 @@ export default function ChatBubble({ role, content, thinking, toolCalls }: Props
   return (
     <div className={`flex ${isUser ? "justify-end" : "justify-start"}`}>
       <div
-        className={`max-w-[85%] rounded-2xl px-4 py-3 text-sm whitespace-pre-wrap leading-relaxed ${
-          isUser ? "bg-accent text-white" : "bg-card border border-white/5 text-gray-100"
+        className={`max-w-[85%] rounded-2xl px-4 py-3 text-sm leading-relaxed ${
+          isUser
+            ? "bg-accent text-white whitespace-pre-wrap"
+            : "bg-card border border-white/5 text-gray-100"
         }`}
       >
-        {content || (
+        {isUser ? (
+          content || <span className="italic text-muted">…</span>
+        ) : content ? (
+          <MarkdownBody content={content} />
+        ) : (
           <span className="italic text-muted">…</span>
         )}
         {!isUser && thinking && (
@@ -58,6 +66,24 @@ export default function ChatBubble({ role, content, thinking, toolCalls }: Props
           </details>
         )}
       </div>
+    </div>
+  );
+}
+
+function MarkdownBody({ content }: { content: string }) {
+  return (
+    <div
+      className="prose prose-invert prose-sm max-w-none
+                 prose-p:my-2 prose-p:leading-relaxed
+                 prose-ul:my-2 prose-ol:my-2 prose-li:my-0.5
+                 prose-headings:my-2 prose-headings:text-gray-100
+                 prose-strong:text-gray-50
+                 prose-code:bg-black/30 prose-code:px-1 prose-code:py-0.5
+                 prose-code:rounded prose-code:text-accent prose-code:before:content-none
+                 prose-code:after:content-none
+                 prose-a:text-accent prose-a:no-underline hover:prose-a:underline"
+    >
+      <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
     </div>
   );
 }

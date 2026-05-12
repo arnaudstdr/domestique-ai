@@ -26,7 +26,12 @@ export default function Coach() {
   const [streaming, setStreaming] = useState(false);
   const [pending, setPending] = useState<PendingAssistant>(EMPTY_PENDING);
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
-  const { push } = useToast();
+  const pendingRef = useRef<PendingAssistant>(EMPTY_PENDING);
+  // Flag levé quand on vient de recevoir un session_id du serveur (premier tour
+  // d'une nouvelle session) : on doit alors ignorer le prochain fetch déclenché
+  // par le changement de sessionId, sinon il écrase l'état local en cours de
+  // streaming ou juste après.
+  const skipNextFetchRef = useRef(false);
 
   useEffect(() => {
     api.coach.sessions().then(setSessions).catch(() => undefined);
@@ -37,10 +42,20 @@ export default function Coach() {
       setMessages([]);
       return;
     }
+    if (skipNextFetchRef.current) {
+      skipNextFetchRef.current = false;
+      return;
+    }
+    let aborted = false;
     api.coach
       .messages(sessionId)
-      .then(setMessages)
+      .then((m) => {
+        if (!aborted) setMessages(m);
+      })
       .catch(() => undefined);
+    return () => {
+      aborted = true;
+    };
   }, [sessionId]);
 
   useEffect(() => {
@@ -55,76 +70,83 @@ export default function Coach() {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, pending]);
 
+  function updatePending(patch: (p: PendingAssistant) => PendingAssistant) {
+    pendingRef.current = patch(pendingRef.current);
+    setPending(pendingRef.current);
+  }
+
   async function send() {
     const message = draft.trim();
     if (!message || streaming) return;
     setDraft("");
     setStreaming(true);
+    pendingRef.current = EMPTY_PENDING;
     setPending(EMPTY_PENDING);
     setMessages((prev) => [
       ...prev,
       { role: "user", content: message, thinking: null, tool_calls: null },
     ]);
 
-    let localSessionId = sessionId;
     try {
-      await streamCoachChat(
-        { session_id: sessionId, message },
-        (event) => {
-          if (event.type === "session_id") {
-            localSessionId = event.value;
-            setSessionId(event.value);
-          } else if (event.type === "thinking") {
-            setPending((p) => ({ ...p, thinking: event.value }));
-          } else if (event.type === "token") {
-            setPending((p) => ({ ...p, content: p.content + event.value }));
-          } else if (event.type === "tool_call") {
-            setPending((p) => ({
-              ...p,
-              toolCalls: [
-                ...p.toolCalls,
-                { name: event.name, arguments: event.args, result: null },
-              ],
-            }));
-          } else if (event.type === "tool_result") {
-            setPending((p) => ({
-              ...p,
-              toolCalls: p.toolCalls.map((tc) =>
-                tc.name === event.name && tc.result === null
-                  ? { ...tc, result: event.result }
-                  : tc,
-              ),
-            }));
-          } else if (event.type === "error") {
-            push(event.value, "error");
-          }
-        },
-      );
+      await streamCoachChat({ session_id: sessionId, message }, (event) => {
+        if (event.type === "session_id") {
+          // Nouvelle session côté serveur : on évite que l'effect du
+          // changement de sessionId déclenche un fetch qui écraserait le
+          // streaming en cours.
+          skipNextFetchRef.current = true;
+          setSessionId(event.value);
+        } else if (event.type === "thinking") {
+          updatePending((p) => ({ ...p, thinking: event.value }));
+        } else if (event.type === "token") {
+          updatePending((p) => ({ ...p, content: p.content + event.value }));
+        } else if (event.type === "tool_call") {
+          updatePending((p) => ({
+            ...p,
+            toolCalls: [
+              ...p.toolCalls,
+              { name: event.name, arguments: event.args, result: null },
+            ],
+          }));
+        } else if (event.type === "tool_result") {
+          updatePending((p) => ({
+            ...p,
+            toolCalls: p.toolCalls.map((tc) =>
+              tc.name === event.name && tc.result === null
+                ? { ...tc, result: event.result }
+                : tc,
+            ),
+          }));
+        } else if (event.type === "error") {
+          push(event.value, "error");
+        }
+      });
     } catch (err) {
       const msg = err instanceof ApiError ? err.message : String(err);
       push(`Coach : ${msg}`, "error");
     } finally {
+      const final = pendingRef.current;
+      setMessages((prev) => [
+        ...prev,
+        {
+          role: "assistant",
+          content: final.content,
+          thinking: final.thinking,
+          tool_calls: final.toolCalls,
+        },
+      ]);
+      pendingRef.current = EMPTY_PENDING;
+      setPending(EMPTY_PENDING);
       setStreaming(false);
-      setPending((finalP) => {
-        setMessages((prev) => [
-          ...prev,
-          {
-            role: "assistant",
-            content: finalP.content,
-            thinking: finalP.thinking,
-            tool_calls: finalP.toolCalls,
-          },
-        ]);
-        return EMPTY_PENDING;
-      });
       api.coach.sessions().then(setSessions).catch(() => undefined);
-      if (localSessionId) setSessionId(localSessionId);
     }
   }
+
+  const { push } = useToast();
 
   function startNew() {
     setSessionId(null);
     setMessages([]);
+    pendingRef.current = EMPTY_PENDING;
     setPending(EMPTY_PENDING);
   }
 
