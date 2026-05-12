@@ -114,12 +114,13 @@ export type CoachEvent =
   | { type: "error"; value: string }
   | { type: "done" };
 
-export async function streamCoachChat(
-  body: { session_id: string | null; message: string },
+async function consumeSseStream(
+  path: string,
+  body: unknown,
   onEvent: (event: CoachEvent) => void,
   signal?: AbortSignal,
 ): Promise<void> {
-  const response = await fetch(`/api/coach/chat`, {
+  const response = await fetch(path, {
     method: "POST",
     headers: { "Content-Type": "application/json", Accept: "text/event-stream" },
     body: JSON.stringify(body),
@@ -155,4 +156,20 @@ export async function streamCoachChat(
       }
     }
   }
+}
+
+export function streamCoachChat(
+  body: { session_id: string | null; message: string },
+  onEvent: (event: CoachEvent) => void,
+  signal?: AbortSignal,
+): Promise<void> {
+  return consumeSseStream("/api/coach/chat", body, onEvent, signal);
+}
+
+export function streamCoachAnalyze(
+  prompt: string,
+  onEvent: (event: CoachEvent) => void,
+  signal?: AbortSignal,
+): Promise<void> {
+  return consumeSseStream("/api/coach/analyze", { prompt }, onEvent, signal);
 }

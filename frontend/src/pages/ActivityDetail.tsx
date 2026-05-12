@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import {
   Area,
@@ -9,12 +9,33 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
-import { api, ApiError } from "../api/client";
+import { api, ApiError, streamCoachAnalyze } from "../api/client";
 import type { ActivityDetail as ActivityDetailType } from "../api/types";
 import ActivityMap from "../components/ActivityMap";
+import ChatBubble from "../components/ChatBubble";
 import MetricCard from "../components/MetricCard";
 import ZoneBar from "../components/ZoneBar";
 import { useToast } from "../hooks/useToast";
+
+const ANALYSIS_PROMPT = (sid: number) =>
+  `Analyse l'activité Strava avec strava_id=${sid}. ` +
+  `Étape 1 : appelle \`get_activity_details(strava_id=${sid})\` pour récupérer ` +
+  `les chiffres (durée, distance, FC, charge, zones HR) ainsi que la date. ` +
+  `Étape 2 : appelle \`get_training_load_state\` (CTL/ATL/TSB du jour) et ` +
+  `\`get_objective\` pour le contexte. ` +
+  `Étape 2 bis : appelle \`get_planned_workout(date=<date ISO de l'activité>)\` ` +
+  `pour récupérer la séance qui était prévue ce jour-là dans le plan en cours. ` +
+  `Compare le réalisé au prévu (kind, target_zone, durée, charge estimée) — ` +
+  `ou note explicitement que la sortie était hors plan si aucun plan ne couvre ` +
+  `cette date. ` +
+  `Étape 3 : conclus en 4-6 lignes en répondant explicitement à : ` +
+  `(1) ce que cette sortie a apporté physiologiquement (filière dominante, ` +
+  `stimulus principal) ; ` +
+  `(2) si elle a été *productive* ou *contre-productive* vu le TSB courant, ` +
+  `l'objectif et la séance prévue (conforme au plan ? écart en intensité ou ` +
+  `volume ? si écart, avec quel impact ?) ; ` +
+  `(3) la séance ou la récup à privilégier ensuite. ` +
+  `Sois concis, factuel, en français.`;
 
 function formatHms(seconds: number): string {
   const h = Math.floor(seconds / 3600);
@@ -36,12 +57,80 @@ function buildSeries(
   return out;
 }
 
+interface AnalysisState {
+  content: string;
+  thinking: string | null;
+  toolCalls: { name: string; arguments: unknown; result: unknown }[];
+}
+
+const EMPTY_ANALYSIS: AnalysisState = {
+  content: "",
+  thinking: null,
+  toolCalls: [],
+};
+
 export default function ActivityDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
   const [detail, setDetail] = useState<ActivityDetailType | null>(null);
   const [loading, setLoading] = useState(true);
+  const [analyzing, setAnalyzing] = useState(false);
+  const [analysis, setAnalysis] = useState<AnalysisState | null>(null);
+  const analysisRef = useRef<AnalysisState>(EMPTY_ANALYSIS);
   const { push } = useToast();
+
+  async function runAnalysis() {
+    if (analyzing || !detail) return;
+    setAnalyzing(true);
+    analysisRef.current = EMPTY_ANALYSIS;
+    setAnalysis(EMPTY_ANALYSIS);
+    try {
+      await streamCoachAnalyze(
+        ANALYSIS_PROMPT(detail.activity.strava_id),
+        (event) => {
+          if (event.type === "thinking") {
+            analysisRef.current = {
+              ...analysisRef.current,
+              thinking: event.value,
+            };
+            setAnalysis({ ...analysisRef.current });
+          } else if (event.type === "token") {
+            analysisRef.current = {
+              ...analysisRef.current,
+              content: analysisRef.current.content + event.value,
+            };
+            setAnalysis({ ...analysisRef.current });
+          } else if (event.type === "tool_call") {
+            analysisRef.current = {
+              ...analysisRef.current,
+              toolCalls: [
+                ...analysisRef.current.toolCalls,
+                { name: event.name, arguments: event.args, result: null },
+              ],
+            };
+            setAnalysis({ ...analysisRef.current });
+          } else if (event.type === "tool_result") {
+            analysisRef.current = {
+              ...analysisRef.current,
+              toolCalls: analysisRef.current.toolCalls.map((tc) =>
+                tc.name === event.name && tc.result === null
+                  ? { ...tc, result: event.result }
+                  : tc,
+              ),
+            };
+            setAnalysis({ ...analysisRef.current });
+          } else if (event.type === "error") {
+            push(event.value, "error");
+          }
+        },
+      );
+    } catch (err) {
+      const msg = err instanceof ApiError ? err.message : String(err);
+      push(`Analyse : ${msg}`, "error");
+    } finally {
+      setAnalyzing(false);
+    }
+  }
 
   useEffect(() => {
     let aborted = false;
@@ -140,14 +229,33 @@ export default function ActivityDetail() {
         <ZoneBar zones={detail.hr_zones as Record<string, number>} />
       )}
 
-      <Link
-        to={`/coach?prompt=${encodeURIComponent(
-          `Analyse l'activité Strava avec strava_id=${a.strava_id}.`,
-        )}`}
+      <button
+        onClick={runAnalysis}
+        disabled={analyzing}
         className="btn-primary w-full"
       >
-        🤖 Analyser avec le coach
-      </Link>
+        {analyzing && !analysis?.content
+          ? "Le coach analyse cette sortie…"
+          : analyzing
+            ? "Réception de la réponse…"
+            : analysis
+              ? "🤖 Relancer l'analyse"
+              : "🤖 Analyser cette sortie"}
+      </button>
+
+      {analysis && (analyzing || analysis.content || analysis.thinking) && (
+        <div className="space-y-2">
+          <h3 className="text-sm font-medium text-gray-200">
+            🤖 Analyse du coach
+          </h3>
+          <ChatBubble
+            role="assistant"
+            content={analysis.content || (analyzing ? "…" : "")}
+            thinking={analysis.thinking}
+            toolCalls={analysis.toolCalls}
+          />
+        </div>
+      )}
     </div>
   );
 }

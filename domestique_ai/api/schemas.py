@@ -206,3 +206,7 @@ class CoachMessage(BaseModel):
 class CoachChatRequest(BaseModel):
     session_id: str | None = None
     message: str
+
+
+class CoachAnalyzeRequest(BaseModel):
+    prompt: str

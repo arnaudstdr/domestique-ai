@@ -10,7 +10,12 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, status
 from sse_starlette.sse import EventSourceResponse
 
-from domestique_ai.api.schemas import CoachChatRequest, CoachMessage, CoachSession
+from domestique_ai.api.schemas import (
+    CoachAnalyzeRequest,
+    CoachChatRequest,
+    CoachMessage,
+    CoachSession,
+)
 from domestique_ai.llm.coach import run_turn
 from domestique_ai.llm.conversations import (
     append_message,
@@ -183,6 +188,69 @@ async def post_chat(payload: CoachChatRequest) -> EventSourceResponse:
                 "tool_calls": tool_trace_payload,
             },
         )
+
+        yield _sse_event("done", {"type": "done"})
+
+    return EventSourceResponse(event_stream())
+
+
+@router.post("/analyze")
+async def post_analyze(payload: CoachAnalyzeRequest) -> EventSourceResponse:
+    """Analyse one-shot (sans persistance de session) — typiquement appelée
+    depuis la page détail d'une activité.
+
+    Émet les mêmes événements SSE que /chat sauf `session_id` : aucune
+    conversation n'est créée en base, l'analyse reste éphémère côté serveur.
+    """
+    if not (payload.prompt and payload.prompt.strip()):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="prompt vide.",
+        )
+
+    prompt = payload.prompt
+
+    async def event_stream() -> AsyncGenerator[dict[str, str], None]:
+        try:
+            reply = await asyncio.to_thread(run_turn, prompt)
+        except OllamaError as exc:
+            yield _sse_event(
+                "error",
+                {"type": "error", "value": f"Ollama indisponible: {exc}"},
+            )
+            yield _sse_event("done", {"type": "done"})
+            return
+
+        if reply.thinking:
+            yield _sse_event(
+                "thinking",
+                {"type": "thinking", "value": reply.thinking},
+            )
+
+        for trace in reply.tool_trace:
+            yield _sse_event(
+                "tool_call",
+                {
+                    "type": "tool_call",
+                    "name": trace.name,
+                    "args": trace.arguments,
+                },
+            )
+            yield _sse_event(
+                "tool_result",
+                {
+                    "type": "tool_result",
+                    "name": trace.name,
+                    "result": trace.result,
+                },
+            )
+
+        for token in _tokenize(reply.content):
+            yield _sse_event(
+                "token",
+                {"type": "token", "value": token},
+            )
+            await asyncio.sleep(_TOKEN_STREAM_DELAY_SEC)
 
         yield _sse_event("done", {"type": "done"})
 
