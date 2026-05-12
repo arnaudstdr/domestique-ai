@@ -30,6 +30,10 @@ tmp
 *.csv
 icon.png
 
+# Frontend build artifacts (le stage Docker reconstruit le bundle)
+frontend/node_modules
+frontend/dist
+
 # Docker
 Dockerfile
 docker-compose.yml

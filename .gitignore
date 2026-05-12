@@ -32,3 +32,13 @@ __pycache__/
 
 # Notes locales
 tmp/
+
+# Frontend (build & deps reconstruits par CI/Docker)
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+frontend/*.tsbuildinfo
+frontend/vite.config.js
+frontend/vite.config.d.ts
+node_modules/
+dist/

@@ -21,9 +21,36 @@ pytest tests/test_strava.py -x   # stoppe au premier échec
 # Flow OAuth Strava (interactif, à exécuter une fois pour générer data/.strava_tokens.json)
 python -m domestique_ai.ingestion.strava_oauth_flow
 
-# Dashboard
+# Backend API FastAPI (production / runtime principal)
+uvicorn domestique_ai.api.main:app --reload --port 8501
+
+# Frontend React PWA (dev — dans un autre terminal)
+cd frontend && npm install && npm run dev   # → http://localhost:5173
+
+# Build complet (FastAPI sert ensuite le bundle React via StaticFiles)
+cd frontend && npm run build
+uvicorn domestique_ai.api.main:app --port 8501   # → http://localhost:8501
+
+# Dashboard Streamlit legacy (conservé mais plus le runtime par défaut)
 streamlit run domestique_ai/app/dashboard.py
 ```
+
+## Stack web (post-migration)
+
+L'UI Streamlit a été remplacée par **FastAPI + React PWA** :
+
+- `domestique_ai/api/` : FastAPI, un routeur par domaine (metrics, activities,
+  morning, objective, strava, coach). Pydantic v2 pour la sérialisation.
+- `frontend/` : React 18 + Vite + TypeScript + Tailwind + recharts + react-leaflet.
+  Service worker manuel dans `public/sw.js` (NetworkFirst sur `/api/`).
+- Le port runtime est **8501** (conservé depuis l'ancien Streamlit). En dev,
+  Vite écoute sur 5173 et proxy `/api` vers `http://localhost:8501`.
+- Le coach LLM streame via **SSE** (`/api/coach/chat`). `run_turn` est appelé
+  via `asyncio.to_thread`, puis les `thinking` / `tool_call` / `token` / `done`
+  sont émis dans l'ordre. À terme, basculer sur un vrai streaming Ollama.
+- `domestique_ai/app/dashboard.py` reste en place comme legacy — ne pas le
+  supprimer tant que la PWA n'a pas atteint la parité fonctionnelle complète
+  (notamment l'onglet Plan et le push Garmin Connect, encore Streamlit-only).
 
 ## Architecture
 
