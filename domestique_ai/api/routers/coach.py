@@ -4,19 +4,21 @@ from __future__ import annotations
 
 import asyncio
 import json
+import time
 from collections.abc import AsyncGenerator
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, status
 from sse_starlette.sse import EventSourceResponse
 
+from domestique_ai.api.logging import get_logger
 from domestique_ai.api.schemas import (
     CoachAnalyzeRequest,
     CoachChatRequest,
     CoachMessage,
     CoachSession,
 )
-from domestique_ai.llm.coach import run_turn
+from domestique_ai.llm.coach import CoachReply, run_turn
 from domestique_ai.llm.conversations import (
     append_message,
     delete_session,
@@ -27,6 +29,7 @@ from domestique_ai.llm.conversations import (
 from domestique_ai.llm.ollama_client import OllamaError
 
 router = APIRouter(prefix="/api/coach", tags=["coach"])
+log = get_logger("coach")
 
 # Cadence d'émission des tokens (synchrone côté run_turn — on simule).
 _TOKEN_STREAM_DELAY_SEC = 0.02
@@ -79,6 +82,7 @@ def get_session_messages(session_id: str) -> list[CoachMessage]:
 @router.delete("/sessions/{session_id}", status_code=status.HTTP_204_NO_CONTENT)
 def remove_session(session_id: str) -> None:
     """Supprime une session et tous ses messages."""
+    log.info("Suppression session %s", session_id[:8])
     delete_session(session_id)
 
 
@@ -96,6 +100,45 @@ def _tokenize(text: str) -> list[str]:
     if buf:
         tokens.append(buf)
     return tokens
+
+
+async def _run_coach_turn(
+    label: str,
+    user_message: str,
+    history: list[dict[str, Any]] | None = None,
+) -> CoachReply:
+    """Wrapper autour de `run_turn` avec logging détaillé.
+
+    Émet trois traces : début, fin (avec stats), erreur (avec traceback). Le
+    label permet de distinguer chat / analyze dans les logs.
+    """
+    start = time.perf_counter()
+    log.info(
+        "%s start | prompt_len=%d history=%d msgs",
+        label,
+        len(user_message),
+        len(history or []),
+    )
+    try:
+        reply = await asyncio.to_thread(run_turn, user_message, history)
+    except OllamaError as exc:
+        log.error("%s | Ollama error: %s", label, exc)
+        raise
+    except Exception:
+        log.exception("%s | run_turn unhandled exception", label)
+        raise
+
+    duration = time.perf_counter() - start
+    tool_names = [t.name for t in reply.tool_trace]
+    log.info(
+        "%s done | duration=%.1fs content=%d chars tools=%s thinking=%s",
+        label,
+        duration,
+        len(reply.content or ""),
+        tool_names or "[]",
+        "yes" if reply.thinking else "no",
+    )
+    return reply
 
 
 @router.post("/chat")
@@ -116,6 +159,7 @@ async def post_chat(payload: CoachChatRequest) -> EventSourceResponse:
         )
 
     session_id = payload.session_id or new_session_id()
+    is_new_session = payload.session_id is None
     user_message = payload.message
     history = [
         m
@@ -123,6 +167,7 @@ async def post_chat(payload: CoachChatRequest) -> EventSourceResponse:
         if m.get("role") in ("user", "assistant") and (m.get("content") or "").strip()
     ]
     append_message(session_id, "user", {"role": "user", "content": user_message})
+    label = f"chat[{session_id[:8]}{' new' if is_new_session else ''}]"
 
     async def event_stream() -> AsyncGenerator[dict[str, str], None]:
         yield _sse_event(
@@ -130,11 +175,18 @@ async def post_chat(payload: CoachChatRequest) -> EventSourceResponse:
         )
 
         try:
-            reply = await asyncio.to_thread(run_turn, user_message, history)
+            reply = await _run_coach_turn(label, user_message, history)
         except OllamaError as exc:
             yield _sse_event(
                 "error",
                 {"type": "error", "value": f"Ollama indisponible: {exc}"},
+            )
+            yield _sse_event("done", {"type": "done"})
+            return
+        except Exception as exc:  # noqa: BLE001 — on remonte tout au front
+            yield _sse_event(
+                "error",
+                {"type": "error", "value": f"Coach erreur: {exc}"},
             )
             yield _sse_event("done", {"type": "done"})
             return
@@ -209,14 +261,22 @@ async def post_analyze(payload: CoachAnalyzeRequest) -> EventSourceResponse:
         )
 
     prompt = payload.prompt
+    label = "analyze"
 
     async def event_stream() -> AsyncGenerator[dict[str, str], None]:
         try:
-            reply = await asyncio.to_thread(run_turn, prompt)
+            reply = await _run_coach_turn(label, prompt)
         except OllamaError as exc:
             yield _sse_event(
                 "error",
                 {"type": "error", "value": f"Ollama indisponible: {exc}"},
+            )
+            yield _sse_event("done", {"type": "done"})
+            return
+        except Exception as exc:  # noqa: BLE001 — on remonte tout au front
+            yield _sse_event(
+                "error",
+                {"type": "error", "value": f"Coach erreur: {exc}"},
             )
             yield _sse_event("done", {"type": "done"})
             return

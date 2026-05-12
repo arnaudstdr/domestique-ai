@@ -9,6 +9,7 @@ from threading import Lock
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from domestique_ai.api.deps import get_strava_client
+from domestique_ai.api.logging import get_logger
 from domestique_ai.api.schemas import (
     ActivitiesList,
     ActivityDetail,
@@ -22,6 +23,7 @@ from domestique_ai.processing.analyzer import (
 )
 
 router = APIRouter(prefix="/api/activities", tags=["activities"])
+log = get_logger("activities")
 
 _DETAIL_STREAM_KEYS = [
     "time",
@@ -103,10 +105,12 @@ def get_activity(
         payload = cached[1] if cached and now - cached[0] < _DETAIL_TTL_SEC else None
 
     if payload is None:
+        log.info("Activité %d : cache miss, fetch Strava…", strava_id)
         try:
             streams = client.fetch_streams_full(strava_id, _DETAIL_STREAM_KEYS) or {}
             summary = client.fetch_activity_summary(strava_id) or {}
         except StravaAuthError as exc:
+            log.warning("Activité %d : auth Strava KO : %s", strava_id, exc)
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                 detail=str(exc),
@@ -114,6 +118,8 @@ def get_activity(
         payload = {"streams": streams, "summary": summary}
         with _cache_lock:
             _detail_cache[strava_id] = (now, payload)
+    else:
+        log.debug("Activité %d : cache hit", strava_id)
 
     summary = payload.get("summary") or {}
     streams = payload.get("streams") or {}

@@ -8,6 +8,7 @@ from threading import Lock
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 
 from domestique_ai.api.deps import get_strava_client
+from domestique_ai.api.logging import get_logger
 from domestique_ai.api.schemas import SyncResult, SyncStatus
 from domestique_ai.config import get_strava_credentials
 from domestique_ai.ingestion.strava import (
@@ -21,6 +22,7 @@ from domestique_ai.ingestion.strava import (
 from domestique_ai.processing.analyzer import recalculate_training_loads
 
 router = APIRouter(prefix="/api/strava", tags=["strava"])
+log = get_logger("strava")
 
 # État de la dernière synchro lancée en tâche de fond.
 _sync_state: dict[str, object] = {
@@ -35,8 +37,13 @@ _sync_lock = Lock()
 
 def _run_sync() -> None:
     """Exécution du sync en background. Capture les exceptions."""
+    import time as _t  # local — évite collision avec time.time global
+    start = _t.perf_counter()
+    log.info("Sync Strava : démarrage…")
+
     client_id, client_secret, _ = get_strava_credentials()
     if not (client_id and client_secret):
+        log.error("Sync Strava : credentials absents (STRAVA_CLIENT_ID/SECRET).")
         with _sync_lock:
             _sync_state.update(
                 status="error",
@@ -48,6 +55,7 @@ def _run_sync() -> None:
         client = StravaClient.from_tokens_file(client_id, client_secret)
         inserted = sync_activities(client)
     except StravaAuthError as exc:
+        log.error("Sync Strava : erreur d'authentification : %s", exc)
         with _sync_lock:
             _sync_state.update(
                 status="error",
@@ -56,6 +64,7 @@ def _run_sync() -> None:
             )
         return
     except Exception as exc:  # noqa: BLE001 — on remonte tout au front
+        log.exception("Sync Strava : exception non gérée")
         with _sync_lock:
             _sync_state.update(
                 status="error",
@@ -64,6 +73,9 @@ def _run_sync() -> None:
             )
         return
 
+    duration = _t.perf_counter() - start
+    log.info("Sync Strava : terminé en %.1fs — %d nouvelle(s) activité(s).",
+             duration, inserted)
     with _sync_lock:
         _sync_state.update(
             status="done",
@@ -101,13 +113,16 @@ def get_sync_status() -> SyncStatus:
 @router.post("/recalculate", response_model=SyncResult)
 def post_recalculate() -> SyncResult:
     """Recalcule la charge d'entraînement pour toute la base."""
+    log.info("Recalcul charge : démarrage…")
     try:
         updated = recalculate_training_loads()
     except Exception as exc:  # noqa: BLE001
+        log.exception("Recalcul charge : exception")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=str(exc),
         ) from exc
+    log.info("Recalcul charge : %d ligne(s) mises à jour.", updated)
     return SyncResult(status="done", updated=updated)
 
 
@@ -116,16 +131,20 @@ def post_backfill_hr_zones(
     client: StravaClient = Depends(get_strava_client),  # noqa: B008
 ) -> SyncResult:
     """Backfill des zones HR pour les activités déjà en base sans ventilation."""
+    log.info("Backfill zones HR : démarrage…")
     try:
         updated = _backfill_hr_zones(client)
     except RuntimeError as exc:
+        log.warning("Backfill zones HR : configuration invalide : %s", exc)
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(exc),
         ) from exc
     except StravaAuthError as exc:
+        log.warning("Backfill zones HR : auth Strava : %s", exc)
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail=str(exc),
         ) from exc
+    log.info("Backfill zones HR : %d activité(s) ventilée(s).", updated)
     return SyncResult(status="done", updated=updated)

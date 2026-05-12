@@ -4,8 +4,11 @@ from __future__ import annotations
 
 from fastapi import HTTPException, status
 
+from domestique_ai.api.logging import get_logger
 from domestique_ai.config import get_strava_credentials
 from domestique_ai.ingestion.strava import StravaAuthError, StravaClient
+
+log = get_logger("deps")
 
 
 def get_strava_client() -> StravaClient:
@@ -16,6 +19,7 @@ def get_strava_client() -> StravaClient:
     """
     client_id, client_secret, _ = get_strava_credentials()
     if not (client_id and client_secret):
+        log.warning("Strava client demandé mais credentials absents.")
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail=(
@@ -25,6 +29,7 @@ def get_strava_client() -> StravaClient:
     try:
         return StravaClient.from_tokens_file(client_id, client_secret)
     except StravaAuthError as exc:
+        log.warning("Strava client : auth/token KO : %s", exc)
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail=str(exc),
