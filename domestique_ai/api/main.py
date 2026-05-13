@@ -8,11 +8,10 @@ import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
-from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from domestique_ai.api.logging import get_logger, setup_logging
 from domestique_ai.api.routers import (
@@ -76,11 +75,16 @@ def _cors_origins() -> list[str]:
     ]
 
 
-class RequestLoggingMiddleware(BaseHTTPMiddleware):
+class RequestLoggingMiddleware:
     """Log structuré pour chaque requête : id + durée + status.
 
     Le `request_id` est aussi exposé en header `X-Request-ID` côté réponse,
     pour qu'on puisse corréler un appel front avec sa trace serveur.
+
+    Implémentation en pure ASGI (pas `BaseHTTPMiddleware`) parce que ce
+    dernier bufferise les réponses streamées via une `anyio.MemoryObjectStream`
+    de buffer 0 qui casse `EventSourceResponse` (le SSE du coach restait bloqué
+    sans jamais émettre vers le client).
     """
 
     _LOG = get_logger("request")
@@ -88,14 +92,31 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
     # tuiles de cartes statiques.
     _SKIP_PATHS = {"/api/strava/sync-status", "/api/health"}
 
-    async def dispatch(self, request: Request, call_next):
-        request_id = request.headers.get("x-request-id") or uuid.uuid4().hex[:8]
+    def __init__(self, app: ASGIApp) -> None:
+        self.app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        request_id = _extract_header(scope, b"x-request-id") or uuid.uuid4().hex[:8]
         start = time.perf_counter()
-        path = request.url.path
-        method = request.method
+        path = scope["path"]
+        method = scope["method"]
+        status_code = 500
+
+        async def send_with_logging(message: Message) -> None:
+            nonlocal status_code
+            if message["type"] == "http.response.start":
+                status_code = message["status"]
+                headers = list(message.get("headers") or [])
+                headers.append((b"x-request-id", request_id.encode("latin-1")))
+                message = {**message, "headers": headers}
+            await send(message)
 
         try:
-            response = await call_next(request)
+            await self.app(scope, receive, send_with_logging)
         except Exception:
             duration_ms = (time.perf_counter() - start) * 1000
             self._LOG.exception(
@@ -105,26 +126,30 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
                 path,
                 duration_ms,
             )
-            return JSONResponse(
-                status_code=500,
-                content={"detail": "Internal server error.", "request_id": request_id},
-            )
+            raise
+        else:
+            duration_ms = (time.perf_counter() - start) * 1000
+            if path not in self._SKIP_PATHS:
+                level_log = (
+                    self._LOG.warning if status_code >= 400 else self._LOG.info
+                )
+                level_log(
+                    "rid=%s %s %s -> %d (%.1f ms)",
+                    request_id,
+                    method,
+                    path,
+                    status_code,
+                    duration_ms,
+                )
 
-        duration_ms = (time.perf_counter() - start) * 1000
-        if path not in self._SKIP_PATHS:
-            level_log = (
-                self._LOG.warning if response.status_code >= 400 else self._LOG.info
-            )
-            level_log(
-                "rid=%s %s %s -> %d (%.1f ms)",
-                request_id,
-                method,
-                path,
-                response.status_code,
-                duration_ms,
-            )
-        response.headers["x-request-id"] = request_id
-        return response
+
+def _extract_header(scope: Scope, name: bytes) -> str | None:
+    """Lit un header HTTP depuis le scope ASGI (insensible à la casse)."""
+    lower = name.lower()
+    for key, value in scope.get("headers", []):
+        if key.lower() == lower:
+            return value.decode("latin-1")
+    return None
 
 
 app.add_middleware(RequestLoggingMiddleware)
