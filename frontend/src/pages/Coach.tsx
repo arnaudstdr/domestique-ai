@@ -102,6 +102,36 @@ export default function Coach() {
     setPending(pendingRef.current);
   }
 
+  // Garde l'écran allumé pendant la génération : sur iOS, la veille de
+  // l'écran ferme le fetch SSE et casse le streaming. Wake Lock est best-effort
+  // (échoue silencieusement si non supporté ou refusé).
+  const wakeLockRef = useRef<WakeLockSentinel | null>(null);
+
+  async function acquireWakeLock(): Promise<void> {
+    try {
+      if ("wakeLock" in navigator) {
+        wakeLockRef.current = await navigator.wakeLock.request("screen");
+      }
+    } catch {
+      // Pas critique, on laisse le système gérer la veille.
+    }
+  }
+
+  function releaseWakeLock(): void {
+    wakeLockRef.current?.release().catch(() => undefined);
+    wakeLockRef.current = null;
+  }
+
+  function isNetworkError(err: unknown): boolean {
+    const msg = String(err).toLowerCase();
+    return (
+      msg.includes("load failed") ||
+      msg.includes("failed to fetch") ||
+      msg.includes("network") ||
+      msg.includes("aborted")
+    );
+  }
+
   async function send() {
     const message = draft.trim();
     if (!message || streaming) return;
@@ -113,6 +143,7 @@ export default function Coach() {
       ...prev,
       { role: "user", content: message, thinking: null, tool_calls: null },
     ]);
+    await acquireWakeLock();
 
     try {
       await streamCoachChat({ session_id: sessionId, message }, (event) => {
@@ -151,19 +182,42 @@ export default function Coach() {
         }
       });
     } catch (err) {
-      const msg = err instanceof ApiError ? err.message : String(err);
-      push(`Coach : ${msg}`, "error");
+      if (isNetworkError(err)) {
+        push(
+          "Connexion interrompue (écran verrouillé ou app en arrière-plan). On recharge la session — la réponse a peut-être abouti côté serveur.",
+          "error",
+        );
+        // Le serveur a probablement persisté la réponse même si le stream est
+        // coupé : on recharge la session pour récupérer l'assistant turn.
+        if (sessionId) {
+          try {
+            const fresh = await api.coach.messages(sessionId);
+            setMessages(fresh);
+            pendingRef.current = EMPTY_PENDING;
+            setPending(EMPTY_PENDING);
+            return;
+          } catch {
+            // On retombe sur l'affichage du pending partiel ci-dessous.
+          }
+        }
+      } else {
+        const msg = err instanceof ApiError ? err.message : String(err);
+        push(`Coach : ${msg}`, "error");
+      }
     } finally {
+      releaseWakeLock();
       const final = pendingRef.current;
-      setMessages((prev) => [
-        ...prev,
-        {
-          role: "assistant",
-          content: final.content,
-          thinking: final.thinking,
-          tool_calls: final.toolCalls,
-        },
-      ]);
+      if (final.content || final.thinking || final.toolCalls.length > 0) {
+        setMessages((prev) => [
+          ...prev,
+          {
+            role: "assistant",
+            content: final.content,
+            thinking: final.thinking,
+            tool_calls: final.toolCalls,
+          },
+        ]);
+      }
       pendingRef.current = EMPTY_PENDING;
       setPending(EMPTY_PENDING);
       setStreaming(false);
