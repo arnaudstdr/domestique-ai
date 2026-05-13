@@ -66,11 +66,26 @@ def test_tool_schemas_have_required_shape():
         "generate_training_plan",
         "get_planned_workout",
         "propose_workout",
+        "propose_workout_today",
     }
     for schema in TOOL_SCHEMAS:
         assert schema["type"] == "function"
         assert "description" in schema["function"]
         assert "parameters" in schema["function"]
+
+
+def test_propose_workout_today_dispatchable(tmp_path, monkeypatch):
+    """Le tool est dispatchable et renvoie le contrat attendu."""
+    monkeypatch.setenv("DOMESTIQUE_AI_DB_PATH", str(tmp_path / "today.db"))
+    monkeypatch.setenv(
+        "DOMESTIQUE_AI_AVAILABILITY_PATH", str(tmp_path / "avail.yaml")
+    )
+    init_db(tmp_path / "today.db")
+    # Pas d'availability → pas de contrainte, TSB=0 par défaut → endurance.
+    out = dispatch("propose_workout_today", {})
+    assert "rest_day" in out
+    assert out["rest_day"] is False
+    assert out["workout"]["kind"] in {"recovery", "endurance", "tempo", "intervals"}
 
 
 def test_get_training_load_state_returns_curve(seeded_db):

@@ -17,6 +17,8 @@ from domestique_ai.api.schemas import (
     CoachChatRequest,
     CoachMessage,
     CoachSession,
+    TodayWorkoutResponse,
+    WorkoutSchema,
 )
 from domestique_ai.llm.coach import run_turn_stream
 from domestique_ai.llm.conversations import (
@@ -212,6 +214,29 @@ async def post_chat(payload: CoachChatRequest) -> EventSourceResponse:
             session_id=session_id,
             persist_to_session=session_id,
         )
+    )
+
+
+@router.get("/today", response_model=TodayWorkoutResponse)
+def get_today_workout(available_min: int | None = None) -> TodayWorkoutResponse:
+    """Séance suggérée pour aujourd'hui (TSB + disponibilité, pas de LLM).
+
+    Pur calcul : lit `data/availability.yaml` et la dernière courbe CTL/ATL/TSB
+    de la base, puis renvoie soit un `rest_day=True`, soit un Workout structuré.
+    Le query param `available_min` force la durée (et débraye le check off-day).
+    """
+    from domestique_ai.processing.today import propose_workout_today
+
+    result = propose_workout_today(available_min=available_min)
+    if result["rest_day"]:
+        return TodayWorkoutResponse(
+            rest_day=True, reason=result.get("reason")
+        )
+    return TodayWorkoutResponse(
+        rest_day=False,
+        workout=WorkoutSchema(**result["workout"]),
+        tsb=result.get("tsb"),
+        tsb_zone=result.get("tsb_zone"),
     )
 
 

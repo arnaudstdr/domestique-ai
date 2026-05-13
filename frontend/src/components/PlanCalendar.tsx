@@ -8,7 +8,13 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
-import type { Workout, WorkoutStep } from "../api/types";
+import type { Workout } from "../api/types";
+import {
+  KIND_LABELS,
+  KIND_TONES,
+  PHASE_LABELS,
+  formatDuration,
+} from "./workoutKind";
 
 interface Props {
   workouts: Workout[];
@@ -21,27 +27,6 @@ interface WeekGroup {
   totalTss: number;
   totalDuration: number;
 }
-
-const KIND_LABELS: Record<string, string> = {
-  recovery: "Récup",
-  endurance: "Endurance",
-  tempo: "Tempo",
-  intervals: "Intervalles",
-};
-
-const KIND_TONES: Record<string, string> = {
-  recovery: "bg-green-500/15 text-green-400",
-  endurance: "bg-blue-500/15 text-blue-300",
-  tempo: "bg-orange-500/15 text-orange-300",
-  intervals: "bg-red-500/15 text-red-400",
-};
-
-const PHASE_LABELS: Record<WorkoutStep["phase"], string> = {
-  warmup: "Échauffement",
-  active: "Effort",
-  rest: "Récup",
-  cooldown: "Retour calme",
-};
 
 function startOfWeek(dateStr: string): Date {
   const d = new Date(dateStr + "T00:00:00");
@@ -93,14 +78,6 @@ function dayLabel(dateStr: string): string {
   return new Date(dateStr + "T00:00:00").toLocaleDateString("fr-FR", {
     weekday: "short",
   });
-}
-
-function formatDuration(sec: number): string {
-  const m = Math.round(sec / 60);
-  if (m < 60) return `${m} min`;
-  const h = Math.floor(m / 60);
-  const rest = m % 60;
-  return rest === 0 ? `${h} h` : `${h} h ${rest}`;
 }
 
 export default function PlanCalendar({ workouts }: Props) {

@@ -1,13 +1,24 @@
-"""Configuration centralisée — chemins de données, FTP utilisateur, secrets via .env."""
+"""Configuration centralisée — chemins de données, FTP utilisateur, secrets via .env.
+
+Le profil athlète (`data/profile.yaml`) prend la priorité sur les variables
+d'environnement pour FTP, HR repos, HR max, sexe et %LTHR. Les getters lisent
+le YAML d'abord (via cache mémoire indexé sur `mtime`), tombent sur `.env`
+ensuite, puis sur le défaut.
+"""
 
 from __future__ import annotations
 
 import os
+import threading
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from dotenv import load_dotenv
 
 load_dotenv()
+
+if TYPE_CHECKING:
+    from domestique_ai.llm.profile import Profile
 
 PACKAGE_ROOT = Path(__file__).resolve().parent
 REPO_ROOT = PACKAGE_ROOT.parent
@@ -26,9 +37,90 @@ def get_tokens_path() -> Path:
     return REPO_ROOT / "data" / ".strava_tokens.json"
 
 
+def get_profile_path() -> Path:
+    """Chemin du YAML profil athlète. Override via DOMESTIQUE_AI_PROFILE_PATH."""
+    custom = os.getenv("DOMESTIQUE_AI_PROFILE_PATH")
+    if custom:
+        return Path(custom).expanduser().resolve()
+    return REPO_ROOT / "data" / "profile.yaml"
+
+
+# ---------------------------------------------------------------------------
+# Cache profil (mtime-based, sans daemon).
+#
+# Le coût d'un appel `load_profile` est faible (YAML court), mais on évite la
+# relecture systématique à chaque getter pour garder les chauds chemins du
+# calcul de charge rapides. Le cache est invalidé si :
+#   - le mtime du fichier a changé (édition externe),
+#   - le chemin résolu via env var a changé (utile pour les tests qui
+#     `monkeypatch.setenv("DOMESTIQUE_AI_PROFILE_PATH", ...)`),
+#   - `invalidate_profile_cache()` est appelée explicitement (par le router
+#     après PUT).
+# ---------------------------------------------------------------------------
+
+_profile_cache_lock = threading.Lock()
+_profile_cache: dict[str, object] = {
+    "path": None,        # str | None
+    "mtime_ns": None,    # int | None
+    "profile": None,     # Profile | None
+}
+
+
+def invalidate_profile_cache() -> None:
+    """Force la relecture du profil au prochain accès."""
+    with _profile_cache_lock:
+        _profile_cache["path"] = None
+        _profile_cache["mtime_ns"] = None
+        _profile_cache["profile"] = None
+
+
+def _profile_or_none() -> Profile | None:
+    """Renvoie le profil persisté (avec cache mtime) ou ``None`` si fichier absent."""
+    # Import local pour éviter le cycle config <-> llm.profile.
+    from domestique_ai.llm.profile import ProfileError, load_profile
+
+    path = get_profile_path()
+    path_str = str(path)
+    mtime_ns: int | None = None
+    if path.exists():
+        try:
+            mtime_ns = path.stat().st_mtime_ns
+        except OSError:
+            mtime_ns = None
+
+    with _profile_cache_lock:
+        if (
+            _profile_cache["path"] == path_str
+            and _profile_cache["mtime_ns"] == mtime_ns
+        ):
+            return _profile_cache["profile"]  # type: ignore[return-value]
+
+        try:
+            profile = load_profile(path)
+        except ProfileError:
+            # YAML invalide : on log côté caller éventuellement, ici on évite
+            # de planter la chaîne de calcul. Cache la décision pour ne pas
+            # relire à chaque appel.
+            profile = None
+
+        _profile_cache["path"] = path_str
+        _profile_cache["mtime_ns"] = mtime_ns
+        _profile_cache["profile"] = profile
+        return profile
+
+
 def get_ftp() -> float:
-    """FTP en watts, lue depuis l'env. 250 par défaut."""
-    return float(os.getenv("STRAVA_FTP", "250"))
+    """FTP en watts. Priorité : profile.yaml > STRAVA_FTP > 250.0."""
+    profile = _profile_or_none()
+    if profile is not None and profile.ftp is not None:
+        return float(profile.ftp)
+    raw = os.getenv("STRAVA_FTP")
+    if raw:
+        try:
+            return float(raw)
+        except ValueError:
+            pass
+    return 250.0
 
 
 def _get_optional_float(name: str) -> float | None:
@@ -43,22 +135,36 @@ def _get_optional_float(name: str) -> float | None:
 
 
 def get_hr_rest() -> float | None:
-    """Fréquence cardiaque de repos en bpm. Optionnel — requis pour le scoring HR."""
+    """FC repos. Priorité : profile.yaml > STRAVA_HR_REST > None."""
+    profile = _profile_or_none()
+    if profile is not None and profile.hr_rest is not None:
+        return float(profile.hr_rest)
     return _get_optional_float("STRAVA_HR_REST")
 
 
 def get_hr_max() -> float | None:
-    """Fréquence cardiaque maximale en bpm. Optionnel — requis pour le scoring HR."""
+    """FC max. Priorité : profile.yaml > STRAVA_HR_MAX > None."""
+    profile = _profile_or_none()
+    if profile is not None and profile.hr_max is not None:
+        return float(profile.hr_max)
     return _get_optional_float("STRAVA_HR_MAX")
 
 
 def get_sex() -> str:
-    """Sexe ('M' ou 'F') pour les coefficients TRIMP. 'M' par défaut."""
+    """Sexe ('M' ou 'F') pour les coefficients TRIMP. Priorité : profile.yaml > STRAVA_SEX > 'M'."""
+    profile = _profile_or_none()
+    if profile is not None and profile.sex:
+        return profile.sex.upper()[:1] or "M"
     return os.getenv("STRAVA_SEX", "M").strip().upper()[:1] or "M"
 
 
 def get_lthr_pct() -> float:
-    """Fraction de la HRR considérée comme seuil lactique. 0.88 par défaut."""
+    """Fraction HRR considérée comme seuil lactique. Priorité : profile.yaml > STRAVA_LTHR_PCT > 0.88."""
+    profile = _profile_or_none()
+    if profile is not None:
+        value = profile.lthr_pct
+        if 0.5 <= value <= 1.0:
+            return value
     raw = os.getenv("STRAVA_LTHR_PCT")
     if not raw:
         return 0.88

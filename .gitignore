@@ -8,6 +8,7 @@ data/
 !data/.gitkeep
 !data/objective.yaml.example
 !data/availability.yaml.example
+!data/profile.yaml.example
 
 # Environnements virtuels
 .venv/

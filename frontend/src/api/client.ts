@@ -3,6 +3,7 @@
 import type {
   ActivitiesList,
   ActivityDetail,
+  Availability,
   CoachMessage,
   CoachSession,
   LoadResponse,
@@ -13,9 +14,11 @@ import type {
   PlanCreateRequest,
   PlanDetail,
   PlanSummary,
+  Profile,
   RideVolumeResponse,
   SyncResult,
   SyncStatus,
+  TodayWorkoutResponse,
 } from "./types";
 
 const API_BASE = "";
@@ -85,6 +88,22 @@ export const api = {
         body: JSON.stringify(obj),
       }),
   },
+  profile: {
+    get: () => http<Profile | null>(`/api/profile`),
+    put: (profile: Profile) =>
+      http<Profile>(`/api/profile`, {
+        method: "PUT",
+        body: JSON.stringify(profile),
+      }),
+  },
+  availability: {
+    get: () => http<Availability | null>(`/api/availability`),
+    put: (av: Availability) =>
+      http<Availability>(`/api/availability`, {
+        method: "PUT",
+        body: JSON.stringify(av),
+      }),
+  },
   strava: {
     sync: () => http<SyncStatus>(`/api/strava/sync`, { method: "POST" }),
     syncStatus: () => http<SyncStatus>(`/api/strava/sync-status`),
@@ -99,6 +118,10 @@ export const api = {
       http<CoachMessage[]>(`/api/coach/sessions/${sessionId}/messages`),
     deleteSession: (sessionId: string) =>
       http<void>(`/api/coach/sessions/${sessionId}`, { method: "DELETE" }),
+    today: (availableMin?: number) => {
+      const q = availableMin ? `?available_min=${availableMin}` : "";
+      return http<TodayWorkoutResponse>(`/api/coach/today${q}`);
+    },
   },
   plan: {
     list: (limit = 20) =>

@@ -205,3 +205,49 @@ export interface PlanCreateRequest {
   sessions_per_week: number;
   focus?: string | null;
 }
+
+// ---- Profil utilisateur ------------------------------------------------------
+
+export interface Profile {
+  ftp: number | null;
+  hr_rest: number | null;
+  hr_max: number | null;
+  sex: "M" | "F";
+  lthr_pct: number;
+}
+
+// ---- Disponibilité hebdomadaire ---------------------------------------------
+
+export type WeekdayName =
+  | "monday"
+  | "tuesday"
+  | "wednesday"
+  | "thursday"
+  | "friday"
+  | "saturday"
+  | "sunday";
+
+export interface DayAvailability {
+  max_duration_min: number;
+  context: "indoor" | "outdoor";
+}
+
+export interface AvailabilityPreferences {
+  long_endurance_day: WeekdayName | null;
+  intervals_day: WeekdayName | null;
+}
+
+export interface Availability {
+  days: Partial<Record<WeekdayName, DayAvailability>>;
+  preferences: AvailabilityPreferences | null;
+}
+
+// ---- Séance du jour ---------------------------------------------------------
+
+export interface TodayWorkoutResponse {
+  rest_day: boolean;
+  reason: string | null;
+  workout: Workout | null;
+  tsb: number | null;
+  tsb_zone: string | null;
+}

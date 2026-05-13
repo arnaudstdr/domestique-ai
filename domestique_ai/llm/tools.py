@@ -418,6 +418,19 @@ def get_planned_workout(date: str) -> dict[str, Any]:
     }
 
 
+def propose_workout_today(available_min: int | None = None) -> dict[str, Any]:
+    """Séance optimale pour aujourd'hui en croisant TSB courant et disponibilité.
+
+    Délègue au module ``processing.today`` (pur calcul). Retourne soit
+    ``{rest_day: True, reason: ...}``, soit ``{rest_day: False, workout: ...,
+    tsb: ..., tsb_zone: ...}``.
+    """
+    from domestique_ai.processing.today import (
+        propose_workout_today as _propose_today,
+    )
+    return _propose_today(available_min=available_min)
+
+
 def propose_workout(target_zone: str, duration_min: int,
                     kind: str | None = None) -> dict[str, Any]:
     """
@@ -618,6 +631,31 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
     {
         "type": "function",
         "function": {
+            "name": "propose_workout_today",
+            "description": "Détermine la séance optimale pour aujourd'hui en "
+                           "croisant le TSB courant et la disponibilité du jour "
+                           "(durée max, indoor/outdoor). Renvoie soit "
+                           "rest_day=True (jour off selon disponibilité), soit "
+                           "un workout structuré (kind, target_zone, durée, "
+                           "structure détaillée, TSS estimé) avec le TSB du jour.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "available_min": {
+                        "type": "integer",
+                        "description": "Durée explicite en minutes "
+                                       "(override de la dispo du jour, "
+                                       "débraie le check off-day).",
+                        "minimum": 20, "maximum": 240,
+                    },
+                },
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "propose_workout",
             "description": "Génère un squelette de séance (échauffement, corps, "
                            "retour au calme) selon une zone cible et une durée.",
@@ -658,6 +696,7 @@ TOOLS: dict[str, Callable[..., dict[str, Any]]] = {
     "get_overtraining_signals": get_overtraining_signals,
     "generate_training_plan": generate_training_plan,
     "get_planned_workout": get_planned_workout,
+    "propose_workout_today": propose_workout_today,
     "propose_workout": propose_workout,
 }
 

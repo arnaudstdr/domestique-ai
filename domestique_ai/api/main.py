@@ -19,6 +19,9 @@ from domestique_ai.api.routers import (
     activities as activities_router,
 )
 from domestique_ai.api.routers import (
+    availability as availability_router,
+)
+from domestique_ai.api.routers import (
     coach as coach_router,
 )
 from domestique_ai.api.routers import (
@@ -32,6 +35,9 @@ from domestique_ai.api.routers import (
 )
 from domestique_ai.api.routers import (
     plan as plan_router,
+)
+from domestique_ai.api.routers import (
+    profile as profile_router,
 )
 from domestique_ai.api.routers import (
     strava as strava_router,
@@ -213,6 +219,8 @@ app.include_router(metrics_router.router)
 app.include_router(activities_router.router)
 app.include_router(morning_router.router)
 app.include_router(objective_router.router)
+app.include_router(profile_router.router)
+app.include_router(availability_router.router)
 app.include_router(strava_router.router)
 app.include_router(coach_router.router)
 app.include_router(plan_router.router)

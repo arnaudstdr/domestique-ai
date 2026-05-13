@@ -168,6 +168,37 @@ class Objective(BaseModel):
     notes: str = ""
 
 
+# ---- Profil utilisateur ------------------------------------------------------
+
+
+class ProfileSchema(BaseModel):
+    """Paramètres physiologiques persistés dans ``data/profile.yaml``."""
+
+    ftp: float | None = Field(default=None, gt=0)
+    hr_rest: float | None = Field(default=None, gt=0)
+    hr_max: float | None = Field(default=None, gt=0)
+    sex: Literal["M", "F"] = "M"
+    lthr_pct: float = Field(default=0.88, ge=0.5, le=1.0)
+
+
+# ---- Disponibilité hebdomadaire ----------------------------------------------
+
+
+class DayAvailabilityIn(BaseModel):
+    max_duration_min: int = Field(ge=20)
+    context: Literal["indoor", "outdoor"]
+
+
+class AvailabilityPreferencesSchema(BaseModel):
+    long_endurance_day: str | None = None  # nom anglais lowercase
+    intervals_day: str | None = None
+
+
+class AvailabilitySchema(BaseModel):
+    days: dict[str, DayAvailabilityIn]
+    preferences: AvailabilityPreferencesSchema | None = None
+
+
 # ---- Strava sync -------------------------------------------------------------
 
 
@@ -265,3 +296,20 @@ class PlanCreateRequest(BaseModel):
 
 class PlanPushGarminRequest(BaseModel):
     schedule: bool = True
+
+
+# ---- Séance du jour ---------------------------------------------------------
+
+
+class TodayWorkoutResponse(BaseModel):
+    """Réponse de ``GET /api/coach/today``.
+
+    Soit ``rest_day=True`` (jour off selon la disponibilité), soit
+    ``workout`` rempli avec une séance structurée et le contexte TSB.
+    """
+
+    rest_day: bool = False
+    reason: str | None = None
+    workout: WorkoutSchema | None = None
+    tsb: float | None = None
+    tsb_zone: str | None = None

@@ -1,4 +1,4 @@
-import { Route, Routes } from "react-router-dom";
+import { Link, Route, Routes } from "react-router-dom";
 import BottomNav from "./components/BottomNav";
 import Dashboard from "./pages/Dashboard";
 import Activities from "./pages/Activities";
@@ -6,6 +6,7 @@ import ActivityDetail from "./pages/ActivityDetail";
 import Morning from "./pages/Morning";
 import Coach from "./pages/Coach";
 import Plan from "./pages/Plan";
+import Profil from "./pages/Profil";
 
 export default function App() {
   return (
@@ -18,6 +19,14 @@ export default function App() {
           <h1 className="text-base font-semibold tracking-wide">
             🚴‍♂️ DomestiqueAI
           </h1>
+          <Link
+            to="/profil"
+            aria-label="Profil"
+            title="Profil & paramètres"
+            className="text-xl leading-none text-gray-300 hover:text-accent transition-colors"
+          >
+            ⚙️
+          </Link>
         </div>
       </header>
       <main className="mx-auto max-w-3xl px-4 pt-4 pb-24">
@@ -28,6 +37,7 @@ export default function App() {
           <Route path="/matin" element={<Morning />} />
           <Route path="/coach" element={<Coach />} />
           <Route path="/plan" element={<Plan />} />
+          <Route path="/profil" element={<Profil />} />
         </Routes>
       </main>
       <BottomNav />
