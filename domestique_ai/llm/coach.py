@@ -2,11 +2,8 @@
 Boucle agentique du coach : prend un message utilisateur + l'historique,
 laisse le LLM appeler les tools jusqu'à obtenir une réponse finale.
 
-Deux entrypoints :
-- `run_turn_stream(...)` (async generator) : yield les events au fil de l'eau,
-  consommé par le router SSE.
-- `run_turn(...)` (sync) : façade qui draine `run_turn_stream` pour le
-  dashboard Streamlit legacy.
+Entrypoint : `run_turn_stream(...)` (async generator) yield les events au fil
+de l'eau et est consommé par le router SSE.
 
 Le LLM ne doit jamais inventer de chiffres : il appelle les tools déclarés
 dans `domestique_ai.llm.tools` pour récupérer les données puis les commente.
@@ -14,10 +11,9 @@ dans `domestique_ai.llm.tools` pour récupérer les données puis les commente.
 
 from __future__ import annotations
 
-import asyncio
 import json
 from collections.abc import AsyncIterator
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any
 
 from domestique_ai.llm.ollama_client import stream_chat
@@ -40,8 +36,8 @@ Règles strictes :
   un objectif, programme), appelle generate_training_plan : il lit l'objectif,
   calcule la périodisation (cycle 3:1, taper) et persiste le plan. Tu commentes
   ensuite le summary retourné (TSS hebdo, semaine pic, séances clés). Indique
-  à l'utilisateur que le téléchargement des fichiers `.FIT` se fait depuis
-  l'onglet « 📋 Plan » du dashboard.
+  à l'utilisateur que le téléchargement des fichiers `.FIT` et le push Garmin
+  Connect se font depuis la page « 📋 Plan ».
 - Tu connais : périodisation, polarisation 80/20, ancrage hr-TSS sur LTHR,
   zones %HRR (Z1<60%, Z2 60-70%, Z3 70-80%, Z4 80-90%, Z5≥90%).
 - Sois pragmatique : propose des actions concrètes adaptées au TSB courant.
@@ -57,15 +53,6 @@ class ToolTrace:
     name: str
     arguments: dict[str, Any]
     result: dict[str, Any]
-
-
-@dataclass
-class CoachReply:
-    """Résultat d'un échange avec le coach (façade sync)."""
-
-    content: str
-    thinking: str | None = None
-    tool_trace: list[ToolTrace] = field(default_factory=list)
 
 
 def build_initial_messages(history: list[dict[str, Any]] | None,
@@ -172,27 +159,3 @@ async def run_turn_stream(
             for t in trace
         ],
     }
-
-
-def run_turn(user_message: str,
-             history: list[dict[str, Any]] | None = None) -> CoachReply:
-    """Façade synchrone qui draine `run_turn_stream`.
-
-    Utilisée par le dashboard Streamlit legacy. Pour le path API (FastAPI),
-    appeler `run_turn_stream` directement.
-    """
-    async def _drain() -> dict[str, Any] | None:
-        final: dict[str, Any] | None = None
-        async for ev in run_turn_stream(user_message, history):
-            if ev["type"] == "final":
-                final = ev
-        return final
-
-    final = asyncio.run(_drain())
-    if final is None:
-        return CoachReply(content="", thinking=None, tool_trace=[])
-    return CoachReply(
-        content=final["content"],
-        thinking=final["thinking"],
-        tool_trace=[ToolTrace(**t) for t in final["tool_trace"]],
-    )

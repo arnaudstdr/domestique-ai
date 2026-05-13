@@ -120,7 +120,7 @@ def get_overtraining() -> OvertrainingResponse:
 
 
 def _is_ride(sport_type: str | None) -> bool:
-    """Filtre vélo — même règle que le dashboard Streamlit (sport_type contient 'Ride')."""
+    """Filtre vélo : `sport_type` contient 'Ride' (Ride, VirtualRide, …)."""
     return bool(sport_type) and "Ride" in sport_type
 
 
@@ -129,8 +129,7 @@ def get_ride_volume() -> RideVolumeResponse:
     """Volume cyclisme (distance + temps) sur l'année civile + la semaine ISO en cours.
 
     N'inclut que les activités dont `sport_type` contient "Ride" (Ride,
-    VirtualRide, MountainBikeRide, GravelRide, EBikeRide…), comme le faisait
-    le dashboard Streamlit.
+    VirtualRide, MountainBikeRide, GravelRide, EBikeRide…).
     """
     today = dt.date.today()
     year_start = dt.date(today.year, 1, 1)

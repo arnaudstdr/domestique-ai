@@ -1,6 +1,6 @@
 # Déploiement sur Raspberry Pi 5 (via Tailscale)
 
-App Streamlit conteneurisée, accessible depuis tous tes appareils du tailnet.
+PWA FastAPI + React conteneurisée, accessible depuis tous tes appareils du tailnet.
 
 ## Prérequis sur le RPi
 
@@ -42,7 +42,7 @@ Sur le RPi :
 ```bash
 cd ~/domestique-ai
 docker compose up -d --build
-docker compose logs -f          # vérifier que Streamlit démarre
+docker compose logs -f          # vérifier que FastAPI démarre (port 8501)
 ```
 
 Le premier build prend quelques minutes (compilation pandas/pyarrow en ARM64).

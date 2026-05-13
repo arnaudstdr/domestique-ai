@@ -30,27 +30,26 @@ cd frontend && npm install && npm run dev   # → http://localhost:5173
 # Build complet (FastAPI sert ensuite le bundle React via StaticFiles)
 cd frontend && npm run build
 uvicorn domestique_ai.api.main:app --port 8501   # → http://localhost:8501
-
-# Dashboard Streamlit legacy (conservé mais plus le runtime par défaut)
-streamlit run domestique_ai/app/dashboard.py
 ```
 
-## Stack web (post-migration)
+## Stack web
 
-L'UI Streamlit a été remplacée par **FastAPI + React PWA** :
+L'UI est une **PWA FastAPI + React** (Streamlit a été retiré) :
 
 - `domestique_ai/api/` : FastAPI, un routeur par domaine (metrics, activities,
-  morning, objective, strava, coach). Pydantic v2 pour la sérialisation.
+  morning, objective, strava, coach, plan). Pydantic v2 pour la sérialisation.
 - `frontend/` : React 18 + Vite + TypeScript + Tailwind + recharts + react-leaflet.
   Service worker manuel dans `public/sw.js` (NetworkFirst sur `/api/`).
-- Le port runtime est **8501** (conservé depuis l'ancien Streamlit). En dev,
-  Vite écoute sur 5173 et proxy `/api` vers `http://localhost:8501`.
-- Le coach LLM streame via **SSE** (`/api/coach/chat`). `run_turn` est appelé
-  via `asyncio.to_thread`, puis les `thinking` / `tool_call` / `token` / `done`
-  sont émis dans l'ordre. À terme, basculer sur un vrai streaming Ollama.
-- `domestique_ai/app/dashboard.py` reste en place comme legacy — ne pas le
-  supprimer tant que la PWA n'a pas atteint la parité fonctionnelle complète
-  (notamment l'onglet Plan et le push Garmin Connect, encore Streamlit-only).
+- Le port runtime est **8501**. En dev, Vite écoute sur 5173 et proxy `/api`
+  vers `http://localhost:8501`.
+- Le coach LLM streame via **SSE** (`/api/coach/chat`) — `run_turn_stream()`
+  yield les events `thinking` / `tool_call` / `tool_result` / `token` au fur
+  et à mesure, consommés par `sse-starlette` côté serveur et par
+  `consumeSseStream()` côté client.
+- Le push Garmin Connect est également streamé en SSE
+  (`POST /api/plan/{id}/push-garmin`) — events `start` / `progress` / `result` /
+  `done`. Le token Garmin est seedé une fois via `python -m
+  domestique_ai.export.garmin_connect`.
 
 ## Architecture
 
@@ -136,9 +135,9 @@ Pour ajouter un tool :
 3. L'enregistrer dans le dict `TOOLS`. `dispatch()` route automatiquement.
 4. Tester sur DB tmp dans `tests/test_tools.py` (pas de réseau, pas de LLM).
 
-Mode `thinking` activé par défaut : le modèle réfléchit explicitement avant de répondre, le contenu est exposé dans un expander Streamlit (debug).
+Mode `thinking` activé sur le 1ᵉʳ tour de tool-calling (fiabilise la décision d'appeler les tools sur gemma3/4), désactivé sur les tours suivants pour gagner du temps. Les deltas de raisonnement sont streamés au client et affichés dans l'expander « 🧠 Raisonnement » de la page Coach (debug).
 
-Persistance : chaque message (user / assistant / tool) est stocké en JSON brut dans la table `conversations` (clé `session_id`, ordre par `id`). Reprise d'une session via le selectbox du dashboard.
+Persistance : chaque message (user / assistant / tool) est stocké en JSON brut dans la table `conversations` (clé `session_id`, ordre par `id`). Reprise d'une session via le sélecteur de la page Coach.
 
 Objectif : `data/objective.yaml` (gitignoré, template `data/objective.yaml.example`). Lu par le tool `get_objective`. Champs : `type` (cyclosportive/course/cyclo/maintenance), `date`, `distance_km`, `elevation_m`, `target_ftp`, `notes`. Override du chemin via `DOMESTIQUE_AI_OBJECTIVE_PATH` (utile pour les tests).
 

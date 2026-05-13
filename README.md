@@ -4,7 +4,8 @@
 ![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)
 ![CI](https://github.com/arnaudstdr/domestique-ai/actions/workflows/ci.yml/badge.svg)
 [![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
-![Streamlit](https://img.shields.io/badge/Streamlit-FF4B4B?logo=streamlit&logoColor=white)
+![FastAPI](https://img.shields.io/badge/FastAPI-009688?logo=fastapi&logoColor=white)
+![React](https://img.shields.io/badge/React-20232A?logo=react&logoColor=61DAFB)
 ![Ollama](https://img.shields.io/badge/Ollama-LLM-blueviolet?logo=ollama&logoColor=white)
 ![Docker](https://img.shields.io/badge/docker-ready-blue?logo=docker&logoColor=white)
 
@@ -29,14 +30,16 @@ domestique_ai/
 │   ├── overtraining.py      # 4 auto indicators (chronic TSB, Monotony/Strain, weekly jump)
 │   └── morning_metrics.py   # CRUD HRV/resting HR/sleep/stress + baselines + alerts
 ├── llm/
-│   ├── ollama_client.py     # Ollama SDK wrapper (chat + tool calling)
-│   ├── tools.py             # 8 tools exposed to the LLM (load, activities, overtraining, …)
+│   ├── ollama_client.py     # Ollama SDK wrapper (async streaming + tool calling)
+│   ├── tools.py             # tools exposed to the LLM (load, activities, overtraining, plan, …)
 │   ├── coach.py             # coach agentic loop (system prompt + tool loop)
 │   ├── objectives.py        # YAML objective handling (data/objective.yaml)
 │   └── conversations.py     # chat session persistence (SQLite)
-└── app/
-    └── dashboard.py         # Streamlit UI (3 tabs: Dashboard + Morning + Coach)
+├── api/                     # FastAPI app, one router per domain
+└── export/                  # FIT files + Garmin Connect push
 ```
+
+Frontend lives in `frontend/` (React 18 + Vite + TypeScript + Tailwind + recharts).
 
 Source of truth: local SQLite (`data/strava_activities.db`). A single
 `activities` table with `strava_id` UNIQUE — idempotent ingestion.
@@ -78,12 +81,12 @@ view:
   *counter-productive* given current TSB and the objective, then
   recommends what's next.
 
-Streams are fetched on demand (1 h Streamlit cache, no DB bloat).
+Streams are fetched on demand (cached client-side, no DB bloat).
 
 ## Overtraining detection
 
 Two analysis levels, exposed in an **alert banner** at the top of the
-dashboard and to the LLM coach via dedicated tools.
+PWA dashboard and to the LLM coach via dedicated tools.
 
 ### Automatic indicators (from activities)
 
@@ -219,22 +222,32 @@ CLI »* — la PWA affiche alors un lien vers cette commande.
 ## Usage
 
 ```bash
-streamlit run domestique_ai/app/dashboard.py
+# Backend API (port 8501) — sert aussi le build React si présent
+uvicorn domestique_ai.api.main:app --reload --port 8501
+
+# Frontend dev (autre terminal) — http://localhost:5173
+cd frontend && npm install && npm run dev
+
+# Production : build le front, FastAPI le sert ensuite via StaticFiles
+cd frontend && npm run build
+uvicorn domestique_ai.api.main:app --port 8501   # → http://localhost:8501
 ```
 
-The dashboard exposes three tabs:
+La PWA expose cinq onglets (BottomNav) :
 
-- **📊 Dashboard**: overtraining alert banner, CTL / ATL / TSB
-  metrics + form zone, evolution charts, HR zone breakdown, weight
-  history, and **clickable activities table** (detail view on click,
-  see above).
-- **🌅 Morning**: daily HRV / resting HR / sleep / stress entry, KPI
-  vs 14-day baseline, 90-day charts.
-- **🤖 Coach**: conversational chat with the LLM, multiple sessions,
-  reasoning and tool calls visible in expanders.
+- **📊 Dashboard** : bandeau d'alerte surentraînement, CTL / ATL / TSB,
+  charts d'évolution, ventilation par zones HR, tableau d'activités cliquable
+  (détail avec carte + streams sur clic).
+- **🚴 Activités** : historique paginé.
+- **🌅 Matin** : saisie HRV / FC repos / sommeil / stress, KPI vs baseline
+  14 j, charts 90 j.
+- **📋 Plan** : génération multi-semaines (lit l'objectif courant), calendrier
+  hebdo, téléchargement ZIP des `.FIT` et push Garmin Connect streamé.
+- **🤖 Coach** : chat conversationnel avec le LLM, sessions multiples, tool
+  calls + raisonnement visibles dans des expanders.
 
-Sidebar utility buttons: 🔄 Sync Strava, 🔁 Recalculate load,
-📥 Backfill HR max, 📥 Backfill HR zones.
+Utilitaires Strava (page Dashboard) : 🔄 Sync, 🔁 Recalculer la charge,
+📥 Backfill HR max / zones HR.
 
 ## Deployment
 
