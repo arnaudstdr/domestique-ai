@@ -112,7 +112,10 @@ export default function Coach() {
           skipNextFetchRef.current = true;
           setSessionId(event.value);
         } else if (event.type === "thinking") {
-          updatePending((p) => ({ ...p, thinking: event.value }));
+          updatePending((p) => ({
+            ...p,
+            thinking: (p.thinking || "") + event.value,
+          }));
         } else if (event.type === "token") {
           updatePending((p) => ({ ...p, content: p.content + event.value }));
         } else if (event.type === "tool_call") {

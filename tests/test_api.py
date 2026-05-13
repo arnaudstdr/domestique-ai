@@ -167,28 +167,46 @@ def test_coach_sessions_empty(client: TestClient) -> None:
     assert r.json() == []
 
 
-def test_coach_chat_streaming_with_mocked_run_turn(
+def test_coach_chat_streaming_with_mocked_run_turn_stream(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Le coach yield bien la séquence d'événements SSE attendue."""
-    from domestique_ai.llm.coach import CoachReply, ToolTrace
+    """Le coach yield bien la séquence d'événements SSE attendue.
 
-    def fake_run_turn(message: str, history=None):  # noqa: ANN001
-        return CoachReply(
-            content="Salut",
-            thinking="reflexion",
-            tool_trace=[
-                ToolTrace(
-                    name="get_training_load_state",
-                    arguments={},
-                    result={"available": False, "reason": "vide"},
-                )
+    Sémantique deltas : `thinking` et `token` arrivent en plusieurs fragments.
+    L'event interne `final` ne doit pas traverser le wire.
+    """
+
+    async def fake_stream(message: str, history=None):  # noqa: ANN001
+        yield {"type": "thinking", "value": "ref"}
+        yield {"type": "thinking", "value": "lexion"}
+        yield {
+            "type": "tool_call",
+            "name": "get_training_load_state",
+            "args": {},
+        }
+        yield {
+            "type": "tool_result",
+            "name": "get_training_load_state",
+            "result": {"available": False, "reason": "vide"},
+        }
+        yield {"type": "token", "value": "Sal"}
+        yield {"type": "token", "value": "ut"}
+        yield {
+            "type": "final",
+            "content": "Salut",
+            "thinking": "reflexion",
+            "tool_trace": [
+                {
+                    "name": "get_training_load_state",
+                    "arguments": {},
+                    "result": {"available": False, "reason": "vide"},
+                }
             ],
-        )
+        }
 
     monkeypatch.setattr(
-        "domestique_ai.api.routers.coach.run_turn",
-        fake_run_turn,
+        "domestique_ai.api.routers.coach.run_turn_stream",
+        fake_stream,
     )
 
     with client.stream(
@@ -202,15 +220,17 @@ def test_coach_chat_streaming_with_mocked_run_turn(
             if line.startswith("data:"):
                 events.append(line[5:].strip())
 
-    types = [e for e in events if e]
-    # On veut au moins les marqueurs : session_id, thinking, tool_call, tool_result,
-    # token(s), done.
-    joined = "".join(types)
+    joined = "".join(events)
     assert "session_id" in joined
     assert "thinking" in joined
     assert "tool_call" in joined
     assert "tool_result" in joined
     assert "done" in joined
+    # Sémantique deltas : au moins 2 events thinking et 2 events token.
+    assert sum(1 for e in events if '"type": "thinking"' in e) >= 2
+    assert sum(1 for e in events if '"type": "token"' in e) >= 2
+    # L'event "final" est interne, ne doit pas traverser le wire.
+    assert '"type": "final"' not in joined
 
 
 def test_app_routes_registered() -> None:

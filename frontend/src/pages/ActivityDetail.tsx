@@ -91,7 +91,7 @@ export default function ActivityDetail() {
           if (event.type === "thinking") {
             analysisRef.current = {
               ...analysisRef.current,
-              thinking: event.value,
+              thinking: (analysisRef.current.thinking || "") + event.value,
             };
             setAnalysis({ ...analysisRef.current });
           } else if (event.type === "token") {

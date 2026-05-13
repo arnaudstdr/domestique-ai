@@ -2,17 +2,25 @@
 Boucle agentique du coach : prend un message utilisateur + l'historique,
 laisse le LLM appeler les tools jusqu'à obtenir une réponse finale.
 
+Deux entrypoints :
+- `run_turn_stream(...)` (async generator) : yield les events au fil de l'eau,
+  consommé par le router SSE.
+- `run_turn(...)` (sync) : façade qui draine `run_turn_stream` pour le
+  dashboard Streamlit legacy.
+
 Le LLM ne doit jamais inventer de chiffres : il appelle les tools déclarés
 dans `domestique_ai.llm.tools` pour récupérer les données puis les commente.
 """
 
 from __future__ import annotations
 
+import asyncio
 import json
+from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from typing import Any
 
-from domestique_ai.llm.ollama_client import chat
+from domestique_ai.llm.ollama_client import stream_chat
 from domestique_ai.llm.tools import TOOL_SCHEMAS, dispatch
 
 MAX_TOOL_LOOPS = 5
@@ -53,12 +61,11 @@ class ToolTrace:
 
 @dataclass
 class CoachReply:
-    """Résultat d'un échange avec le coach."""
+    """Résultat d'un échange avec le coach (façade sync)."""
 
     content: str
     thinking: str | None = None
     tool_trace: list[ToolTrace] = field(default_factory=list)
-    raw_messages: list[dict[str, Any]] = field(default_factory=list)
 
 
 def build_initial_messages(history: list[dict[str, Any]] | None,
@@ -81,57 +88,106 @@ def build_initial_messages(history: list[dict[str, Any]] | None,
     return base
 
 
-def run_turn(user_message: str,
-             history: list[dict[str, Any]] | None = None) -> CoachReply:
-    """
-    Exécute un tour de conversation : envoie le message, gère la boucle de
-    tool calling, retourne la réponse finale + la trace.
+async def run_turn_stream(
+    user_message: str,
+    history: list[dict[str, Any]] | None = None,
+) -> AsyncIterator[dict[str, Any]]:
+    """Yield les events d'un tour de coach au fur et à mesure.
 
-    history contient les messages précédents (sans le system prompt, qui est
-    rajouté à chaque tour pour rester explicite).
+    Forme des events :
+    - {"type": "thinking", "value": <delta>}  — fragment incrémental
+    - {"type": "token",    "value": <delta>}  — fragment incrémental
+    - {"type": "tool_call",   "name": str, "args": dict}
+    - {"type": "tool_result", "name": str, "result": dict}
+    - {"type": "final", "content": str, "thinking": str|None, "tool_trace": list}
+
+    Le dernier event est TOUJOURS `final` (consommé par le router pour
+    persister en DB l'assistant turn complet — il ne traverse jamais le wire).
     """
     messages = build_initial_messages(history, user_message)
     trace: list[ToolTrace] = []
-    final_thinking: str | None = None
+    accumulated_content = ""
+    accumulated_thinking = ""
 
     for _ in range(MAX_TOOL_LOOPS):
-        response = chat(messages, tools=TOOL_SCHEMAS)
-        if response.get("thinking"):
-            final_thinking = response["thinking"]
+        turn_content = ""
+        turn_tool_calls: list[dict[str, Any]] | None = None
+
+        async for chunk in stream_chat(messages, tools=TOOL_SCHEMAS):
+            if chunk["content"]:
+                turn_content += chunk["content"]
+                accumulated_content += chunk["content"]
+                yield {"type": "token", "value": chunk["content"]}
+            if chunk["thinking"]:
+                accumulated_thinking += chunk["thinking"]
+                yield {"type": "thinking", "value": chunk["thinking"]}
+            if chunk["tool_calls"]:
+                turn_tool_calls = chunk["tool_calls"]
+
         messages.append({
             "role": "assistant",
-            "content": response.get("content", ""),
-            "tool_calls": response.get("tool_calls"),
+            "content": turn_content,
+            "tool_calls": turn_tool_calls,
         })
-        tool_calls = response.get("tool_calls") or []
-        if not tool_calls:
-            return CoachReply(
-                content=response.get("content", ""),
-                thinking=final_thinking,
-                tool_trace=trace,
-                raw_messages=messages,
-            )
-        for call in tool_calls:
+
+        if not turn_tool_calls:
+            yield {
+                "type": "final",
+                "content": accumulated_content,
+                "thinking": accumulated_thinking or None,
+                "tool_trace": [
+                    {"name": t.name, "arguments": t.arguments, "result": t.result}
+                    for t in trace
+                ],
+            }
+            return
+
+        for call in turn_tool_calls:
             name = call["function"]["name"]
             args = call["function"]["arguments"] or {}
+            yield {"type": "tool_call", "name": name, "args": args}
             result = dispatch(name, args)
             trace.append(ToolTrace(name=name, arguments=args, result=result))
+            yield {"type": "tool_result", "name": name, "result": result}
             messages.append({
                 "role": "tool",
                 "name": name,
                 "content": json.dumps(result, ensure_ascii=False, default=str),
             })
 
-    # Sortie de la boucle sans réponse finale : on renvoie le dernier contenu.
-    last_content = ""
-    for msg in reversed(messages):
-        if msg.get("role") == "assistant" and msg.get("content"):
-            last_content = msg["content"]
-            break
+    fallback = "\n\n_(Le coach n'a pas pu finaliser : trop de tours d'outils.)_"
+    yield {"type": "token", "value": fallback}
+    accumulated_content += fallback
+    yield {
+        "type": "final",
+        "content": accumulated_content,
+        "thinking": accumulated_thinking or None,
+        "tool_trace": [
+            {"name": t.name, "arguments": t.arguments, "result": t.result}
+            for t in trace
+        ],
+    }
+
+
+def run_turn(user_message: str,
+             history: list[dict[str, Any]] | None = None) -> CoachReply:
+    """Façade synchrone qui draine `run_turn_stream`.
+
+    Utilisée par le dashboard Streamlit legacy. Pour le path API (FastAPI),
+    appeler `run_turn_stream` directement.
+    """
+    async def _drain() -> dict[str, Any] | None:
+        final: dict[str, Any] | None = None
+        async for ev in run_turn_stream(user_message, history):
+            if ev["type"] == "final":
+                final = ev
+        return final
+
+    final = asyncio.run(_drain())
+    if final is None:
+        return CoachReply(content="", thinking=None, tool_trace=[])
     return CoachReply(
-        content=last_content
-        or "Le coach n'a pas pu finaliser sa réponse (trop de tours d'outils).",
-        thinking=final_thinking,
-        tool_trace=trace,
-        raw_messages=messages,
+        content=final["content"],
+        thinking=final["thinking"],
+        tool_trace=[ToolTrace(**t) for t in final["tool_trace"]],
     )

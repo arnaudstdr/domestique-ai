@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import json
 import time
 from collections.abc import AsyncGenerator
@@ -18,7 +17,7 @@ from domestique_ai.api.schemas import (
     CoachMessage,
     CoachSession,
 )
-from domestique_ai.llm.coach import CoachReply, run_turn
+from domestique_ai.llm.coach import run_turn_stream
 from domestique_ai.llm.conversations import (
     append_message,
     delete_session,
@@ -30,9 +29,6 @@ from domestique_ai.llm.ollama_client import OllamaError
 
 router = APIRouter(prefix="/api/coach", tags=["coach"])
 log = get_logger("coach")
-
-# Cadence d'émission des tokens (synchrone côté run_turn — on simule).
-_TOKEN_STREAM_DELAY_SEC = 0.02
 
 
 def _sse_event(event_type: str, payload: dict[str, Any] | str) -> dict[str, str]:
@@ -86,31 +82,22 @@ def remove_session(session_id: str) -> None:
     delete_session(session_id)
 
 
-def _tokenize(text: str) -> list[str]:
-    """Découpe un texte en pseudo-tokens (mots + espaces préservés)."""
-    if not text:
-        return []
-    tokens: list[str] = []
-    buf = ""
-    for char in text:
-        buf += char
-        if char in (" ", "\n", "\t"):
-            tokens.append(buf)
-            buf = ""
-    if buf:
-        tokens.append(buf)
-    return tokens
-
-
-async def _run_coach_turn(
+async def _coach_event_stream(
     label: str,
     user_message: str,
-    history: list[dict[str, Any]] | None = None,
-) -> CoachReply:
-    """Wrapper autour de `run_turn` avec logging détaillé.
+    history: list[dict[str, Any]] | None,
+    *,
+    session_id: str | None = None,
+    persist_to_session: str | None = None,
+) -> AsyncGenerator[dict[str, str], None]:
+    """Pipeline SSE partagé entre `/chat` et `/analyze`.
 
-    Émet trois traces : début, fin (avec stats), erreur (avec traceback). Le
-    label permet de distinguer chat / analyze dans les logs.
+    Émet successivement :
+    - `session_id` (uniquement si fourni — premier tour d'une nouvelle session)
+    - des deltas `thinking` à concaténer côté client
+    - des paires `tool_call` / `tool_result` pour chaque outil appelé
+    - des deltas `token` à concaténer côté client
+    - `error` en cas de souci, puis `done` dans tous les cas
     """
     start = time.perf_counter()
     log.info(
@@ -119,38 +106,66 @@ async def _run_coach_turn(
         len(user_message),
         len(history or []),
     )
+
+    if session_id is not None:
+        yield _sse_event(
+            "session_id", {"type": "session_id", "value": session_id}
+        )
+
+    final_payload: dict[str, Any] | None = None
     try:
-        reply = await asyncio.to_thread(run_turn, user_message, history)
+        async for ev in run_turn_stream(user_message, history):
+            if ev["type"] == "final":
+                final_payload = ev
+                continue
+            yield _sse_event(ev["type"], ev)
     except OllamaError as exc:
         log.error("%s | Ollama error: %s", label, exc)
-        raise
-    except Exception:
-        log.exception("%s | run_turn unhandled exception", label)
-        raise
+        yield _sse_event(
+            "error", {"type": "error", "value": f"Ollama indisponible: {exc}"}
+        )
+        yield _sse_event("done", {"type": "done"})
+        return
+    except Exception as exc:  # noqa: BLE001 — on remonte tout au front
+        log.exception("%s | run_turn_stream unhandled exception", label)
+        yield _sse_event(
+            "error", {"type": "error", "value": f"Coach erreur: {exc}"}
+        )
+        yield _sse_event("done", {"type": "done"})
+        return
 
     duration = time.perf_counter() - start
-    tool_names = [t.name for t in reply.tool_trace]
-    log.info(
-        "%s done | duration=%.1fs content=%d chars tools=%s thinking=%s",
-        label,
-        duration,
-        len(reply.content or ""),
-        tool_names or "[]",
-        "yes" if reply.thinking else "no",
-    )
-    return reply
+    if final_payload is not None:
+        log.info(
+            "%s done | duration=%.1fs content=%d chars tools=%s thinking=%s",
+            label,
+            duration,
+            len(final_payload["content"] or ""),
+            [t["name"] for t in final_payload["tool_trace"]] or "[]",
+            "yes" if final_payload.get("thinking") else "no",
+        )
+        if persist_to_session is not None:
+            append_message(
+                persist_to_session,
+                "assistant",
+                {
+                    "role": "assistant",
+                    "content": final_payload["content"],
+                    "thinking": final_payload["thinking"],
+                    "tool_calls": final_payload["tool_trace"],
+                },
+            )
+
+    yield _sse_event("done", {"type": "done"})
 
 
 @router.post("/chat")
 async def post_chat(payload: CoachChatRequest) -> EventSourceResponse:
     """Tour de conversation avec le coach, streamé en Server-Sent Events.
 
-    Émet successivement :
-    - session_id : id de la session (créé à la volée si absent)
-    - thinking : contenu <think> (si dispo)
-    - tool_call / tool_result pour chaque outil appelé
-    - token : tokens de la réponse finale, mot à mot
-    - done : fin du tour
+    Changement sémantique vs. l'ancienne version : les events `thinking` et
+    `token` sont désormais des DELTAS — le client doit les concaténer au lieu
+    de remplacer. La valeur complète n'est jamais envoyée d'un coup.
     """
     if not (payload.message and payload.message.strip()):
         raise HTTPException(
@@ -169,81 +184,15 @@ async def post_chat(payload: CoachChatRequest) -> EventSourceResponse:
     append_message(session_id, "user", {"role": "user", "content": user_message})
     label = f"chat[{session_id[:8]}{' new' if is_new_session else ''}]"
 
-    async def event_stream() -> AsyncGenerator[dict[str, str], None]:
-        yield _sse_event(
-            "session_id", {"type": "session_id", "value": session_id}
+    return EventSourceResponse(
+        _coach_event_stream(
+            label,
+            user_message,
+            history,
+            session_id=session_id,
+            persist_to_session=session_id,
         )
-
-        try:
-            reply = await _run_coach_turn(label, user_message, history)
-        except OllamaError as exc:
-            yield _sse_event(
-                "error",
-                {"type": "error", "value": f"Ollama indisponible: {exc}"},
-            )
-            yield _sse_event("done", {"type": "done"})
-            return
-        except Exception as exc:  # noqa: BLE001 — on remonte tout au front
-            yield _sse_event(
-                "error",
-                {"type": "error", "value": f"Coach erreur: {exc}"},
-            )
-            yield _sse_event("done", {"type": "done"})
-            return
-
-        if reply.thinking:
-            yield _sse_event(
-                "thinking",
-                {"type": "thinking", "value": reply.thinking},
-            )
-
-        tool_trace_payload: list[dict[str, Any]] = []
-        for trace in reply.tool_trace:
-            tool_trace_payload.append(
-                {
-                    "name": trace.name,
-                    "arguments": trace.arguments,
-                    "result": trace.result,
-                }
-            )
-            yield _sse_event(
-                "tool_call",
-                {
-                    "type": "tool_call",
-                    "name": trace.name,
-                    "args": trace.arguments,
-                },
-            )
-            yield _sse_event(
-                "tool_result",
-                {
-                    "type": "tool_result",
-                    "name": trace.name,
-                    "result": trace.result,
-                },
-            )
-
-        for token in _tokenize(reply.content):
-            yield _sse_event(
-                "token",
-                {"type": "token", "value": token},
-            )
-            await asyncio.sleep(_TOKEN_STREAM_DELAY_SEC)
-
-        append_message(
-            session_id,
-            "assistant",
-            {
-                "role": "assistant",
-                "content": reply.content,
-                "thinking": reply.thinking,
-                "tool_calls": tool_trace_payload,
-            },
-        )
-
-        yield _sse_event("done", {"type": "done"})
-
-    return EventSourceResponse(event_stream())
+    )
 
 
 @router.post("/analyze")
@@ -251,8 +200,9 @@ async def post_analyze(payload: CoachAnalyzeRequest) -> EventSourceResponse:
     """Analyse one-shot (sans persistance de session) — typiquement appelée
     depuis la page détail d'une activité.
 
-    Émet les mêmes événements SSE que /chat sauf `session_id` : aucune
+    Émet les mêmes events SSE que `/chat` sauf `session_id` : aucune
     conversation n'est créée en base, l'analyse reste éphémère côté serveur.
+    Les events `thinking` et `token` sont des DELTAS (à concaténer côté client).
     """
     if not (payload.prompt and payload.prompt.strip()):
         raise HTTPException(
@@ -260,58 +210,12 @@ async def post_analyze(payload: CoachAnalyzeRequest) -> EventSourceResponse:
             detail="prompt vide.",
         )
 
-    prompt = payload.prompt
-    label = "analyze"
-
-    async def event_stream() -> AsyncGenerator[dict[str, str], None]:
-        try:
-            reply = await _run_coach_turn(label, prompt)
-        except OllamaError as exc:
-            yield _sse_event(
-                "error",
-                {"type": "error", "value": f"Ollama indisponible: {exc}"},
-            )
-            yield _sse_event("done", {"type": "done"})
-            return
-        except Exception as exc:  # noqa: BLE001 — on remonte tout au front
-            yield _sse_event(
-                "error",
-                {"type": "error", "value": f"Coach erreur: {exc}"},
-            )
-            yield _sse_event("done", {"type": "done"})
-            return
-
-        if reply.thinking:
-            yield _sse_event(
-                "thinking",
-                {"type": "thinking", "value": reply.thinking},
-            )
-
-        for trace in reply.tool_trace:
-            yield _sse_event(
-                "tool_call",
-                {
-                    "type": "tool_call",
-                    "name": trace.name,
-                    "args": trace.arguments,
-                },
-            )
-            yield _sse_event(
-                "tool_result",
-                {
-                    "type": "tool_result",
-                    "name": trace.name,
-                    "result": trace.result,
-                },
-            )
-
-        for token in _tokenize(reply.content):
-            yield _sse_event(
-                "token",
-                {"type": "token", "value": token},
-            )
-            await asyncio.sleep(_TOKEN_STREAM_DELAY_SEC)
-
-        yield _sse_event("done", {"type": "done"})
-
-    return EventSourceResponse(event_stream())
+    return EventSourceResponse(
+        _coach_event_stream(
+            "analyze",
+            payload.prompt,
+            history=None,
+            session_id=None,
+            persist_to_session=None,
+        )
+    )
