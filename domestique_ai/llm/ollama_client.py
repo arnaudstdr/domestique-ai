@@ -39,6 +39,7 @@ def _async_client() -> ollama.AsyncClient:
 def chat(messages: list[dict[str, Any]],
          tools: list[dict[str, Any]] | None = None,
          model: str | None = None,
+         think: bool = True,
          options: dict[str, Any] | None = None) -> dict[str, Any]:
     """
     Appelle Ollama en mode bloquant et retourne le message brut.
@@ -46,6 +47,9 @@ def chat(messages: list[dict[str, Any]],
     Le dict retourné a la forme {"role": "assistant", "content": str,
     "thinking": str | None, "tool_calls": list | None} et est directement
     réinjectable dans `messages` au tour suivant.
+
+    `think=True` par défaut côté sync : le dashboard legacy n'enchaîne pas
+    plusieurs tours, donc on garde la fiabilité maximale.
     """
     target_model = model or get_ollama_model()
     try:
@@ -53,7 +57,7 @@ def chat(messages: list[dict[str, Any]],
             model=target_model,
             messages=messages,
             tools=tools,
-            think=False,
+            think=think,
             options=options or {},
         )
     except ConnectionError as exc:
@@ -87,6 +91,7 @@ async def stream_chat(
     messages: list[dict[str, Any]],
     tools: list[dict[str, Any]] | None = None,
     model: str | None = None,
+    think: bool = False,
     options: dict[str, Any] | None = None,
 ) -> AsyncIterator[dict[str, Any]]:
     """Yield des chunks Ollama normalisés au fur et à mesure de la génération.
@@ -94,6 +99,11 @@ async def stream_chat(
     Chaque chunk : `{"content": str, "thinking": str, "tool_calls": list|None,
     "done": bool}`. `content` et `thinking` sont des DELTAS incrémentaux.
     `tool_calls` arrive en bloc, en pratique sur le dernier chunk d'un tour.
+
+    `think` contrôle l'émission du bloc <think>. Sur gemma3/4, `think=False`
+    rend le tool-calling moins fiable (le modèle saute les tools et répond
+    de tête). Garder `think=True` au moins sur le 1ᵉʳ tour pour fiabiliser
+    la décision d'appeler des tools.
     """
     target_model = model or get_ollama_model()
     try:
@@ -102,7 +112,7 @@ async def stream_chat(
             messages=messages,
             tools=tools,
             stream=True,
-            think=False,
+            think=think,
             options=options or {},
         )
         async for chunk in stream:

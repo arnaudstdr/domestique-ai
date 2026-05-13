@@ -109,11 +109,16 @@ async def run_turn_stream(
     accumulated_content = ""
     accumulated_thinking = ""
 
-    for _ in range(MAX_TOOL_LOOPS):
+    for iteration in range(MAX_TOOL_LOOPS):
         turn_content = ""
         turn_tool_calls: list[dict[str, Any]] | None = None
+        # `think=True` sur le 1ᵉʳ tour pour forcer la décision d'appeler les
+        # tools (sans thinking, gemma saute les tools et hallucine). Sur les
+        # tours suivants, `think=False` : le modèle synthétise des données
+        # déjà concrètes, ça gagne du temps sans nuire à la qualité.
+        think = iteration == 0
 
-        async for chunk in stream_chat(messages, tools=TOOL_SCHEMAS):
+        async for chunk in stream_chat(messages, tools=TOOL_SCHEMAS, think=think):
             if chunk["content"]:
                 turn_content += chunk["content"]
                 accumulated_content += chunk["content"]
