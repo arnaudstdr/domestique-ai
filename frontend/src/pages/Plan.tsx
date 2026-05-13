@@ -1,8 +1,23 @@
 import { useEffect, useState } from "react";
 import { api, ApiError } from "../api/client";
-import type { PlanDetail, PlanSummary } from "../api/types";
+import type { Objective, PlanDetail, PlanSummary } from "../api/types";
 import PlanCalendar from "../components/PlanCalendar";
 import { useToast } from "../hooks/useToast";
+
+const OBJECTIVE_LABELS: Record<Objective["type"], string> = {
+  cyclosportive: "Cyclosportive",
+  course: "Course",
+  cyclo: "Cyclo",
+  maintenance: "Maintenance",
+};
+
+function daysUntil(dateStr: string): number | null {
+  const target = new Date(dateStr + "T00:00:00");
+  if (Number.isNaN(target.getTime())) return null;
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  return Math.round((target.getTime() - today.getTime()) / 86_400_000);
+}
 
 function formatCreatedAt(iso: string): string {
   if (!iso) return "—";
@@ -41,6 +56,7 @@ export default function Plan() {
   const [plans, setPlans] = useState<PlanSummary[]>([]);
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [detail, setDetail] = useState<PlanDetail | null>(null);
+  const [objective, setObjective] = useState<Objective | null>(null);
   const [sessionsPerWeek, setSessionsPerWeek] = useState(4);
   const [focus, setFocus] = useState("");
   const [generating, setGenerating] = useState(false);
@@ -68,6 +84,13 @@ export default function Plan() {
 
   useEffect(() => {
     refreshList(true);
+    api.objective
+      .get()
+      .then((obj) => setObjective(obj))
+      .catch((err) => {
+        const msg = err instanceof ApiError ? err.message : String(err);
+        push(`Erreur chargement objectif : ${msg}`, "error");
+      });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -149,8 +172,62 @@ export default function Plan() {
     }
   }
 
+  const remainingDays = objective?.date ? daysUntil(objective.date) : null;
+
   return (
     <div className="space-y-4">
+      <div className="card space-y-2">
+        <h2 className="text-base font-medium">🎯 Objectif courant</h2>
+        {!objective ? (
+          <div className="text-sm text-muted">
+            Aucun objectif défini. Le plan sera généré en mode « maintenance ».
+            Renseignez{" "}
+            <code className="rounded bg-surface/60 px-1 text-xs">
+              data/objective.yaml
+            </code>{" "}
+            pour cibler une épreuve.
+          </div>
+        ) : (
+          <div className="space-y-1 text-sm">
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-gray-100">
+                {OBJECTIVE_LABELS[objective.type] || objective.type}
+              </span>
+              {objective.date && (
+                <span className="pill bg-accent/15 text-accent">
+                  {objective.date}
+                  {remainingDays != null && remainingDays >= 0 && (
+                    <span className="ml-1 text-muted">
+                      · J-{remainingDays}
+                    </span>
+                  )}
+                </span>
+              )}
+            </div>
+            {(objective.distance_km || objective.elevation_m) && (
+              <div className="text-xs text-muted">
+                {objective.distance_km != null && (
+                  <span>{objective.distance_km} km</span>
+                )}
+                {objective.distance_km != null &&
+                  objective.elevation_m != null && <span> · </span>}
+                {objective.elevation_m != null && (
+                  <span>{objective.elevation_m} m D+</span>
+                )}
+              </div>
+            )}
+            {objective.target_ftp != null && (
+              <div className="text-xs text-muted">
+                FTP cible : {objective.target_ftp} W
+              </div>
+            )}
+            {objective.notes && (
+              <div className="text-xs italic text-muted">{objective.notes}</div>
+            )}
+          </div>
+        )}
+      </div>
+
       <div className="card space-y-3">
         <h2 className="text-base font-medium">📋 Générer un plan</h2>
         <div className="grid grid-cols-2 gap-3">
