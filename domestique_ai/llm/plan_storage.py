@@ -15,7 +15,11 @@ from pathlib import Path
 from typing import Any
 
 from domestique_ai.config import get_db_path
-from domestique_ai.processing.plan_builder import Workout
+from domestique_ai.processing.plan_builder import Workout, build_training_plan
+
+
+class PlanGenerationError(RuntimeError):
+    """Erreur fonctionnelle de génération de plan (input invalide, etc.)."""
 
 
 def _connect(db_path: Path | None = None) -> sqlite3.Connection:
@@ -126,3 +130,85 @@ def delete_plan(plan_id: int, db_path: Path | None = None) -> bool:
         return cursor.rowcount > 0
     finally:
         conn.close()
+
+
+def build_and_save_plan(
+    sessions_per_week: int = 4,
+    focus: str | None = None,
+) -> tuple[int, list[Workout], dict[str, Any]]:
+    """Génère un plan d'entraînement et le persiste.
+
+    Lit l'objectif (`data/objective.yaml`), l'availability
+    (`data/availability.yaml`), calcule le CTL courant depuis la DB, puis
+    appelle ``build_training_plan`` et ``save_plan``.
+
+    Retourne ``(plan_id, plan, context)`` où ``context`` contient les
+    métadonnées utiles aux appelants (CTL courant, date cible, type d'objectif,
+    flag availability_loaded, jours utilisés). Cette fonction est appelée à la
+    fois par le tool LLM `generate_training_plan` et par l'endpoint
+    `POST /api/plan`.
+
+    Lève ``PlanGenerationError`` sur input invalide / plan vide.
+    Lève ``AvailabilityError`` si `availability.yaml` est mal formé.
+    """
+    from domestique_ai.llm.availability import load_availability
+    from domestique_ai.llm.objectives import load_objective
+    from domestique_ai.llm.tools import (
+        calculate_ctl_atl_tsb,
+        fetch_activities_from_db,
+    )
+    from domestique_ai.processing.plan_builder import days_used
+
+    if sessions_per_week not in (2, 3, 4, 5, 6, 7):
+        raise PlanGenerationError(
+            f"sessions_per_week doit être entre 2 et 7, reçu {sessions_per_week}."
+        )
+
+    activities = fetch_activities_from_db()
+    today = _dt.date.today()
+    curves = calculate_ctl_atl_tsb(activities, end_date=today)
+    ctl_current = float(curves[-1]["CTL"]) if curves else 0.0
+
+    objective = load_objective()
+    target_date: _dt.date | None = None
+    target_event_type = "cyclosportive"
+    if objective is not None:
+        target_event_type = objective.type
+        if objective.date:
+            try:
+                target_date = _dt.date.fromisoformat(objective.date)
+            except ValueError:
+                target_date = None
+
+    availability = load_availability()
+
+    plan = build_training_plan(
+        target_date=target_date,
+        ctl_current=ctl_current,
+        sessions_per_week=sessions_per_week,
+        availability=availability,
+        target_event_type=target_event_type,
+        focus=focus,
+        start_date=today,
+    )
+
+    if not plan:
+        raise PlanGenerationError(
+            "Aucune séance générée (date cible déjà passée ?)."
+        )
+
+    plan_id = save_plan(
+        plan,
+        target_date=target_date,
+        target_event_type=target_event_type,
+        sessions_per_week=sessions_per_week,
+    )
+
+    context = {
+        "ctl_current": round(ctl_current, 1),
+        "target_date": target_date.isoformat() if target_date else None,
+        "target_event_type": target_event_type,
+        "availability_loaded": availability is not None,
+        "days_used": days_used(plan),
+    }
+    return plan_id, plan, context

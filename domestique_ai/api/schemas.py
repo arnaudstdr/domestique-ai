@@ -210,3 +210,53 @@ class CoachChatRequest(BaseModel):
 
 class CoachAnalyzeRequest(BaseModel):
     prompt: str
+
+
+# ---- Plan d'entraînement -----------------------------------------------------
+
+
+class WorkoutStepSchema(BaseModel):
+    phase: Literal["warmup", "active", "rest", "cooldown"]
+    zone: str
+    duration_sec: int
+    repeat: int = 1
+
+
+class WorkoutSchema(BaseModel):
+    date: str
+    name: str
+    sport: str = "cycling"
+    kind: str
+    duration_min: int
+    target_zone: str
+    structure: list[WorkoutStepSchema] = Field(default_factory=list)
+    estimated_tss: float = 0.0
+    notes: str = ""
+
+
+class PlanSummary(BaseModel):
+    """Vue compacte d'un plan persisté (liste des plans)."""
+
+    id: int
+    created_at: str
+    target_date: str | None = None
+    target_event_type: str | None = None
+    sessions_per_week: int | None = None
+    weeks: int | None = None
+
+
+class PlanDetail(BaseModel):
+    """Plan complet avec toutes ses séances."""
+
+    id: int
+    created_at: str
+    target_date: str | None = None
+    target_event_type: str | None = None
+    sessions_per_week: int | None = None
+    weeks: int | None = None
+    workouts: list[WorkoutSchema]
+
+
+class PlanCreateRequest(BaseModel):
+    sessions_per_week: int = Field(default=4, ge=2, le=7)
+    focus: str | None = None

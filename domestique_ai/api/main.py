@@ -30,6 +30,9 @@ from domestique_ai.api.routers import (
     objective as objective_router,
 )
 from domestique_ai.api.routers import (
+    plan as plan_router,
+)
+from domestique_ai.api.routers import (
     strava as strava_router,
 )
 from domestique_ai.config import REPO_ROOT
@@ -168,6 +171,7 @@ app.include_router(morning_router.router)
 app.include_router(objective_router.router)
 app.include_router(strava_router.router)
 app.include_router(coach_router.router)
+app.include_router(plan_router.router)
 
 
 @app.get("/api/health", tags=["meta"])

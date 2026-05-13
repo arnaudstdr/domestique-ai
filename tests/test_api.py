@@ -254,6 +254,9 @@ def test_app_routes_registered() -> None:
         "/api/strava/backfill-hr-zones",
         "/api/coach/sessions",
         "/api/coach/chat",
+        "/api/plan",
+        "/api/plan/{plan_id}",
+        "/api/plan/{plan_id}/export.zip",
     }
     missing = expected - paths
     assert not missing, f"Endpoints manquants : {missing}"
