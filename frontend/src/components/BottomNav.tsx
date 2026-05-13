@@ -11,7 +11,7 @@ const ITEMS: { to: string; label: string; icon: string }[] = [
 export default function BottomNav() {
   return (
     <nav
-      className="fixed bottom-0 inset-x-0 z-30 bg-card/95 backdrop-blur
+      className="fixed bottom-0 inset-x-0 z-[1100] bg-card/95 backdrop-blur
                  border-t border-white/5 pb-[env(safe-area-inset-bottom)]"
     >
       <ul className="grid grid-cols-5">

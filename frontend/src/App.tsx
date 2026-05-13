@@ -11,7 +11,7 @@ export default function App() {
   return (
     <div className="min-h-screen bg-surface text-gray-100">
       <header
-        className="sticky top-0 z-20 bg-surface/95 backdrop-blur border-b border-white/5
+        className="sticky top-0 z-[1100] bg-surface/95 backdrop-blur border-b border-white/5
                    pt-[env(safe-area-inset-top)]"
       >
         <div className="mx-auto max-w-3xl px-4 py-3 flex items-center justify-between">
