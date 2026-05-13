@@ -200,3 +200,82 @@ export function streamCoachAnalyze(
 ): Promise<void> {
   return consumeSseStream("/api/coach/analyze", { prompt }, onEvent, signal);
 }
+
+// ---- Garmin push -------------------------------------------------------------
+
+export type GarminPushEvent =
+  | { type: "start"; total: number }
+  | {
+      type: "progress";
+      index: number;
+      total: number;
+      workout: { date: string; name: string };
+    }
+  | {
+      type: "result";
+      workout: { date: string; name: string };
+      workout_id: number | null;
+      scheduled: boolean;
+      url?: string;
+      error?: string;
+    }
+  | { type: "error"; value: string }
+  | { type: "done"; uploaded: number; errors: number };
+
+async function consumeGarminSse(
+  path: string,
+  body: unknown,
+  onEvent: (event: GarminPushEvent) => void,
+  signal?: AbortSignal,
+): Promise<void> {
+  const response = await fetch(path, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Accept: "text/event-stream" },
+    body: JSON.stringify(body),
+    signal,
+  });
+  if (!response.ok || !response.body) {
+    throw new ApiError(response.status, response.statusText);
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+
+  while (true) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true }).replace(/\r\n/g, "\n");
+    let idx;
+    while ((idx = buffer.indexOf("\n\n")) !== -1) {
+      const chunk = buffer.slice(0, idx);
+      buffer = buffer.slice(idx + 2);
+      const dataLine = chunk
+        .split("\n")
+        .find((l) => l.startsWith("data:"))
+        ?.replace(/^data:\s?/, "");
+      if (!dataLine) continue;
+      try {
+        const event = JSON.parse(dataLine) as GarminPushEvent;
+        onEvent(event);
+        if (event.type === "done") return;
+      } catch {
+        // ignore malformed frames
+      }
+    }
+  }
+}
+
+export function streamGarminPush(
+  planId: number,
+  schedule: boolean,
+  onEvent: (event: GarminPushEvent) => void,
+  signal?: AbortSignal,
+): Promise<void> {
+  return consumeGarminSse(
+    `/api/plan/${planId}/push-garmin`,
+    { schedule },
+    onEvent,
+    signal,
+  );
+}

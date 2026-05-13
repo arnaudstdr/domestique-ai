@@ -257,6 +257,7 @@ def test_app_routes_registered() -> None:
         "/api/plan",
         "/api/plan/{plan_id}",
         "/api/plan/{plan_id}/export.zip",
+        "/api/plan/{plan_id}/push-garmin",
     }
     missing = expected - paths
     assert not missing, f"Endpoints manquants : {missing}"

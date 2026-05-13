@@ -194,6 +194,28 @@ ollama pull gemma4:31b-cloud
 ollama serve
 ```
 
+## Garmin Connect setup (push de plan)
+
+Le bouton « ☁️ Pousser sur Garmin Connect » de la page Plan upload chaque
+séance dans Garmin Connect (et la planifie sur le calendrier si demandé). Le
+serveur n'expose **pas** d'écran de connexion : on seede le cache token une
+seule fois depuis le shell, puis l'API réutilise ce cache silencieusement.
+
+1. Renseigner `GARMIN_EMAIL` et `GARMIN_PASSWORD` dans `.env`.
+2. Lancer le login interactif (prompt MFA si nécessaire) :
+
+   ```bash
+   python -m domestique_ai.export.garmin_connect
+   ```
+
+3. Le token est persisté dans `data/.garmin_tokens/` (gitignoré). À refaire
+   uniquement si Garmin invalide la session (changement de mot de passe,
+   token expiré).
+
+Si l'API reçoit un push alors que le cache est absent ou invalide, le stream
+SSE émet un event `error` avec le message *« Token invalide, relance le setup
+CLI »* — la PWA affiche alors un lien vers cette commande.
+
 ## Usage
 
 ```bash

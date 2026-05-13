@@ -260,3 +260,7 @@ class PlanDetail(BaseModel):
 class PlanCreateRequest(BaseModel):
     sessions_per_week: int = Field(default=4, ge=2, le=7)
     focus: str | None = None
+
+
+class PlanPushGarminRequest(BaseModel):
+    schedule: bool = True

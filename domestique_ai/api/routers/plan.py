@@ -2,19 +2,31 @@
 
 from __future__ import annotations
 
+import asyncio
+import json
+from collections.abc import AsyncGenerator
+from typing import Any
+
 from fastapi import APIRouter, HTTPException, status
 from fastapi.responses import Response
+from sse_starlette.sse import EventSourceResponse
 
 from domestique_ai.api.logging import get_logger
 from domestique_ai.api.schemas import (
     PlanCreateRequest,
     PlanDetail,
+    PlanPushGarminRequest,
     PlanSummary,
     WorkoutSchema,
     WorkoutStepSchema,
 )
 from domestique_ai.config import get_hr_max, get_hr_rest
 from domestique_ai.export.fit import plan_to_zip
+from domestique_ai.export.garmin_connect import (
+    GarminPushError,
+    get_client,
+    push_workout,
+)
 from domestique_ai.llm.availability import AvailabilityError
 from domestique_ai.llm.plan_storage import (
     PlanGenerationError,
@@ -148,6 +160,133 @@ def remove_plan(plan_id: int) -> None:
             detail=f"Plan {plan_id} introuvable.",
         )
     log.info("Plan %d supprimé", plan_id)
+
+
+def _sse_event(payload: dict[str, Any]) -> dict[str, str]:
+    """Construit un événement SSE compatible sse-starlette."""
+    return {
+        "event": "message",
+        "data": json.dumps(payload, ensure_ascii=False),
+        "id": payload.get("type", "message"),
+    }
+
+
+async def _push_garmin_stream(
+    plan: list[Workout], schedule: bool
+) -> AsyncGenerator[dict[str, str], None]:
+    """Pipeline SSE pour le push d'un plan vers Garmin Connect.
+
+    Émet successivement :
+    - `start` (total)
+    - pour chaque séance : `progress` (avant l'upload) puis `result` (après)
+    - `done` avec compteurs final (uploaded, errors) ou `error` + `done`
+
+    `push_workout` est synchrone : on l'appelle via `asyncio.to_thread` pour ne
+    pas bloquer la boucle ASGI (le réseau Garmin peut prendre plusieurs secondes
+    par séance).
+    """
+    total = len(plan)
+    yield _sse_event({"type": "start", "total": total})
+
+    try:
+        client = await asyncio.to_thread(get_client)
+    except GarminPushError as exc:
+        log.warning("Push Garmin : auth échouée — %s", exc)
+        yield _sse_event({"type": "error", "value": str(exc)})
+        yield _sse_event({"type": "done", "uploaded": 0, "errors": total})
+        return
+
+    hr_rest = get_hr_rest()
+    hr_max = get_hr_max()
+    uploaded = 0
+    errors = 0
+
+    for idx, workout in enumerate(plan):
+        yield _sse_event(
+            {
+                "type": "progress",
+                "index": idx,
+                "total": total,
+                "workout": {"date": workout.date, "name": workout.name},
+            }
+        )
+        try:
+            workout_id = await asyncio.to_thread(
+                push_workout,
+                client,
+                workout,
+                hr_rest=hr_rest,
+                hr_max=hr_max,
+            )
+        except GarminPushError as exc:
+            errors += 1
+            yield _sse_event(
+                {
+                    "type": "result",
+                    "workout": {"date": workout.date, "name": workout.name},
+                    "workout_id": None,
+                    "scheduled": False,
+                    "error": str(exc),
+                }
+            )
+            continue
+
+        scheduled = False
+        scheduling_error: str | None = None
+        if schedule:
+            try:
+                await asyncio.to_thread(
+                    client.schedule_workout, workout_id, workout.date
+                )
+                scheduled = True
+            except Exception as exc:  # noqa: BLE001 — on remonte au front
+                scheduling_error = str(exc)
+
+        result: dict[str, Any] = {
+            "type": "result",
+            "workout": {"date": workout.date, "name": workout.name},
+            "workout_id": workout_id,
+            "scheduled": scheduled,
+            "url": f"https://connect.garmin.com/modern/workout/{workout_id}",
+        }
+        if scheduling_error:
+            result["error"] = f"planification : {scheduling_error}"
+            errors += 1
+        else:
+            uploaded += 1
+        yield _sse_event(result)
+
+    log.info(
+        "Push Garmin terminé : uploaded=%d errors=%d total=%d",
+        uploaded,
+        errors,
+        total,
+    )
+    yield _sse_event(
+        {"type": "done", "uploaded": uploaded, "errors": errors}
+    )
+
+
+@router.post("/{plan_id}/push-garmin")
+async def push_plan_garmin(
+    plan_id: int, payload: PlanPushGarminRequest
+) -> EventSourceResponse:
+    """Push un plan vers Garmin Connect en streamant la progression (SSE).
+
+    Le cache token Garmin doit être présent (lancer
+    `python -m domestique_ai.export.garmin_connect` une fois pour seeder).
+    Si l'auth échoue, on émet un event `error` puis `done` (pas d'exception HTTP
+    pour rester compatible avec un client SSE).
+    """
+    plan = load_plan(plan_id)
+    if plan is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Plan {plan_id} introuvable.",
+        )
+
+    log.info("Push Garmin demandé pour plan %d (schedule=%s)", plan_id, payload.schedule)
+    return EventSourceResponse(_push_garmin_stream(plan, payload.schedule))
 
 
 @router.get("/{plan_id}/export.zip")
