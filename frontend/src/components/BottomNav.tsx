@@ -4,6 +4,7 @@ const ITEMS: { to: string; label: string; icon: string }[] = [
   { to: "/", label: "Dashboard", icon: "📊" },
   { to: "/activites", label: "Activités", icon: "🚴" },
   { to: "/matin", label: "Matin", icon: "🌅" },
+  { to: "/plan", label: "Plan", icon: "📋" },
   { to: "/coach", label: "Coach", icon: "🤖" },
 ];
 
@@ -13,7 +14,7 @@ export default function BottomNav() {
       className="fixed bottom-0 inset-x-0 z-30 bg-card/95 backdrop-blur
                  border-t border-white/5 pb-[env(safe-area-inset-bottom)]"
     >
-      <ul className="grid grid-cols-4">
+      <ul className="grid grid-cols-5">
         {ITEMS.map((item) => (
           <li key={item.to}>
             <NavLink

@@ -5,6 +5,7 @@ import Activities from "./pages/Activities";
 import ActivityDetail from "./pages/ActivityDetail";
 import Morning from "./pages/Morning";
 import Coach from "./pages/Coach";
+import Plan from "./pages/Plan";
 
 export default function App() {
   return (
@@ -26,6 +27,7 @@ export default function App() {
           <Route path="/activites/:id" element={<ActivityDetail />} />
           <Route path="/matin" element={<Morning />} />
           <Route path="/coach" element={<Coach />} />
+          <Route path="/plan" element={<Plan />} />
         </Routes>
       </main>
       <BottomNav />

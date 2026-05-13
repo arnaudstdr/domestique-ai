@@ -163,3 +163,44 @@ export interface CoachMessage {
   thinking: string | null;
   tool_calls: { name: string; arguments: unknown; result: unknown }[] | null;
 }
+
+// ---- Plan d'entraînement -----------------------------------------------------
+
+export type WorkoutPhase = "warmup" | "active" | "rest" | "cooldown";
+
+export interface WorkoutStep {
+  phase: WorkoutPhase;
+  zone: string;
+  duration_sec: number;
+  repeat: number;
+}
+
+export interface Workout {
+  date: string;
+  name: string;
+  sport: string;
+  kind: string;
+  duration_min: number;
+  target_zone: string;
+  structure: WorkoutStep[];
+  estimated_tss: number;
+  notes: string;
+}
+
+export interface PlanSummary {
+  id: number;
+  created_at: string;
+  target_date: string | null;
+  target_event_type: string | null;
+  sessions_per_week: number | null;
+  weeks: number | null;
+}
+
+export interface PlanDetail extends PlanSummary {
+  workouts: Workout[];
+}
+
+export interface PlanCreateRequest {
+  sessions_per_week: number;
+  focus?: string | null;
+}

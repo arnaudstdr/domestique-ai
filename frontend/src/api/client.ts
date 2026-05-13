@@ -10,6 +10,9 @@ import type {
   MorningResponse,
   Objective,
   OvertrainingResponse,
+  PlanCreateRequest,
+  PlanDetail,
+  PlanSummary,
   RideVolumeResponse,
   SyncResult,
   SyncStatus,
@@ -96,6 +99,28 @@ export const api = {
       http<CoachMessage[]>(`/api/coach/sessions/${sessionId}/messages`),
     deleteSession: (sessionId: string) =>
       http<void>(`/api/coach/sessions/${sessionId}`, { method: "DELETE" }),
+  },
+  plan: {
+    list: (limit = 20) =>
+      http<PlanSummary[]>(`/api/plan?limit=${limit}`),
+    create: (payload: PlanCreateRequest) =>
+      http<PlanDetail>(`/api/plan`, {
+        method: "POST",
+        body: JSON.stringify(payload),
+      }),
+    detail: (id: number) => http<PlanDetail>(`/api/plan/${id}`),
+    remove: (id: number) =>
+      http<void>(`/api/plan/${id}`, { method: "DELETE" }),
+    exportZip: async (id: number): Promise<{ blob: Blob; filename: string }> => {
+      const response = await fetch(`${API_BASE}/api/plan/${id}/export.zip`);
+      if (!response.ok) {
+        throw new ApiError(response.status, response.statusText);
+      }
+      const disposition = response.headers.get("content-disposition") || "";
+      const match = disposition.match(/filename="([^"]+)"/);
+      const filename = match ? match[1] : `plan_${id}.zip`;
+      return { blob: await response.blob(), filename };
+    },
   },
 };
 
