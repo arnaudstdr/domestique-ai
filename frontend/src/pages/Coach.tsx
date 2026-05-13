@@ -222,6 +222,12 @@ export default function Coach() {
       setPending(EMPTY_PENDING);
       setStreaming(false);
       api.coach.sessions().then(setSessions).catch(() => undefined);
+      // Le titre de session est généré côté serveur en arrière-plan après le
+      // 1ᵉʳ échange (~5-15 s). On re-fetch après un délai pour le récupérer
+      // sans attendre que l'utilisateur envoie un autre message.
+      window.setTimeout(() => {
+        api.coach.sessions().then(setSessions).catch(() => undefined);
+      }, 15_000);
     }
   }
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import os
 import time
 import uuid
@@ -43,15 +44,58 @@ setup_logging()
 log = get_logger("main")
 
 
+async def _backfill_session_titles(limit: int = 30) -> None:
+    """Génère les titres manquants pour les sessions existantes (best-effort).
+
+    Tourne séquentiellement pour ne pas saturer Ollama, et s'arrête après 3
+    échecs consécutifs (modèle indisponible). Idempotent : ne touche pas aux
+    sessions qui ont déjà un titre.
+    """
+    from domestique_ai.llm.conversations import (
+        generate_session_title,
+        list_sessions,
+    )
+
+    sessions = list_sessions(limit=limit)
+    missing = [s for s in sessions if not s.get("title") and s["messages"] >= 2]
+    if not missing:
+        return
+    log.info("Backfill titres de session : %d candidates", len(missing))
+    consecutive_failures = 0
+    for sess in missing:
+        try:
+            title = await generate_session_title(sess["session_id"])
+        except Exception:  # noqa: BLE001 — best-effort, jamais fatal
+            log.exception(
+                "Backfill titre échoué (%s)", sess["session_id"][:8]
+            )
+            title = None
+        if title:
+            consecutive_failures = 0
+            log.info(
+                "Backfill titre %s : %r", sess["session_id"][:8], title
+            )
+        else:
+            consecutive_failures += 1
+            if consecutive_failures >= 3:
+                log.warning(
+                    "Backfill titres interrompu après 3 échecs consécutifs."
+                )
+                return
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):  # noqa: ARG001
-    """Logs au démarrage et à l'arrêt pour faciliter le diagnostic en prod."""
+    """Logs au démarrage et à l'arrêt + backfill titres en arrière-plan."""
     setup_logging()
     log.info(
         "DomestiqueAI API démarrée — frontend_dist=%s (présent=%s)",
         _FRONTEND_DIST,
         _FRONTEND_DIST.is_dir(),
     )
+    # Lancement non bloquant — l'API est prête immédiatement, le backfill
+    # tourne en tâche de fond.
+    asyncio.create_task(_backfill_session_titles())
     yield
     log.info("DomestiqueAI API arrêtée.")
 
