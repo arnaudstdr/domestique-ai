@@ -258,7 +258,7 @@ export default function Coach() {
             {sessions.map((s) => (
               <option key={s.session_id} value={s.session_id}>
                 {s.started_at.slice(0, 16).replace("T", " ")} —{" "}
-                {s.preview || "…"}
+                {s.title || s.preview || "…"}
               </option>
             ))}
           </select>

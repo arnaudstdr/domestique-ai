@@ -348,6 +348,13 @@ def init_db(db_path: Path | None = None) -> None:
             "ON conversations(session_id, id)"
         )
         conn.execute("""
+            CREATE TABLE IF NOT EXISTS session_titles (
+                session_id TEXT PRIMARY KEY,
+                title TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            )
+        """)
+        conn.execute("""
             CREATE TABLE IF NOT EXISTS weight_history (
                 date TEXT PRIMARY KEY,
                 weight REAL NOT NULL

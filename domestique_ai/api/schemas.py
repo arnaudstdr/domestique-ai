@@ -194,6 +194,7 @@ class CoachSession(BaseModel):
     started_at: str
     messages: int
     preview: str
+    title: str | None = None
 
 
 class CoachMessage(BaseModel):

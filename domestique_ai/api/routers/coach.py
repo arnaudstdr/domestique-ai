@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import time
 from collections.abc import AsyncGenerator
@@ -21,6 +22,8 @@ from domestique_ai.llm.coach import run_turn_stream
 from domestique_ai.llm.conversations import (
     append_message,
     delete_session,
+    generate_session_title,
+    get_session_title,
     list_sessions,
     load_session,
     new_session_id,
@@ -47,6 +50,7 @@ def get_sessions(limit: int = 20) -> list[CoachSession]:
             started_at=s["started_at"],
             messages=s["messages"],
             preview=(s.get("preview") or "")[:60],
+            title=s.get("title"),
         )
         for s in sessions
     ]
@@ -155,8 +159,24 @@ async def _coach_event_stream(
                     "tool_calls": final_payload["tool_trace"],
                 },
             )
+            # Génère un titre court en arrière-plan après le 1ᵉʳ échange.
+            # `asyncio.create_task` ne bloque pas le yield "done" : l'utilisateur
+            # voit sa réponse tout de suite, le titre arrive ~5 s plus tard via
+            # le poll régulier de /api/coach/sessions côté front.
+            if get_session_title(persist_to_session) is None:
+                asyncio.create_task(_generate_title_safely(persist_to_session))
 
     yield _sse_event("done", {"type": "done"})
+
+
+async def _generate_title_safely(session_id: str) -> None:
+    """Wrapper qui isole les erreurs de génération de titre (pas de remontée)."""
+    try:
+        title = await generate_session_title(session_id)
+        if title:
+            log.info("Titre session %s généré : %r", session_id[:8], title)
+    except Exception:  # noqa: BLE001 — best-effort, on n'interrompt jamais le chat
+        log.exception("Échec génération titre pour session %s", session_id[:8])
 
 
 @router.post("/chat")

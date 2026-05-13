@@ -81,17 +81,107 @@ def delete_session(session_id: str,
             "DELETE FROM conversations WHERE session_id = ?",
             (session_id,),
         )
+        conn.execute(
+            "DELETE FROM session_titles WHERE session_id = ?",
+            (session_id,),
+        )
         conn.commit()
         return cursor.rowcount
     finally:
         conn.close()
 
 
+def get_session_title(session_id: str,
+                      db_path: Path | None = None) -> str | None:
+    """Retourne le titre persisté d'une session, ou ``None`` si absent."""
+    conn = _connect(db_path)
+    try:
+        row = conn.execute(
+            "SELECT title FROM session_titles WHERE session_id = ?",
+            (session_id,),
+        ).fetchone()
+    finally:
+        conn.close()
+    return row[0] if row else None
+
+
+def set_session_title(session_id: str, title: str,
+                      db_path: Path | None = None) -> None:
+    """Persiste (UPSERT) le titre d'une session."""
+    conn = _connect(db_path)
+    try:
+        conn.execute(
+            "INSERT INTO session_titles (session_id, title, updated_at) "
+            "VALUES (?, ?, ?) "
+            "ON CONFLICT(session_id) DO UPDATE SET "
+            "  title = excluded.title, updated_at = excluded.updated_at",
+            (
+                session_id,
+                title.strip(),
+                dt.datetime.now(dt.timezone.utc).isoformat(),
+            ),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+async def generate_session_title(session_id: str,
+                                 db_path: Path | None = None) -> str | None:
+    """Génère un titre court (3-6 mots) via Ollama et le persiste.
+
+    Best-effort : si Ollama échoue ou si la session est vide, retourne ``None``
+    sans rien persister. Appelée en arrière-plan par le router après le 1er
+    échange complet — l'utilisateur a déjà sa réponse, le titre arrive ~5 s
+    plus tard via le poll régulier des sessions.
+    """
+    from domestique_ai.llm.ollama_client import OllamaError, stream_chat
+
+    messages = load_session(session_id, db_path=db_path)
+    excerpts: list[str] = []
+    for msg in messages[:6]:  # max 3 paires user / assistant
+        role = msg.get("role")
+        content = (msg.get("content") or "").strip()
+        if not content:
+            continue
+        if role == "user":
+            excerpts.append(f"[USER]: {content[:300]}")
+        elif role == "assistant":
+            excerpts.append(f"[COACH]: {content[:300]}")
+    if not excerpts:
+        return None
+
+    prompt = (
+        "Donne un titre court (3 à 6 mots, en français) qui résume cette "
+        "conversation entre un cycliste et son coach d'endurance. Renvoie "
+        "UNIQUEMENT le titre, sans guillemets ni ponctuation finale, sans "
+        "préfixe \"Titre :\".\n\n"
+        + "\n".join(excerpts)
+    )
+
+    title = ""
+    try:
+        async for chunk in stream_chat(
+            [{"role": "user", "content": prompt}],
+            think=False,
+        ):
+            title += chunk.get("content") or ""
+    except OllamaError:
+        return None
+
+    title = title.strip().strip("\"'").rstrip(".").strip()
+    if not title:
+        return None
+    title = title[:80]
+    set_session_title(session_id, title, db_path=db_path)
+    return title
+
+
 def list_sessions(limit: int = 50,
                   db_path: Path | None = None) -> list[dict[str, Any]]:
     """
-    Liste les sessions (les plus récentes en premier) avec leur premier
-    message utilisateur comme aperçu.
+    Liste les sessions (les plus récentes en premier) avec leur titre généré
+    (s'il existe) et leur premier message utilisateur comme aperçu de secours.
     """
     conn = _connect(db_path)
     try:
@@ -113,11 +203,16 @@ def list_sessions(limit: int = 50,
             if preview_row:
                 payload = json.loads(preview_row[0])
                 preview = (payload.get("content") or "")[:80]
+            title_row = conn.execute(
+                "SELECT title FROM session_titles WHERE session_id = ?",
+                (session_id,),
+            ).fetchone()
             sessions.append({
                 "session_id": session_id,
                 "started_at": started_at,
                 "messages": count,
                 "preview": preview,
+                "title": title_row[0] if title_row else None,
             })
         return sessions
     finally:

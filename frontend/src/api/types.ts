@@ -155,6 +155,7 @@ export interface CoachSession {
   started_at: string;
   messages: number;
   preview: string;
+  title: string | null;
 }
 
 export interface CoachMessage {
