@@ -42,6 +42,7 @@ export default function Coach() {
   const [streaming, setStreaming] = useState(false);
   const [pending, setPending] = useState<PendingAssistant>(EMPTY_PENDING);
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const pendingRef = useRef<PendingAssistant>(EMPTY_PENDING);
   // Flag levé quand on vient de recevoir un session_id du serveur (premier tour
   // d'une nouvelle session) : on doit alors ignorer le prochain fetch déclenché
@@ -85,6 +86,16 @@ export default function Coach() {
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, pending]);
+
+  // Auto-grow du textarea : on remet la hauteur à `auto` pour lire un
+  // `scrollHeight` propre, puis on l'aligne dessus. Le `max-h-32` du CSS cap la
+  // hauteur visible et `overflow-y-auto` prend le relais via le scroll interne.
+  useEffect(() => {
+    const el = textareaRef.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = `${el.scrollHeight}px`;
+  }, [draft]);
 
   function updatePending(patch: (p: PendingAssistant) => PendingAssistant) {
     pendingRef.current = patch(pendingRef.current);
@@ -211,7 +222,7 @@ export default function Coach() {
         </div>
       </div>
 
-      <div className="space-y-3 pb-4">
+      <div className="space-y-3 pb-40">
         {messages.map((m, i) => (
           <ChatBubble
             key={i}
@@ -239,6 +250,7 @@ export default function Coach() {
       >
         <div className="mx-auto max-w-3xl px-4 py-3 flex items-end gap-2">
           <textarea
+            ref={textareaRef}
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
             onKeyDown={(e) => {
@@ -249,7 +261,7 @@ export default function Coach() {
             }}
             rows={1}
             placeholder="Pose une question au coach…"
-            className="input resize-none max-h-32"
+            className="input resize-none max-h-32 overflow-y-auto"
           />
           <button
             onClick={send}
