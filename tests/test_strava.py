@@ -11,9 +11,11 @@ from domestique_ai.ingestion.strava import (
     StravaClient,
     backfill_activity_fields,
     backfill_sport_types,
+    backfill_temperature,
     init_db,
     save_activity,
     snapshot_athlete_weight,
+    summarize_temp_stream,
 )
 
 
@@ -263,6 +265,137 @@ def test_backfill_sport_types_does_not_overwrite_existing(db_path: Path):
     finally:
         conn.close()
     assert rows == [(1, "Ride"), (2, "Run")]
+
+
+def test_summarize_temp_stream_avg_min_max():
+    assert summarize_temp_stream([10.0, 20.0, 30.0]) == (20.0, 10.0, 30.0)
+
+
+def test_summarize_temp_stream_empty_or_none():
+    assert summarize_temp_stream(None) is None
+    assert summarize_temp_stream([]) is None
+
+
+def test_summarize_temp_stream_filters_outliers():
+    # 999 et None doivent être écartés ; les valeurs restantes 20 et 22 → avg 21.
+    assert summarize_temp_stream([20.0, None, 999.0, 22.0]) == (21.0, 20.0, 22.0)
+
+
+def test_summarize_temp_stream_accepts_subzero():
+    # Météo hivernale : -5°C est légitime, doit être pris en compte.
+    avg, mn, mx = summarize_temp_stream([-5.0, 0.0, 5.0])
+    assert (mn, mx) == (-5.0, 5.0)
+    assert avg == pytest.approx(0.0)
+
+
+def test_save_activity_persists_temp(db_path: Path, monkeypatch):
+    monkeypatch.delenv("STRAVA_HR_REST", raising=False)
+    monkeypatch.delenv("STRAVA_HR_MAX", raising=False)
+    save_activity(
+        {
+            "id": 777, "date": "2025-07-15T08:00:00Z", "duration": 3600,
+            "avg_heart_rate": 145.0, "max_heart_rate": 182.0,
+            "avg_power": 220.0, "elevation_gain": 0, "distance": 30000,
+        },
+        db_path=db_path, ftp=250.0,
+        temp_summary=(28.5, 22.0, 34.0),
+    )
+    conn = sqlite3.connect(db_path)
+    try:
+        row = conn.execute(
+            "SELECT avg_temp, min_temp, max_temp FROM activities WHERE strava_id = 777"
+        ).fetchone()
+    finally:
+        conn.close()
+    assert row == (pytest.approx(28.5), pytest.approx(22.0), pytest.approx(34.0))
+
+
+def test_save_activity_leaves_temp_null_by_default(db_path: Path, monkeypatch):
+    monkeypatch.delenv("STRAVA_HR_REST", raising=False)
+    monkeypatch.delenv("STRAVA_HR_MAX", raising=False)
+    save_activity(
+        {
+            "id": 778, "date": "2025-07-15T08:00:00Z", "duration": 3600,
+            "avg_heart_rate": None, "max_heart_rate": None,
+            "avg_power": 220.0, "elevation_gain": 0, "distance": 30000,
+        },
+        db_path=db_path, ftp=250.0,
+    )
+    conn = sqlite3.connect(db_path)
+    try:
+        row = conn.execute(
+            "SELECT avg_temp, min_temp, max_temp FROM activities WHERE strava_id = 778"
+        ).fetchone()
+    finally:
+        conn.close()
+    assert row == (None, None, None)
+
+
+class _TempStreamsClient(StravaClient):
+    """StravaClient minimal qui retourne un stream temp fixé par strava_id."""
+
+    def __init__(self, streams_by_id: dict[int, dict[str, list]]):
+        super().__init__(access_token="stub")
+        self._streams = streams_by_id
+
+    def fetch_streams_full(self, activity_id, keys):  # type: ignore[override]
+        return self._streams.get(activity_id)
+
+
+def test_backfill_temperature_fills_missing_only(db_path: Path, monkeypatch):
+    monkeypatch.delenv("STRAVA_HR_REST", raising=False)
+    monkeypatch.delenv("STRAVA_HR_MAX", raising=False)
+    # Activité 1 : pas de temp en base → doit être enrichie.
+    save_activity({
+        "id": 1, "date": "2025-07-15T08:00:00Z", "duration": 3600,
+        "avg_heart_rate": None, "max_heart_rate": None,
+        "avg_power": 220.0, "elevation_gain": 0, "distance": 30000,
+    }, db_path=db_path, ftp=250.0)
+    # Activité 2 : déjà ventilée → le backfill doit la laisser intacte.
+    save_activity({
+        "id": 2, "date": "2025-07-16T08:00:00Z", "duration": 3600,
+        "avg_heart_rate": None, "max_heart_rate": None,
+        "avg_power": 220.0, "elevation_gain": 0, "distance": 30000,
+    }, db_path=db_path, ftp=250.0,
+        temp_summary=(10.0, 8.0, 12.0))
+
+    client = _TempStreamsClient({
+        1: {"temp": [20.0, 25.0, 30.0]},
+        # 2 ne devrait jamais être appelée — pas pertinent.
+    })
+    assert backfill_temperature(client, db_path=db_path) == 1
+
+    conn = sqlite3.connect(db_path)
+    try:
+        rows = conn.execute(
+            "SELECT strava_id, avg_temp, min_temp, max_temp "
+            "FROM activities ORDER BY strava_id"
+        ).fetchall()
+    finally:
+        conn.close()
+    assert rows[0] == (1, pytest.approx(25.0), pytest.approx(20.0), pytest.approx(30.0))
+    assert rows[1] == (2, pytest.approx(10.0), pytest.approx(8.0), pytest.approx(12.0))
+
+
+def test_backfill_temperature_idempotent(db_path: Path):
+    """Sans activité à enrichir, le backfill ne fait aucun appel."""
+    # Aucune activité du tout → 0 ligne mise à jour, pas de crash.
+    client = _TempStreamsClient({})
+    assert backfill_temperature(client, db_path=db_path) == 0
+
+
+def test_backfill_temperature_skips_activities_without_stream(db_path: Path, monkeypatch):
+    """Si Strava ne renvoie pas de stream temp, on saute sans toucher la ligne."""
+    monkeypatch.delenv("STRAVA_HR_REST", raising=False)
+    monkeypatch.delenv("STRAVA_HR_MAX", raising=False)
+    save_activity({
+        "id": 99, "date": "2025-12-15T08:00:00Z", "duration": 3600,
+        "avg_heart_rate": None, "max_heart_rate": None,
+        "avg_power": 220.0, "elevation_gain": 0, "distance": 30000,
+    }, db_path=db_path, ftp=250.0)
+    # Home trainer typiquement : pas de capteur température → streams None.
+    client = _TempStreamsClient({99: None})  # type: ignore[arg-type]
+    assert backfill_temperature(client, db_path=db_path) == 0
 
 
 def test_get_authorization_url_contains_required_params():

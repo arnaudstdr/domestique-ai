@@ -47,7 +47,7 @@ def fetch_activities_from_db(db_path: Path | None = None) -> list[dict[str, Any]
             "SELECT strava_id, date, duration, avg_heart_rate, max_heart_rate, "
             "avg_power, elevation_gain, distance, training_load, "
             "hr_z1_time, hr_z2_time, hr_z3_time, hr_z4_time, hr_z5_time, "
-            "sport_type "
+            "sport_type, avg_temp, min_temp, max_temp "
             "FROM activities ORDER BY date ASC"
         )
         rows = cursor.fetchall()
@@ -70,6 +70,9 @@ def fetch_activities_from_db(db_path: Path | None = None) -> list[dict[str, Any]
             "hr_z4_time": row[12],
             "hr_z5_time": row[13],
             "sport_type": row[14],
+            "avg_temp": row[15],
+            "min_temp": row[16],
+            "max_temp": row[17],
         }
         for row in rows
     ]

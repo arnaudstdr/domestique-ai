@@ -199,6 +199,17 @@ export default function ActivityDetail() {
           label="Puissance"
           value={a.avg_power != null ? `${Math.round(a.avg_power)} W` : "—"}
         />
+        {a.avg_temp != null && (
+          <MetricCard
+            label="Température"
+            value={`${a.avg_temp.toFixed(1)} °C`}
+            hint={
+              a.min_temp != null && a.max_temp != null
+                ? `${a.min_temp.toFixed(0)} → ${a.max_temp.toFixed(0)} °C`
+                : undefined
+            }
+          />
+        )}
       </div>
 
       {s.latlng && <ActivityMap latlng={s.latlng} />}
@@ -223,6 +234,13 @@ export default function ActivityDetail() {
         values={s.watts}
         color="#f97316"
         yKey="watts"
+      />
+      <StreamChart
+        title="Température (°C)"
+        time={s.time}
+        values={s.temp}
+        color="#fbbf24"
+        yKey="temp"
       />
 
       {detail.hr_zones && (

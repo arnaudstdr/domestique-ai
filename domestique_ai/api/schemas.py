@@ -129,6 +129,9 @@ class ActivitySummary(BaseModel):
     tss: float
     sport_type: str | None = None
     hr_zones_sec: dict[str, float | None] | None = None
+    avg_temp: float | None = None
+    min_temp: float | None = None
+    max_temp: float | None = None
 
 
 class ActivitiesList(BaseModel):
@@ -147,6 +150,7 @@ class ActivityStreams(BaseModel):
     cadence: list[float] | None = None
     velocity_smooth: list[float] | None = None
     distance: list[float] | None = None
+    temp: list[float] | None = None
 
 
 class ActivityDetail(BaseModel):

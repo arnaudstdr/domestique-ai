@@ -109,6 +109,9 @@ export interface ActivitySummary {
   tss: number;
   sport_type: string | null;
   hr_zones_sec: Record<string, number | null> | null;
+  avg_temp: number | null;
+  min_temp: number | null;
+  max_temp: number | null;
 }
 
 export interface ActivitiesList {
@@ -127,6 +130,7 @@ export interface ActivityStreams {
   cadence: number[] | null;
   velocity_smooth: number[] | null;
   distance: number[] | null;
+  temp: number[] | null;
 }
 
 export interface ActivityDetail {

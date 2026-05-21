@@ -168,7 +168,12 @@ def get_objective() -> dict[str, Any]:
 
 
 def get_activity_details(strava_id: int) -> dict[str, Any]:
-    """Détail complet d'une activité identifiée par strava_id."""
+    """Détail complet d'une activité identifiée par strava_id.
+
+    Inclut la température (``avg_temp`` / ``min_temp`` / ``max_temp`` en °C)
+    quand le stream Strava était disponible. Utile pour expliquer une dérive
+    HR par la chaleur ou justifier un effort ressenti élevé.
+    """
     import sqlite3
 
     from domestique_ai.config import get_db_path
@@ -179,7 +184,8 @@ def get_activity_details(strava_id: int) -> dict[str, Any]:
         cursor = conn.execute(
             "SELECT strava_id, date, duration, avg_heart_rate, max_heart_rate, "
             "avg_power, elevation_gain, distance, training_load, "
-            "hr_z1_time, hr_z2_time, hr_z3_time, hr_z4_time, hr_z5_time "
+            "hr_z1_time, hr_z2_time, hr_z3_time, hr_z4_time, hr_z5_time, "
+            "avg_temp, min_temp, max_temp "
             "FROM activities WHERE strava_id = ?",
             (strava_id,),
         )
@@ -202,6 +208,9 @@ def get_activity_details(strava_id: int) -> dict[str, Any]:
         "hr_zones_sec": {
             HR_ZONE_KEYS[i]: row[9 + i] for i in range(5)
         },
+        "avg_temp_c": row[14],
+        "min_temp_c": row[15],
+        "max_temp_c": row[16],
     }
 
 

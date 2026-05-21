@@ -178,7 +178,7 @@ export default function Dashboard() {
 
       <div className="card space-y-3">
         <h3 className="text-sm font-medium text-gray-200">Actions</h3>
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
           <button
             className="btn-primary"
             disabled={busy !== null}
@@ -223,6 +223,22 @@ export default function Dashboard() {
             }
           >
             📥 Backfill HR
+          </button>
+          <button
+            className="btn-ghost"
+            disabled={busy !== null}
+            onClick={() =>
+              triggerAction(
+                "Backfill température",
+                () => api.strava.backfillTemperature(),
+                (r) => {
+                  const updated = (r as { updated?: number }).updated ?? 0;
+                  return `Backfill temp : ${updated} activité(s)`;
+                },
+              )
+            }
+          >
+            🌡️ Backfill temp.
           </button>
         </div>
       </div>

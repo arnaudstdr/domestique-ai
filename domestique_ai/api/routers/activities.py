@@ -34,6 +34,7 @@ _DETAIL_STREAM_KEYS = [
     "watts",
     "velocity_smooth",
     "distance",
+    "temp",
 ]
 _DETAIL_TTL_SEC = 3600.0
 _detail_cache: dict[int, tuple[float, dict]] = {}
@@ -55,6 +56,9 @@ def _activity_to_summary(row: dict) -> ActivitySummary:
         tss=float(row.get("training_load") or 0.0),
         sport_type=row.get("sport_type"),
         hr_zones_sec={key: row.get(f"hr_{key}_time") for key in HR_ZONE_KEYS},
+        avg_temp=row.get("avg_temp"),
+        min_temp=row.get("min_temp"),
+        max_temp=row.get("max_temp"),
     )
 
 
@@ -140,6 +144,7 @@ def get_activity(
             cadence=streams.get("cadence"),
             velocity_smooth=streams.get("velocity_smooth"),
             distance=streams.get("distance"),
+            temp=streams.get("temp"),
         ),
         hr_zones={k: float(v) for k, v in hr_zones.items() if v is not None}
         if has_hr_zones

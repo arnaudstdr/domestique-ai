@@ -19,6 +19,9 @@ from domestique_ai.ingestion.strava import (
 from domestique_ai.ingestion.strava import (
     backfill_hr_zones as _backfill_hr_zones,
 )
+from domestique_ai.ingestion.strava import (
+    backfill_temperature as _backfill_temperature,
+)
 from domestique_ai.processing.analyzer import recalculate_training_loads
 
 router = APIRouter(prefix="/api/strava", tags=["strava"])
@@ -147,4 +150,26 @@ def post_backfill_hr_zones(
             detail=str(exc),
         ) from exc
     log.info("Backfill zones HR : %d activité(s) ventilée(s).", updated)
+    return SyncResult(status="done", updated=updated)
+
+
+@router.post("/backfill-temperature", response_model=SyncResult)
+def post_backfill_temperature(
+    client: StravaClient = Depends(get_strava_client),  # noqa: B008
+) -> SyncResult:
+    """Backfill température (min/avg/max) pour les activités sans donnée temp.
+
+    1 appel API par activité — attention au rate limit Strava (100 req / 15 min).
+    Idempotent : ne touche que les lignes ``avg_temp IS NULL``.
+    """
+    log.info("Backfill température : démarrage…")
+    try:
+        updated = _backfill_temperature(client)
+    except StravaAuthError as exc:
+        log.warning("Backfill température : auth Strava : %s", exc)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=str(exc),
+        ) from exc
+    log.info("Backfill température : %d activité(s) enrichie(s).", updated)
     return SyncResult(status="done", updated=updated)

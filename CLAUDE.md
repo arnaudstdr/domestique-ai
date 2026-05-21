@@ -110,6 +110,15 @@ Chaque activité est ventilée en 5 zones %HRR (Karvonen) — colonnes `hr_z1_ti
 
 À l'ingestion (`sync_activities`), si `STRAVA_HR_REST` + `STRAVA_HR_MAX` sont configurés, un appel `GET /activities/{id}/streams` est fait par activité avec `avg_heart_rate` non null. Pour rattraper l'historique : bouton « 📥 Backfill zones HR » du dashboard ou `backfill_hr_zones(client)` — idempotent (filtre `hr_z1_time IS NULL`), 1 requête Strava par activité, attention aux rate limits (100 req / 15 min, 1000 / jour).
 
+### Température météo (avg/min/max par activité)
+
+Colonnes `avg_temp` / `min_temp` / `max_temp` (REAL nullable, °C) calculées à partir du stream Strava `temp` lors de la sync. La réduction est faite par `summarize_temp_stream()` (filtre les valeurs aberrantes hors `-50 °C < t < 60 °C`, garde les zéros légitimes).
+
+- **À l'ingestion** : récupération batchée avec HR (clés `heartrate,time,temp` en un seul appel `fetch_streams_full`) — pas de surcoût API par rapport à l'ingestion HR seule. Si HR n'est pas configuré, les streams ne sont pas téléchargés à la sync.
+- **Backfill** : bouton « 🌡️ Backfill temp. » du Dashboard ou `backfill_temperature(client)` — idempotent (filtre `avg_temp IS NULL`), 1 requête Strava par activité, mêmes rate limits que le backfill HR. Les activités sans capteur température (home trainer typique) restent à NULL après backfill.
+- **Convention DB** : `NULL` = stream pas encore lu OU activité sans capteur ; pour distinguer les deux, regarder si le backfill a déjà été lancé pour cette activité (`avg_heart_rate IS NOT NULL` est un proxy raisonnable pour « activité outdoor avec capteurs »).
+- **Exposition** : `ActivitySummary` et le tool LLM `get_activity_details` retournent `avg_temp_c` / `min_temp_c` / `max_temp_c` quand disponibles, ce qui permet au coach d'expliquer une dérive HR par la chaleur.
+
 ### OAuth Strava
 
 `StravaClient.from_tokens_file()` est le point d'entrée standard côté code. Il :

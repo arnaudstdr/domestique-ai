@@ -326,7 +326,10 @@ def init_db(db_path: Path | None = None) -> None:
                 hr_z3_time REAL,
                 hr_z4_time REAL,
                 hr_z5_time REAL,
-                sport_type TEXT
+                sport_type TEXT,
+                avg_temp REAL,
+                min_temp REAL,
+                max_temp REAL
             )
         """)
         _ensure_column(conn, "activities", "max_heart_rate", "REAL")
@@ -334,6 +337,8 @@ def init_db(db_path: Path | None = None) -> None:
                      "hr_z4_time", "hr_z5_time"):
             _ensure_column(conn, "activities", zone, "REAL")
         _ensure_column(conn, "activities", "sport_type", "TEXT")
+        for temp_col in ("avg_temp", "min_temp", "max_temp"):
+            _ensure_column(conn, "activities", temp_col, "REAL")
         conn.execute("""
             CREATE TABLE IF NOT EXISTS conversations (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -402,9 +407,32 @@ def init_db(db_path: Path | None = None) -> None:
         conn.close()
 
 
+def summarize_temp_stream(
+    temp_stream: list[float] | None,
+) -> tuple[float, float, float] | None:
+    """Réduit un stream de température en triplet ``(avg, min, max)`` en °C.
+
+    Retourne ``None`` si le stream est vide ou ne contient que des valeurs
+    aberrantes. Les samples ``None`` ou hors plage plausible
+    (``-50 °C < t < 60 °C``) sont ignorés — on garde les ``0.0`` qui sont
+    parfaitement légitimes (météo hivernale).
+    """
+    if not temp_stream:
+        return None
+    clean = [
+        float(t) for t in temp_stream
+        if t is not None and -50 < float(t) < 60
+    ]
+    if not clean:
+        return None
+    avg = round(sum(clean) / len(clean), 1)
+    return avg, round(min(clean), 1), round(max(clean), 1)
+
+
 def save_activity(activity: dict[str, Any], db_path: Path | None = None,
                   ftp: float | None = None,
-                  hr_zones: dict[str, float] | None = None) -> bool:
+                  hr_zones: dict[str, float] | None = None,
+                  temp_summary: tuple[float, float, float] | None = None) -> bool:
     """
     Sauvegarde une activité. Calcule la charge d'entraînement si absente
     (hr-TSS si HR configurée, sinon TSS puissance, sinon 0).
@@ -413,6 +441,10 @@ def save_activity(activity: dict[str, Any], db_path: Path | None = None,
     hr_zones : dict {"z1": secondes, ..., "z5": secondes} si les streams HR
     ont déjà été calculés en amont. None laisse les colonnes hr_zN_time à NULL
     (signal pour le backfill).
+
+    temp_summary : triplet ``(avg, min, max)`` en °C, déjà calculé par
+    ``summarize_temp_stream()``. ``None`` laisse les colonnes ``*_temp`` à NULL
+    (signal pour ``backfill_temperature``).
     """
     strava_id = activity.get("id")
     if strava_id is None:
@@ -444,6 +476,7 @@ def save_activity(activity: dict[str, Any], db_path: Path | None = None,
         tuple(hr_zones.get(key) for key in HR_ZONE_KEYS)
         if hr_zones is not None else (None,) * 5
     )
+    temp_values = temp_summary if temp_summary is not None else (None, None, None)
 
     conn = sqlite3.connect(path)
     try:
@@ -455,8 +488,8 @@ def save_activity(activity: dict[str, Any], db_path: Path | None = None,
                 strava_id, date, duration, avg_heart_rate, max_heart_rate,
                 avg_power, elevation_gain, distance, training_load,
                 hr_z1_time, hr_z2_time, hr_z3_time, hr_z4_time, hr_z5_time,
-                sport_type
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                sport_type, avg_temp, min_temp, max_temp
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             strava_id,
             activity.get("date"),
@@ -469,6 +502,7 @@ def save_activity(activity: dict[str, Any], db_path: Path | None = None,
             tss,
             *zone_values,
             activity.get("sport_type"),
+            *temp_values,
         ))
         conn.commit()
         return True
@@ -511,9 +545,12 @@ def snapshot_athlete_weight(client: StravaClient,
 def sync_activities(client: StravaClient, after: int | None = None) -> int:
     """Récupère et sauvegarde les nouvelles activités. Retourne le nombre d'insertions.
 
-    Si HRrepos / HRmax sont configurés, télécharge aussi les streams HR
-    pour ventiler chaque activité dans les 5 zones %HRR (1 appel API
-    supplémentaire par activité avec capteur HR).
+    Si HRrepos / HRmax sont configurés, télécharge les streams ``heartrate``,
+    ``time`` et ``temp`` en un seul appel par activité — ce qui permet à la
+    fois la ventilation Z1-Z5 et la persistance de la température (min/avg/max).
+    Quand HR n'est pas configuré, les streams ne sont pas téléchargés à
+    l'ingestion : il reste possible de rattraper la température via
+    ``backfill_temperature()``.
 
     Snapshot également le poids courant de l'athlète (`weight_history`) —
     silencieux si Strava ne renvoie pas de poids.
@@ -532,12 +569,18 @@ def sync_activities(client: StravaClient, after: int | None = None) -> int:
     for raw in activities:
         data = client.extract_activity_data(raw)
         zones: dict[str, float] | None = None
+        temp_summary: tuple[float, float, float] | None = None
         if zone_params and data.get("avg_heart_rate") and data.get("id"):
-            streams = client.fetch_activity_streams(data["id"])
+            streams = client.fetch_streams_full(
+                data["id"], keys=["heartrate", "time", "temp"]
+            )
             if streams is not None:
-                hr_stream, time_stream = streams
-                zones = calculate_hr_zones(hr_stream, time_stream, *zone_params)
-        if save_activity(data, hr_zones=zones):
+                hr_stream = streams.get("heartrate")
+                time_stream = streams.get("time")
+                if hr_stream and time_stream:
+                    zones = calculate_hr_zones(hr_stream, time_stream, *zone_params)
+                temp_summary = summarize_temp_stream(streams.get("temp"))
+        if save_activity(data, hr_zones=zones, temp_summary=temp_summary):
             inserted += 1
 
     snapshot_athlete_weight(client)
@@ -594,6 +637,55 @@ def backfill_hr_zones(client: StravaClient,
                     *(zones[key] for key in HR_ZONE_KEYS),
                     strava_id,
                 ),
+            )
+            conn.commit()
+            updated += 1
+        finally:
+            conn.close()
+    return updated
+
+
+def backfill_temperature(client: StravaClient,
+                         db_path: Path | None = None) -> int:
+    """
+    Récupère rétroactivement la température (min/avg/max) pour les activités
+    déjà en base dont les colonnes ``*_temp`` sont NULL.
+
+    Idempotent : seules les lignes avec ``avg_temp IS NULL`` sont traitées,
+    donc relançable sans risque. 1 appel API par activité — attention au
+    rate limit Strava (100 req / 15 min, 1000 / jour). Les activités sans
+    capteur température (home trainer typiquement) sont laissées telles
+    quelles (le ``None`` retour de ``summarize_temp_stream`` reste NULL en DB).
+
+    Retourne le nombre de lignes effectivement mises à jour.
+    """
+    init_db(db_path)
+    path = Path(db_path) if db_path else get_db_path()
+
+    conn = sqlite3.connect(path)
+    try:
+        rows = conn.execute(
+            "SELECT strava_id FROM activities WHERE avg_temp IS NULL"
+        ).fetchall()
+    finally:
+        conn.close()
+
+    updated = 0
+    for (strava_id,) in rows:
+        if strava_id is None:
+            continue
+        streams = client.fetch_streams_full(strava_id, keys=["temp"])
+        if streams is None:
+            continue
+        summary = summarize_temp_stream(streams.get("temp"))
+        if summary is None:
+            continue
+        conn = sqlite3.connect(path)
+        try:
+            conn.execute(
+                "UPDATE activities SET avg_temp = ?, min_temp = ?, max_temp = ? "
+                "WHERE strava_id = ?",
+                (*summary, strava_id),
             )
             conn.commit()
             updated += 1
