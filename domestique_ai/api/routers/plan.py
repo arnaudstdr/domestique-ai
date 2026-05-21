@@ -27,13 +27,19 @@ from domestique_ai.export.garmin_connect import (
     get_client,
     push_workout,
 )
+from domestique_ai.export.ics import plan_to_ics
 from domestique_ai.llm.availability import AvailabilityError
+from domestique_ai.llm.plan_generator import (
+    build_context_from_app_state,
+    generate_plan_stream,
+)
 from domestique_ai.llm.plan_storage import (
     PlanGenerationError,
     build_and_save_plan,
     delete_plan,
     list_plans,
     load_plan,
+    save_plan,
 )
 from domestique_ai.processing.plan_builder import Workout
 
@@ -287,6 +293,141 @@ async def push_plan_garmin(
 
     log.info("Push Garmin demandé pour plan %d (schedule=%s)", plan_id, payload.schedule)
     return EventSourceResponse(_push_garmin_stream(plan, payload.schedule))
+
+
+async def _llm_generation_stream(
+    sessions_per_week: int, focus: str | None
+) -> AsyncGenerator[dict[str, str], None]:
+    """Pipeline SSE pour la génération de plan par LLM, semaine par semaine.
+
+    Events émis :
+    - ``start`` {total_weeks, target_date}
+    - ``week_completed`` {index, source, workouts: [...], adjustments: [...]}
+    - ``done`` {plan_id, total_workouts, llm_weeks, fallback_weeks}
+    - ``error`` {value} en cas d'exception fatale (problème de config typiquement)
+    """
+    try:
+        ctx = build_context_from_app_state(
+            sessions_per_week=sessions_per_week, focus=focus
+        )
+    except Exception as exc:  # noqa: BLE001 — on remonte au front
+        log.exception("LLM plan : construction du contexte impossible")
+        yield _sse_event({"type": "error", "value": str(exc)})
+        yield _sse_event({"type": "done", "plan_id": None})
+        return
+
+    yield _sse_event(
+        {
+            "type": "start",
+            "target_date": ctx.target_date.isoformat() if ctx.target_date else None,
+            "target_event_type": ctx.target_event_type,
+            "ctl_current": round(ctx.ctl_current, 1),
+        }
+    )
+
+    aggregated: list[Workout] = []
+    llm_count = 0
+    fallback_count = 0
+
+    try:
+        async for week in generate_plan_stream(ctx):
+            aggregated.extend(week.workouts)
+            if week.source == "llm":
+                llm_count += 1
+            else:
+                fallback_count += 1
+            yield _sse_event(
+                {
+                    "type": "week_completed",
+                    "index": week.week_index,
+                    "source": week.source,
+                    "adjustments": week.adjustments,
+                    "workouts": [
+                        _workout_to_schema(w).model_dump() for w in week.workouts
+                    ],
+                }
+            )
+    except Exception as exc:  # noqa: BLE001
+        log.exception("LLM plan : exception pendant le streaming")
+        yield _sse_event({"type": "error", "value": str(exc)})
+        yield _sse_event({"type": "done", "plan_id": None})
+        return
+
+    if not aggregated:
+        yield _sse_event(
+            {
+                "type": "error",
+                "value": "Aucune séance générée (date cible déjà passée ?).",
+            }
+        )
+        yield _sse_event({"type": "done", "plan_id": None})
+        return
+
+    plan_id = save_plan(
+        aggregated,
+        target_date=ctx.target_date,
+        target_event_type=ctx.target_event_type,
+        sessions_per_week=sessions_per_week,
+    )
+    log.info(
+        "LLM plan %d sauvegardé : %d séances (llm=%d, fallback=%d)",
+        plan_id,
+        len(aggregated),
+        llm_count,
+        fallback_count,
+    )
+    yield _sse_event(
+        {
+            "type": "done",
+            "plan_id": plan_id,
+            "total_workouts": len(aggregated),
+            "llm_weeks": llm_count,
+            "fallback_weeks": fallback_count,
+        }
+    )
+
+
+@router.post("/llm")
+async def post_plan_llm(payload: PlanCreateRequest) -> EventSourceResponse:
+    """Génère un plan d'entraînement par LLM, streamé semaine par semaine.
+
+    À chaque semaine, le générateur tente une sortie LLM (avec retry) puis
+    bascule sur le builder déterministe si la sortie est invalide. La
+    semaine validée est émise via ``week_completed``. À la fin, le plan
+    complet est persisté et l'``plan_id`` retourné dans ``done``.
+    """
+    log.info(
+        "LLM plan : génération démarrée (sessions_per_week=%d, focus=%r)",
+        payload.sessions_per_week,
+        payload.focus,
+    )
+    return EventSourceResponse(
+        _llm_generation_stream(payload.sessions_per_week, payload.focus)
+    )
+
+
+@router.get("/{plan_id}/export.ics")
+def export_plan_ics(plan_id: int) -> Response:
+    """Renvoie le plan au format iCalendar (RFC 5545).
+
+    Le fichier généré s'importe directement dans Google Calendar, Apple
+    Calendar et Outlook. Les ``UID`` sont stables (clé ``plan-<id>-<date>``),
+    donc réimporter le fichier après modification met à jour les événements
+    existants au lieu d'en créer des doublons.
+    """
+    plan = load_plan(plan_id)
+    if plan is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Plan {plan_id} introuvable.",
+        )
+    payload = plan_to_ics(plan, plan_id=plan_id)
+    filename = f"plan_{plan[0].date}_{plan[-1].date}.ics"
+    return Response(
+        content=payload,
+        media_type="text/calendar; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 @router.get("/{plan_id}/export.zip")

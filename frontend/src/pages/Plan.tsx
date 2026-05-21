@@ -1,6 +1,12 @@
 import { useEffect, useState } from "react";
-import { api, ApiError, streamGarminPush } from "../api/client";
-import type { Objective, PlanDetail, PlanSummary } from "../api/types";
+import {
+  api,
+  ApiError,
+  streamGarminPush,
+  streamLlmPlan,
+  type LlmPlanEvent,
+} from "../api/client";
+import type { Objective, PlanDetail, PlanSummary, Workout } from "../api/types";
 import PlanCalendar from "../components/PlanCalendar";
 import { useToast } from "../hooks/useToast";
 
@@ -26,6 +32,36 @@ const EMPTY_PUSH: PushState = {
   total: 0,
   currentWorkout: null,
   results: [],
+  summary: null,
+  error: null,
+};
+
+type GenerationMode = "classic" | "llm";
+
+interface LlmWeekProgress {
+  index: number;
+  source: "llm" | "fallback";
+  adjustments: string[];
+  workouts: Workout[];
+}
+
+interface LlmStreamState {
+  ctlCurrent: number | null;
+  targetDate: string | null;
+  weeks: LlmWeekProgress[];
+  summary: {
+    planId: number | null;
+    totalWorkouts: number;
+    llmWeeks: number;
+    fallbackWeeks: number;
+  } | null;
+  error: string | null;
+}
+
+const EMPTY_LLM_STREAM: LlmStreamState = {
+  ctlCurrent: null,
+  targetDate: null,
+  weeks: [],
   summary: null,
   error: null,
 };
@@ -89,9 +125,12 @@ export default function Plan() {
   const [loadingDetail, setLoadingDetail] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [downloading, setDownloading] = useState(false);
+  const [downloadingIcs, setDownloadingIcs] = useState(false);
   const [pushing, setPushing] = useState(false);
   const [pushSchedule, setPushSchedule] = useState(true);
   const [pushState, setPushState] = useState<PushState>(EMPTY_PUSH);
+  const [mode, setMode] = useState<GenerationMode>("classic");
+  const [llmStream, setLlmStream] = useState<LlmStreamState>(EMPTY_LLM_STREAM);
   const { push } = useToast();
 
   async function refreshList(autoSelect = true): Promise<void> {
@@ -149,6 +188,10 @@ export default function Plan() {
   }, [selectedId, push]);
 
   async function generate(): Promise<void> {
+    if (mode === "llm") {
+      await generateLlm();
+      return;
+    }
     setGenerating(true);
     try {
       const created = await api.plan.create({
@@ -163,6 +206,73 @@ export default function Plan() {
     } catch (err) {
       const msg = err instanceof ApiError ? err.message : String(err);
       push(`Erreur génération : ${msg}`, "error");
+    } finally {
+      setGenerating(false);
+    }
+  }
+
+  async function generateLlm(): Promise<void> {
+    setGenerating(true);
+    setLlmStream({ ...EMPTY_LLM_STREAM });
+    try {
+      await streamLlmPlan(
+        { sessions_per_week: sessionsPerWeek, focus: focus.trim() || null },
+        (ev: LlmPlanEvent) => {
+          setLlmStream((prev) => {
+            if (ev.type === "start") {
+              return {
+                ...EMPTY_LLM_STREAM,
+                ctlCurrent: ev.ctl_current,
+                targetDate: ev.target_date,
+              };
+            }
+            if (ev.type === "week_completed") {
+              return {
+                ...prev,
+                weeks: [
+                  ...prev.weeks,
+                  {
+                    index: ev.index,
+                    source: ev.source,
+                    adjustments: ev.adjustments,
+                    workouts: ev.workouts,
+                  },
+                ],
+              };
+            }
+            if (ev.type === "error") {
+              return { ...prev, error: ev.value };
+            }
+            if (ev.type === "done") {
+              return {
+                ...prev,
+                summary: {
+                  planId: ev.plan_id,
+                  totalWorkouts: ev.total_workouts ?? 0,
+                  llmWeeks: ev.llm_weeks ?? 0,
+                  fallbackWeeks: ev.fallback_weeks ?? 0,
+                },
+              };
+            }
+            return prev;
+          });
+        },
+      );
+      // Une fois le streaming terminé, on rafraîchit la liste et sélectionne le plan.
+      const list = await api.plan.list(50);
+      setPlans(list);
+      const newest = list[0];
+      if (newest) {
+        setSelectedId(newest.id);
+        const fresh = await api.plan.detail(newest.id);
+        setDetail(fresh);
+      }
+      push("Plan généré par le coach IA.", "success");
+      setFocus("");
+    } catch (err) {
+      const msg = err instanceof ApiError ? err.message : String(err);
+      push(`Erreur génération IA : ${msg}`, "error");
+      setLlmStream((prev) => ({ ...prev, error: msg }));
     } finally {
       setGenerating(false);
     }
@@ -258,6 +368,21 @@ export default function Plan() {
     }
   }
 
+  async function downloadIcs(): Promise<void> {
+    if (selectedId == null) return;
+    setDownloadingIcs(true);
+    try {
+      const { blob, filename } = await api.plan.exportIcs(selectedId);
+      triggerDownload(blob, filename);
+      push(`Téléchargement : ${filename}`, "success");
+    } catch (err) {
+      const msg = err instanceof ApiError ? err.message : String(err);
+      push(`Erreur téléchargement : ${msg}`, "error");
+    } finally {
+      setDownloadingIcs(false);
+    }
+  }
+
   const remainingDays = objective?.date ? daysUntil(objective.date) : null;
 
   return (
@@ -316,6 +441,35 @@ export default function Plan() {
 
       <div className="card space-y-3">
         <h2 className="text-base font-medium">📋 Générer un plan</h2>
+        <div className="flex rounded-lg overflow-hidden border border-white/10 text-xs">
+          <button
+            type="button"
+            onClick={() => setMode("classic")}
+            className={`flex-1 px-3 py-2 transition-colors ${
+              mode === "classic"
+                ? "bg-accent text-white"
+                : "bg-white/5 text-muted hover:bg-white/10"
+            }`}
+          >
+            Périodisation classique
+          </button>
+          <button
+            type="button"
+            onClick={() => setMode("llm")}
+            className={`flex-1 px-3 py-2 transition-colors ${
+              mode === "llm"
+                ? "bg-accent text-white"
+                : "bg-white/5 text-muted hover:bg-white/10"
+            }`}
+          >
+            Coach IA (bêta)
+          </button>
+        </div>
+        <p className="text-xs text-muted">
+          {mode === "classic"
+            ? "Cycle 3:1 déterministe + taper. Sortie rapide, structure prédictible."
+            : "Le coach LLM compose chaque semaine, garde-fous physiologiques appliqués automatiquement. Plus lent (quelques secondes par semaine)."}
+        </p>
         <div className="grid grid-cols-2 gap-3">
           <label className="block">
             <span className="text-xs text-muted">Séances / semaine</span>
@@ -349,9 +503,85 @@ export default function Plan() {
           disabled={generating}
           className="btn-primary w-full"
         >
-          {generating ? "Génération…" : "✨ Générer un plan"}
+          {generating
+            ? mode === "llm"
+              ? `Génération IA…${llmStream.weeks.length > 0 ? ` (${llmStream.weeks.length} sem)` : ""}`
+              : "Génération…"
+            : mode === "llm"
+              ? "🤖 Lancer le coach IA"
+              : "✨ Générer un plan"}
         </button>
       </div>
+
+      {(generating && mode === "llm") || llmStream.weeks.length > 0 || llmStream.error ? (
+        <div className="card space-y-2">
+          <div className="flex items-center justify-between">
+            <h3 className="text-sm font-medium text-gray-200">
+              🤖 Génération coach IA
+            </h3>
+            {llmStream.summary && (
+              <span className="pill bg-emerald-500/15 text-emerald-300">
+                {llmStream.summary.totalWorkouts} séances ·{" "}
+                {llmStream.summary.llmWeeks} sem IA
+                {llmStream.summary.fallbackWeeks > 0 &&
+                  ` · ${llmStream.summary.fallbackWeeks} fallback`}
+              </span>
+            )}
+          </div>
+          {llmStream.ctlCurrent != null && (
+            <div className="text-xs text-muted">
+              Contexte : CTL {llmStream.ctlCurrent.toFixed(1)}
+              {llmStream.targetDate && ` · objectif ${llmStream.targetDate}`}
+            </div>
+          )}
+          {llmStream.error && (
+            <div className="rounded-lg border border-red-500/30 bg-red-500/10 p-2 text-xs text-red-300">
+              {llmStream.error}
+            </div>
+          )}
+          <ul className="space-y-1 text-xs">
+            {llmStream.weeks.map((week) => (
+              <li
+                key={week.index}
+                className="rounded bg-surface/40 px-2 py-1.5 space-y-1"
+              >
+                <div className="flex items-center justify-between">
+                  <span className="text-gray-200">
+                    Semaine {week.index + 1} ·{" "}
+                    {week.workouts.length} séance{week.workouts.length > 1 ? "s" : ""}
+                  </span>
+                  <span
+                    className={`pill ${
+                      week.source === "llm"
+                        ? "bg-accent/15 text-accent"
+                        : "bg-yellow-500/15 text-yellow-300"
+                    }`}
+                    title={
+                      week.source === "llm"
+                        ? "Générée par le LLM"
+                        : "Fallback déterministe (LLM indisponible ou réponse invalide)"
+                    }
+                  >
+                    {week.source === "llm" ? "IA" : "fallback"}
+                  </span>
+                </div>
+                {week.adjustments.length > 0 && (
+                  <details>
+                    <summary className="cursor-pointer text-muted">
+                      {week.adjustments.length} ajustement{week.adjustments.length > 1 ? "s" : ""}
+                    </summary>
+                    <ul className="mt-1 ml-3 list-disc space-y-0.5 text-muted">
+                      {week.adjustments.map((adj, i) => (
+                        <li key={i}>{adj}</li>
+                      ))}
+                    </ul>
+                  </details>
+                )}
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
 
       <div className="card space-y-3">
         <h2 className="text-base font-medium">📚 Plans persistés</h2>
@@ -383,7 +613,15 @@ export default function Plan() {
                 disabled={downloading || selectedId == null}
                 className="btn-primary flex-1"
               >
-                {downloading ? "Téléchargement…" : "📥 Télécharger ZIP"}
+                {downloading ? "Téléchargement…" : "📥 ZIP (.fit)"}
+              </button>
+              <button
+                onClick={downloadIcs}
+                disabled={downloadingIcs || selectedId == null}
+                className="btn-ghost flex-1"
+                title="Importer dans Google Calendar, Apple Calendar ou Outlook"
+              >
+                {downloadingIcs ? "Téléchargement…" : "📆 Calendrier (.ics)"}
               </button>
               <button
                 onClick={remove}

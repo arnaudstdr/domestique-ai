@@ -211,6 +211,22 @@ export const api = {
       const filename = match ? match[1] : `plan_${id}.zip`;
       return { blob: await response.blob(), filename };
     },
+    exportIcs: async (id: number): Promise<{ blob: Blob; filename: string }> => {
+      const response = await fetch(`${API_BASE}/api/plan/${id}/export.ics`, {
+        headers: { ...authHeaders() },
+      });
+      if (response.status === 401) {
+        handleUnauthorized();
+        throw new ApiError(401, "Unauthorized");
+      }
+      if (!response.ok) {
+        throw new ApiError(response.status, response.statusText);
+      }
+      const disposition = response.headers.get("content-disposition") || "";
+      const match = disposition.match(/filename="([^"]+)"/);
+      const filename = match ? match[1] : `plan_${id}.ics`;
+      return { blob: await response.blob(), filename };
+    },
   },
 };
 
@@ -297,6 +313,95 @@ export function streamCoachAnalyze(
   signal?: AbortSignal,
 ): Promise<void> {
   return consumeSseStream("/api/coach/analyze", { prompt }, onEvent, signal);
+}
+
+// ---- LLM plan generation -----------------------------------------------------
+
+import type { Workout } from "./types";
+
+export type LlmPlanEvent =
+  | {
+      type: "start";
+      target_date: string | null;
+      target_event_type: string;
+      ctl_current: number;
+    }
+  | {
+      type: "week_completed";
+      index: number;
+      source: "llm" | "fallback";
+      adjustments: string[];
+      workouts: Workout[];
+    }
+  | {
+      type: "error";
+      value: string;
+    }
+  | {
+      type: "done";
+      plan_id: number | null;
+      total_workouts?: number;
+      llm_weeks?: number;
+      fallback_weeks?: number;
+    };
+
+async function consumeLlmPlanSse(
+  body: { sessions_per_week: number; focus: string | null },
+  onEvent: (event: LlmPlanEvent) => void,
+  signal?: AbortSignal,
+): Promise<void> {
+  const response = await fetch(`${API_BASE}/api/plan/llm`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Accept: "text/event-stream",
+      ...authHeaders(),
+    },
+    body: JSON.stringify(body),
+    signal,
+  });
+  if (response.status === 401) {
+    handleUnauthorized();
+    throw new ApiError(401, "Unauthorized");
+  }
+  if (!response.ok || !response.body) {
+    throw new ApiError(response.status, response.statusText);
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+
+  while (true) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true }).replace(/\r\n/g, "\n");
+    let idx;
+    while ((idx = buffer.indexOf("\n\n")) !== -1) {
+      const chunk = buffer.slice(0, idx);
+      buffer = buffer.slice(idx + 2);
+      const dataLine = chunk
+        .split("\n")
+        .find((l) => l.startsWith("data:"))
+        ?.replace(/^data:\s?/, "");
+      if (!dataLine) continue;
+      try {
+        const event = JSON.parse(dataLine) as LlmPlanEvent;
+        onEvent(event);
+        if (event.type === "done") return;
+      } catch {
+        // ignore malformed frames
+      }
+    }
+  }
+}
+
+export function streamLlmPlan(
+  body: { sessions_per_week: number; focus: string | null },
+  onEvent: (event: LlmPlanEvent) => void,
+  signal?: AbortSignal,
+): Promise<void> {
+  return consumeLlmPlanSse(body, onEvent, signal);
 }
 
 // ---- Garmin push -------------------------------------------------------------
