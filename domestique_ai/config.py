@@ -268,3 +268,14 @@ def get_ollama_model() -> str:
 def get_ollama_host() -> str | None:
     """Host Ollama. None = SDK utilise sa valeur par défaut (http://localhost:11434)."""
     return os.getenv("OLLAMA_HOST") or None
+
+
+def get_api_token() -> str | None:
+    """Token Bearer requis pour les endpoints ``/api/*`` (sauf ``/api/health``).
+
+    Lu depuis ``DOMESTIQUE_AI_API_TOKEN``. ``None`` → auth désactivée
+    (mode dev local). En prod, doit être un secret cryptographique
+    (ex. ``openssl rand -hex 32``).
+    """
+    raw = os.getenv("DOMESTIQUE_AI_API_TOKEN")
+    return raw.strip() if raw and raw.strip() else None

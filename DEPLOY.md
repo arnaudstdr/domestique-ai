@@ -21,10 +21,31 @@ cd domestique-ai
 
 ## Étape 2 — Préparer la configuration et les données
 
+### 2.1 — Générer un token API
+
+L'API n'a pas d'auth utilisateur — le port `8501` est joignable depuis le LAN
+du RPi (cf. `network_mode: host` du compose). On protège donc tous les
+endpoints `/api/*` par un token Bearer applicatif.
+
+```bash
+# Sur la machine de dev — générer un secret cryptographique
+openssl rand -hex 32
+```
+
+Ajouter dans `.env` (côté dev **ET** côté RPi) :
+
+```
+DOMESTIQUE_AI_API_TOKEN=<le hash généré>
+```
+
+Sans cette variable, l'auth est désactivée (un warning est loggé au boot).
+
+### 2.2 — Copier `.env` et les données
+
 Depuis ta machine de dev, copier les fichiers locaux vers le RPi (remplacer `<rpi>` par le hostname Tailscale ou l'IP du RPi) :
 
 ```bash
-# Secrets / config
+# Secrets / config (inclut DOMESTIQUE_AI_API_TOKEN)
 scp .env <rpi>:~/domestique-ai/.env
 
 # Données persistantes (DB, tokens Strava, objectif)
@@ -56,6 +77,11 @@ http://<rpi-tailnet-hostname>:8501
 ```
 
 Le hostname est celui affiché par `tailscale status` côté RPi (ex. `raspberrypi.tail-scale.ts.net` ou simplement `raspberrypi`).
+
+Au premier chargement, la PWA redirige vers `/login` (mini-page) où il faut
+saisir le token configuré à l'étape 2.1. Le token est ensuite stocké en
+`localStorage` du navigateur — pas besoin de le ressaisir tant qu'on ne change
+pas d'appareil ou de profil.
 
 ## Maintenance
 

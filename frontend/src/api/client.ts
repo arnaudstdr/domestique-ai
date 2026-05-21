@@ -22,6 +22,7 @@ import type {
 } from "./types";
 
 const API_BASE = "";
+const TOKEN_KEY = "domestique_api_token";
 
 export class ApiError extends Error {
   status: number;
@@ -31,11 +32,62 @@ export class ApiError extends Error {
   }
 }
 
+export function getApiToken(): string | null {
+  try {
+    return localStorage.getItem(TOKEN_KEY);
+  } catch {
+    return null;
+  }
+}
+
+export function setApiToken(token: string): void {
+  try {
+    localStorage.setItem(TOKEN_KEY, token);
+  } catch {
+    // localStorage indisponible (mode privé Safari, etc.) — l'utilisateur
+    // devra ressaisir à chaque reload.
+  }
+}
+
+export function clearApiToken(): void {
+  try {
+    localStorage.removeItem(TOKEN_KEY);
+  } catch {
+    // no-op
+  }
+}
+
+function authHeaders(): Record<string, string> {
+  const token = getApiToken();
+  return token ? { Authorization: `Bearer ${token}` } : {};
+}
+
+/**
+ * Intercepte les 401 : nettoie le token et redirige vers /login.
+ * Conserve le chemin courant en query (`?next=...`) pour rebondir après auth.
+ */
+function handleUnauthorized(): void {
+  clearApiToken();
+  const current = window.location.pathname + window.location.search;
+  if (window.location.pathname !== "/login") {
+    const next = encodeURIComponent(current);
+    window.location.assign(`/login?next=${next}`);
+  }
+}
+
 async function http<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${API_BASE}${path}`, {
-    headers: { "Content-Type": "application/json", ...(init?.headers || {}) },
+    headers: {
+      "Content-Type": "application/json",
+      ...authHeaders(),
+      ...(init?.headers || {}),
+    },
     ...init,
   });
+  if (response.status === 401) {
+    handleUnauthorized();
+    throw new ApiError(401, "Unauthorized");
+  }
   if (!response.ok) {
     let message = response.statusText;
     try {
@@ -135,7 +187,13 @@ export const api = {
     remove: (id: number) =>
       http<void>(`/api/plan/${id}`, { method: "DELETE" }),
     exportZip: async (id: number): Promise<{ blob: Blob; filename: string }> => {
-      const response = await fetch(`${API_BASE}/api/plan/${id}/export.zip`);
+      const response = await fetch(`${API_BASE}/api/plan/${id}/export.zip`, {
+        headers: { ...authHeaders() },
+      });
+      if (response.status === 401) {
+        handleUnauthorized();
+        throw new ApiError(401, "Unauthorized");
+      }
       if (!response.ok) {
         throw new ApiError(response.status, response.statusText);
       }
@@ -170,10 +228,18 @@ async function consumeSseStream(
 ): Promise<void> {
   const response = await fetch(path, {
     method: "POST",
-    headers: { "Content-Type": "application/json", Accept: "text/event-stream" },
+    headers: {
+      "Content-Type": "application/json",
+      Accept: "text/event-stream",
+      ...authHeaders(),
+    },
     body: JSON.stringify(body),
     signal,
   });
+  if (response.status === 401) {
+    handleUnauthorized();
+    throw new ApiError(401, "Unauthorized");
+  }
   if (!response.ok || !response.body) {
     throw new ApiError(response.status, response.statusText);
   }
@@ -253,10 +319,18 @@ async function consumeGarminSse(
 ): Promise<void> {
   const response = await fetch(path, {
     method: "POST",
-    headers: { "Content-Type": "application/json", Accept: "text/event-stream" },
+    headers: {
+      "Content-Type": "application/json",
+      Accept: "text/event-stream",
+      ...authHeaders(),
+    },
     body: JSON.stringify(body),
     signal,
   });
+  if (response.status === 401) {
+    handleUnauthorized();
+    throw new ApiError(401, "Unauthorized");
+  }
   if (!response.ok || !response.body) {
     throw new ApiError(response.status, response.statusText);
   }

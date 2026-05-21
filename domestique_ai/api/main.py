@@ -14,6 +14,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
+from domestique_ai.api.auth import BearerAuthMiddleware
 from domestique_ai.api.logging import get_logger, setup_logging
 from domestique_ai.api.routers import (
     activities as activities_router,
@@ -42,7 +43,7 @@ from domestique_ai.api.routers import (
 from domestique_ai.api.routers import (
     strava as strava_router,
 )
-from domestique_ai.config import REPO_ROOT
+from domestique_ai.config import REPO_ROOT, get_api_token
 
 _FRONTEND_DIST = REPO_ROOT / "frontend" / "dist"
 
@@ -205,6 +206,12 @@ def _extract_header(scope: Scope, name: bytes) -> str | None:
     return None
 
 
+# Ordre de la stack (de l'intérieur vers l'extérieur, donc inverse de
+# l'ordre d'ajout) :
+#   handler → BearerAuth → RequestLogging → CORS
+# Ainsi le RequestLogging trace aussi les 401 émis par BearerAuth, et CORS
+# répond aux preflights avant tout filtrage applicatif.
+app.add_middleware(BearerAuthMiddleware, token=get_api_token())
 app.add_middleware(RequestLoggingMiddleware)
 app.add_middleware(
     CORSMiddleware,

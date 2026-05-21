@@ -7,8 +7,9 @@ import Morning from "./pages/Morning";
 import Coach from "./pages/Coach";
 import Plan from "./pages/Plan";
 import Profil from "./pages/Profil";
+import Login from "./pages/Login";
 
-export default function App() {
+function AuthenticatedLayout() {
   return (
     <div className="min-h-screen bg-surface text-gray-100">
       <header
@@ -42,5 +43,14 @@ export default function App() {
       </main>
       <BottomNav />
     </div>
+  );
+}
+
+export default function App() {
+  return (
+    <Routes>
+      <Route path="/login" element={<Login />} />
+      <Route path="/*" element={<AuthenticatedLayout />} />
+    </Routes>
   );
 }
