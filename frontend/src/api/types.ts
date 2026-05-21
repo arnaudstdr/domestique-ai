@@ -50,6 +50,52 @@ export interface RideVolumeResponse {
   week: VolumePeriod;
 }
 
+// ---- Tendances longues -------------------------------------------------------
+
+export type TrendPeriod = "3m" | "6m" | "1y" | "all";
+export type TrendResolution = "day" | "week" | "month";
+
+export interface TrendLoadPoint {
+  date: string;
+  ctl: number;
+  atl: number;
+  tsb: number;
+}
+
+export interface TrendMonthlyEntry {
+  month: string; // "YYYY-MM"
+  distance_km: number;
+  elevation_m: number;
+  duration_sec: number;
+  sessions: number;
+  tss: number;
+  distance_km_n1: number | null;
+  tss_n1: number | null;
+  z1_pct: number | null;
+  z2_pct: number | null;
+  z3_pct: number | null;
+  z4_pct: number | null;
+  z5_pct: number | null;
+}
+
+export interface TrendsResponse {
+  period: TrendPeriod;
+  resolution: TrendResolution;
+  load_history: TrendLoadPoint[];
+  monthly: TrendMonthlyEntry[];
+}
+
+export interface FtpProjectionResponse {
+  current_ftp: number | null;
+  projected_ftp: number | null;
+  delta_pct: number;
+  delta_ctl_28d: number | null;
+  ctl_current: number | null;
+  z4_z5_share_pct: number | null;
+  confidence: "low" | "medium" | "high";
+  history_days: number;
+}
+
 export interface ActivitySummary {
   strava_id: number;
   name: string | null;

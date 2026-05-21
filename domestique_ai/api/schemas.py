@@ -61,6 +61,58 @@ class RideVolumeResponse(BaseModel):
     week: VolumePeriod
 
 
+# ---- Tendances longues -------------------------------------------------------
+
+
+class TrendLoadPoint(BaseModel):
+    """Point de la courbe CTL/ATL/TSB sous-échantillonnée selon la résolution."""
+
+    date: str
+    ctl: float
+    atl: float
+    tsb: float
+
+
+class TrendMonthlyEntry(BaseModel):
+    """Agrégat mensuel + valeurs N-1 alignées sur le même mois."""
+
+    month: str  # ``"YYYY-MM"``
+    distance_km: float
+    elevation_m: float
+    duration_sec: int
+    sessions: int
+    tss: float
+    distance_km_n1: float | None = None
+    tss_n1: float | None = None
+    z1_pct: float | None = None
+    z2_pct: float | None = None
+    z3_pct: float | None = None
+    z4_pct: float | None = None
+    z5_pct: float | None = None
+
+
+class TrendsResponse(BaseModel):
+    """Réponse de ``GET /api/metrics/trends``."""
+
+    period: Literal["3m", "6m", "1y", "all"]
+    resolution: Literal["day", "week", "month"]
+    load_history: list[TrendLoadPoint]
+    monthly: list[TrendMonthlyEntry]
+
+
+class FtpProjectionResponse(BaseModel):
+    """Réponse de ``GET /api/metrics/ftp-projection``."""
+
+    current_ftp: float | None
+    projected_ftp: float | None
+    delta_pct: float
+    delta_ctl_28d: float | None
+    ctl_current: float | None
+    z4_z5_share_pct: float | None
+    confidence: Literal["low", "medium", "high"]
+    history_days: int
+
+
 # ---- Activities --------------------------------------------------------------
 
 

@@ -3,17 +3,20 @@
 from __future__ import annotations
 
 import datetime as dt
+from typing import Literal
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Query
 
 from domestique_ai.api.schemas import (
     Alert,
+    FtpProjectionResponse,
     LoadCurrent,
     LoadPoint,
     LoadResponse,
     OvertrainingIndicators,
     OvertrainingResponse,
     RideVolumeResponse,
+    TrendsResponse,
     VolumePeriod,
 )
 from domestique_ai.processing.analyzer import (
@@ -22,6 +25,7 @@ from domestique_ai.processing.analyzer import (
 )
 from domestique_ai.processing.morning_metrics import detect_morning_alerts
 from domestique_ai.processing.overtraining import detect_overtraining_signals
+from domestique_ai.processing.trends import get_ftp_projection, get_trends
 
 router = APIRouter(prefix="/api/metrics", tags=["metrics"])
 
@@ -169,3 +173,29 @@ def get_ride_volume() -> RideVolumeResponse:
             duration_sec=int(week["duration_sec"]),
         ),
     )
+
+
+@router.get("/trends", response_model=TrendsResponse)
+def get_long_term_trends(
+    period: Literal["3m", "6m", "1y", "all"] = Query(default="6m"),
+) -> TrendsResponse:
+    """Tendances longue durée : CTL/ATL/TSB + volumes mensuels + zones par mois.
+
+    La résolution de la courbe de charge est adaptée à la période demandée
+    (jour pour 3 mois, semaine pour 6 mois et 1 an, mois pour ``all``) afin de
+    garder un nombre de points raisonnable côté graphique.
+    """
+    raw = get_trends(period=period)
+    return TrendsResponse(**raw)
+
+
+@router.get("/ftp-projection", response_model=FtpProjectionResponse)
+def get_projection_ftp() -> FtpProjectionResponse:
+    """Projection FTP à 4 semaines, heuristique CTL + part Z4-Z5.
+
+    Heuristique : +1 % de FTP par +5 points de CTL net sur 28 jours, plafonné
+    à ±5 %. La confiance qualitative (``low/medium/high``) reflète la
+    profondeur de l'historique et la présence d'un stimulus seuil/VO2max
+    plausible (part Z4-Z5 entre 4 % et 25 %).
+    """
+    return FtpProjectionResponse(**get_ftp_projection())

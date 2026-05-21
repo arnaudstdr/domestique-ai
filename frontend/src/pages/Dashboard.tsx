@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 import { api, ApiError } from "../api/client";
 import type {
   LoadResponse,
@@ -163,6 +164,15 @@ export default function Dashboard() {
       )}
 
       <LoadChart data={load?.history || []} />
+
+      <div className="flex justify-end">
+        <Link
+          to="/tendances"
+          className="text-xs text-accent hover:underline"
+        >
+          Voir les tendances longues →
+        </Link>
+      </div>
 
       {hasZones && <ZoneBar zones={zones} />}
 

@@ -7,6 +7,7 @@ import Morning from "./pages/Morning";
 import Coach from "./pages/Coach";
 import Plan from "./pages/Plan";
 import Profil from "./pages/Profil";
+import Tendances from "./pages/Tendances";
 import Login from "./pages/Login";
 
 function AuthenticatedLayout() {
@@ -38,6 +39,7 @@ function AuthenticatedLayout() {
           <Route path="/matin" element={<Morning />} />
           <Route path="/coach" element={<Coach />} />
           <Route path="/plan" element={<Plan />} />
+          <Route path="/tendances" element={<Tendances />} />
           <Route path="/profil" element={<Profil />} />
         </Routes>
       </main>
