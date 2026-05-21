@@ -34,21 +34,38 @@ def _tsb_zone_label(tsb: float) -> str:
     return "Surentraîné"
 
 
-def _filter_recent(activities: list[dict[str, Any]], days: int) -> list[dict[str, Any]]:
+def _today() -> dt.date:
+    """Indirection sur `dt.date.today()` pour monkeypatching dans les tests."""
+    return dt.date.today()
+
+
+def _filter_recent(
+    activities: list[dict[str, Any]],
+    days: int,
+    *,
+    end: dt.date | None = None,
+) -> list[dict[str, Any]]:
+    """Active la fenêtre ``[end - (days - 1) ; end]`` (incluse), ancrée sur
+    ``today()`` par défaut.
+
+    Régression CR-006 : l'ancrage était auparavant sur la dernière activité
+    en base, ce qui faisait répondre le coach LLM sur une fenêtre obsolète
+    après une période sans synchronisation.
+    """
     if not activities or days <= 0:
         return []
-    last_date = activities[-1].get("date") or ""
-    if not last_date:
-        return []
-    end = dt.datetime.fromisoformat(last_date.replace("Z", "+00:00"))
+    if end is None:
+        end = _today()
+    # Sémantique préservée vs version pré-CR-006 : fenêtre [end - days ; end]
+    # (bornes incluses), donc l'argument `days` désigne l'âge max relatif.
     start = end - dt.timedelta(days=days)
     out = []
     for act in activities:
         d = act.get("date")
         if not d:
             continue
-        when = dt.datetime.fromisoformat(d.replace("Z", "+00:00"))
-        if when >= start:
+        when = dt.datetime.fromisoformat(d.replace("Z", "+00:00")).date()
+        if start <= when <= end:
             out.append(act)
     return out
 
@@ -76,9 +93,10 @@ def get_training_load_state() -> dict[str, Any]:
 
 
 def get_recent_activities(days: int = 7) -> dict[str, Any]:
-    """Liste des activités sur les N derniers jours (jusqu'à la dernière en base)."""
+    """Liste des activités sur les N derniers jours (fenêtre ancrée sur today)."""
     activities = fetch_activities_from_db()
-    recent = _filter_recent(activities, days)
+    as_of = _today()
+    recent = _filter_recent(activities, days, end=as_of)
     out = []
     for act in recent:
         out.append({
@@ -95,13 +113,19 @@ def get_recent_activities(days: int = 7) -> dict[str, Any]:
                 for key in HR_ZONE_KEYS
             },
         })
-    return {"days": days, "count": len(out), "activities": out}
+    return {
+        "as_of": as_of.isoformat(),
+        "days": days,
+        "count": len(out),
+        "activities": out,
+    }
 
 
 def get_zone_distribution(days: int = 14) -> dict[str, Any]:
     """Répartition cumulée du temps par zone HR sur les N derniers jours."""
     activities = fetch_activities_from_db()
-    recent = _filter_recent(activities, days)
+    as_of = _today()
+    recent = _filter_recent(activities, days, end=as_of)
     totals: dict[str, float] = dict.fromkeys(HR_ZONE_KEYS, 0.0)
     counted = 0
     for act in recent:
@@ -121,6 +145,7 @@ def get_zone_distribution(days: int = 14) -> dict[str, Any]:
         for key, value in totals.items()
     }
     return {
+        "as_of": as_of.isoformat(),
         "days": days,
         "activities_with_zones": counted,
         "activities_total_in_window": len(recent),

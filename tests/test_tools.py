@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import datetime as dt
 import sqlite3
 
 import pytest
@@ -18,6 +19,15 @@ from domestique_ai.llm.tools import (
     get_zone_distribution,
     propose_workout,
 )
+
+
+@pytest.fixture
+def freeze_today(monkeypatch):
+    """Fixe la date utilisée par les tools à 2026-04-30 (dernière activité seedée)."""
+    monkeypatch.setattr(
+        "domestique_ai.llm.tools._today",
+        lambda: dt.date(2026, 4, 30),
+    )
 
 
 def _seed_activities(db_path):
@@ -103,17 +113,34 @@ def test_get_training_load_state_empty_db(tmp_path, monkeypatch):
     assert state["available"] is False
 
 
-def test_get_recent_activities_filters_window(seeded_db):
+def test_get_recent_activities_filters_window(seeded_db, freeze_today):
     out = get_recent_activities(days=3)
     assert out["count"] == 2  # 2026-04-27 et 2026-04-30 dans la fenêtre 3j
+    assert out["as_of"] == "2026-04-30"
     activity = out["activities"][0]
     assert "hr_zones_sec" in activity
     assert set(activity["hr_zones_sec"]) == {"z1", "z2", "z3", "z4", "z5"}
 
 
-def test_get_zone_distribution_aggregates(seeded_db):
+def test_get_recent_activities_ignores_old_when_unsynced(seeded_db, monkeypatch):
+    """
+    Régression CR-006 : si l'utilisateur n'a pas synchronisé depuis longtemps,
+    « les 7 derniers jours » doit renvoyer 0 activité (et non les 7 jours
+    précédant la dernière sync, parfois vieille de plusieurs semaines).
+    """
+    monkeypatch.setattr(
+        "domestique_ai.llm.tools._today",
+        lambda: dt.date(2026, 5, 21),
+    )
+    out = get_recent_activities(days=7)
+    assert out["count"] == 0
+    assert out["as_of"] == "2026-05-21"
+
+
+def test_get_zone_distribution_aggregates(seeded_db, freeze_today):
     dist = get_zone_distribution(days=10)
     assert dist["activities_with_zones"] == 3
+    assert dist["as_of"] == "2026-04-30"
     z2 = dist["distribution"]["z2"]
     assert z2["seconds"] == 1800 + 2700 + 900  # somme z2 des 3 lignes
     assert z2["minutes"] == pytest.approx(z2["seconds"] / 60, abs=0.1)
@@ -124,6 +151,10 @@ def test_get_zone_distribution_aggregates(seeded_db):
 def test_get_zone_distribution_skips_null_zones(tmp_path, monkeypatch):
     db_path = tmp_path / "partial.db"
     monkeypatch.setenv("DOMESTIQUE_AI_DB_PATH", str(db_path))
+    monkeypatch.setattr(
+        "domestique_ai.llm.tools._today",
+        lambda: dt.date(2026, 4, 30),
+    )
     init_db(db_path)
     conn = sqlite3.connect(db_path)
     try:
@@ -210,7 +241,7 @@ def test_dispatch_with_invalid_args():
     assert "error" in result
 
 
-def test_dispatch_routes_to_correct_function(seeded_db):
+def test_dispatch_routes_to_correct_function(seeded_db, freeze_today):
     result = dispatch("get_recent_activities", {"days": 7})
     assert result["count"] >= 1
 
