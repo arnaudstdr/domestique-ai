@@ -12,6 +12,7 @@ from pathlib import Path
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from domestique_ai.api.auth import BearerAuthMiddleware
@@ -239,13 +240,31 @@ def health() -> dict[str, str]:
     return {"status": "ok"}
 
 
+class SPAStaticFiles(StaticFiles):
+    """``StaticFiles`` qui retombe sur ``index.html`` pour les routes inconnues.
+
+    Sans ce fallback, naviguer en direct vers ``/login`` ou tout autre chemin
+    géré par React Router renvoie un 404 ``{"detail":"Not Found"}`` parce que
+    ``StaticFiles`` cherche un fichier physique correspondant. On laisse
+    seulement passer le 404 si même ``index.html`` est manquant.
+    """
+
+    async def get_response(self, path, scope):  # type: ignore[override]
+        try:
+            return await super().get_response(path, scope)
+        except StarletteHTTPException as exc:
+            if exc.status_code != 404:
+                raise
+            return await super().get_response("index.html", scope)
+
+
 def _mount_frontend(app: FastAPI, dist_dir: Path) -> None:
     """Si le build React est disponible, le sert à la racine."""
     if not dist_dir.is_dir():
         return
     app.mount(
         "/",
-        StaticFiles(directory=str(dist_dir), html=True),
+        SPAStaticFiles(directory=str(dist_dir), html=True),
         name="frontend",
     )
 
