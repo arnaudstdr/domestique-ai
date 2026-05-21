@@ -29,21 +29,27 @@ STRAIN_THRESHOLD = 6000.0
 WEEKLY_VOLUME_JUMP_PCT = 30.0
 
 
-def _daily_loads(activities: list[dict[str, Any]],
-                 days: int) -> tuple[list[float], list[str]]:
+def _daily_loads(
+    activities: list[dict[str, Any]],
+    days: int,
+    *,
+    end_date: dt.date | None = None,
+) -> tuple[list[float], list[str]]:
     """
     Renvoie la charge agrégée par jour sur les `days` derniers jours
-    (par rapport à la dernière activité), avec 0 pour les jours sans activité.
+    (par rapport à `end_date`, ou `today()` par défaut), avec 0 pour les jours
+    sans activité.
+
+    L'ancrage sur `today()` permet de produire des alertes cohérentes même
+    après une période d'arrêt de l'athlète (sinon on raisonnait sur la
+    semaine précédant la dernière sortie, potentiellement vieille de
+    plusieurs semaines).
     """
     if not activities:
         return [], []
-    last_iso = activities[-1].get("date")
-    if not last_iso:
-        return [], []
-    last_date = dt.datetime.fromisoformat(
-        last_iso.replace("Z", "+00:00")
-    ).date()
-    start_date = last_date - dt.timedelta(days=days - 1)
+    if end_date is None:
+        end_date = dt.date.today()
+    start_date = end_date - dt.timedelta(days=days - 1)
     daily: dict[dt.date, float] = {
         start_date + dt.timedelta(days=i): 0.0 for i in range(days)
     }
@@ -52,16 +58,22 @@ def _daily_loads(activities: list[dict[str, Any]],
         if not d_str:
             continue
         d = dt.datetime.fromisoformat(d_str.replace("Z", "+00:00")).date()
-        if start_date <= d <= last_date:
+        if start_date <= d <= end_date:
             daily[d] += float(act.get("training_load") or 0.0)
     sorted_dates = sorted(daily.keys())
     return [daily[d] for d in sorted_dates], [d.isoformat() for d in sorted_dates]
 
 
-def compute_chronic_tsb(activities: list[dict[str, Any]],
-                        days: int = 7) -> dict[str, Any]:
+def compute_chronic_tsb(
+    activities: list[dict[str, Any]],
+    days: int = 7,
+    *,
+    end_date: dt.date | None = None,
+) -> dict[str, Any]:
     """Moyenne du TSB sur les N derniers jours du calendrier CTL/ATL/TSB."""
-    curves = calculate_ctl_atl_tsb(activities, end_date=dt.date.today())
+    if end_date is None:
+        end_date = dt.date.today()
+    curves = calculate_ctl_atl_tsb(activities, end_date=end_date)
     if len(curves) < days:
         return {"available": False, "reason": "Pas assez d'historique."}
     window = curves[-days:]
@@ -75,17 +87,22 @@ def compute_chronic_tsb(activities: list[dict[str, Any]],
     }
 
 
-def compute_monotony_strain(activities: list[dict[str, Any]],
-                            days: int = 7) -> dict[str, Any]:
+def compute_monotony_strain(
+    activities: list[dict[str, Any]],
+    days: int = 7,
+    *,
+    end_date: dt.date | None = None,
+) -> dict[str, Any]:
     """
-    Monotony et Strain de Foster sur les N derniers jours.
+    Monotony et Strain de Foster sur les N derniers jours (ancrés sur
+    `end_date`, ou `today()` par défaut).
     Monotony = mean / stdev (les jours sans activité comptent comme 0).
     Strain = total_load × monotony.
 
     Si la charge est strictement constante (stdev=0), on plafonne monotony
     à une valeur élevée (10) — cas extrême déclenchant toutes les alertes.
     """
-    loads, _ = _daily_loads(activities, days)
+    loads, _ = _daily_loads(activities, days, end_date=end_date)
     if len(loads) < days or sum(loads) == 0:
         return {"available": False, "reason": "Pas assez de charge récente."}
     mean = statistics.mean(loads)
@@ -106,22 +123,27 @@ def compute_monotony_strain(activities: list[dict[str, Any]],
     }
 
 
-def compute_weekly_jump(activities: list[dict[str, Any]]) -> dict[str, Any]:
+def compute_weekly_jump(
+    activities: list[dict[str, Any]],
+    *,
+    end_date: dt.date | None = None,
+) -> dict[str, Any]:
     """
-    Comparaison du volume (charge totale) entre la semaine courante (7 derniers
-    jours) et la précédente (jours -14 à -8).
+    Comparaison du volume (charge totale) entre la semaine courante (jours
+    [end_date - 6 ; end_date]) et la précédente (jours [end_date - 13 ;
+    end_date - 7]). Par défaut, `end_date` est `today()`.
     """
     if not activities:
         return {"available": False, "reason": "Pas d'activités."}
+    if end_date is None:
+        end_date = dt.date.today()
     first_iso = activities[0].get("date")
-    last_iso = activities[-1].get("date")
-    if not (first_iso and last_iso):
+    if not first_iso:
         return {"available": False, "reason": "Dates manquantes."}
     first_date = dt.datetime.fromisoformat(first_iso.replace("Z", "+00:00")).date()
-    last_date = dt.datetime.fromisoformat(last_iso.replace("Z", "+00:00")).date()
-    if (last_date - first_date).days < 13:
+    if (end_date - first_date).days < 13:
         return {"available": False, "reason": "Pas assez d'historique (<14 j)."}
-    loads_14, _ = _daily_loads(activities, 14)
+    loads_14, _ = _daily_loads(activities, 14, end_date=end_date)
     prev_week = sum(loads_14[:7])
     cur_week = sum(loads_14[7:])
     if prev_week == 0:
@@ -147,6 +169,8 @@ def compute_weekly_jump(activities: list[dict[str, Any]]) -> dict[str, Any]:
 
 def detect_overtraining_signals(
     db_path: Path | None = None,
+    *,
+    end_date: dt.date | None = None,
 ) -> dict[str, Any]:
     """
     Calcule les 4 indicateurs et renvoie un rapport agrégé.
@@ -154,9 +178,9 @@ def detect_overtraining_signals(
     Le bandeau dashboard / le coach LLM peuvent l'exposer tel quel.
     """
     activities = fetch_activities_from_db(db_path=db_path)
-    chronic = compute_chronic_tsb(activities)
-    monstrain = compute_monotony_strain(activities)
-    weekly = compute_weekly_jump(activities)
+    chronic = compute_chronic_tsb(activities, end_date=end_date)
+    monstrain = compute_monotony_strain(activities, end_date=end_date)
+    weekly = compute_weekly_jump(activities, end_date=end_date)
 
     alerts = []
     if chronic.get("alert"):
