@@ -182,6 +182,27 @@ Chaque correction émet une chaîne descriptive dans `adjustments`, ce qui perme
 
 **Tests** : 22 tests dans `tests/test_plan_generator.py` (mock `chat_structured`, scénarios LLM/fallback/retry) + 21 tests dans `tests/test_plan_validator.py` (chaque garde-fou isolément + cas combinés).
 
+### Comparateur d'activités (`processing/similar.py`)
+
+`GET /api/activities/{strava_id}/similar` retourne les activités passées au profil similaire. Heuristique simple, sans appel Strava ni GPS de départ.
+
+**Signature** : `(sport_bucket, distance, elevation_gain)`.
+
+- `sport_bucket` : `outdoor` (Ride, GravelRide, MountainBikeRide, EBikeRide), `indoor` (VirtualRide), ou `other`. On ne compare jamais une sortie route à un home trainer.
+- Distance à ±5 % près en relatif.
+- Dénivelé à ±10 % près en relatif.
+- Plancher distance 5 km / dénivelé 50 m pour éviter les divisions absurdes sur les très courtes activités.
+
+Pré-filtre SQL sur l'index `idx_activities_distance_elev` (créé à la 1re requête) pour borner le scan, puis filtrage fin Python. Sur la DB courante (~quelques milliers de lignes), latence < 200 ms.
+
+Retour : `{available, reference, matches: [{strava_id, date, duration_sec, training_load, tss_delta_pct, power_delta_pct, ...}], criteria}`. Les `*_delta_pct` sont calculés relativement à la référence (positif = candidate plus grand).
+
+**Exposition coach LLM** : tool `find_similar_activities(strava_id, limit=10)`, déclaré dans `tools.py`. Permet au coach de répondre à « ce col, je l'ai monté combien de fois ? » sans inventer de chiffres.
+
+**Tests** : 16 tests dans `tests/test_similar_activities.py` couvrent tolérances, exclusion indoor/outdoor, delta_pct, tri, limit, plancher distance.
+
+Si l'usage révèle des faux positifs (deux profils différents au même bucket), on ajoutera `start_lat` / `start_lng` à `activities` (migration douce + backfill `fetch_activity_summary`) pour affiner via Haversine.
+
 ### Export iCalendar (`export/ics.py`)
 
 `GET /api/plan/{plan_id}/export.ics` retourne le plan au format RFC 5545 importable dans Google Calendar, Apple Calendar et Outlook. Implémentation manuelle sans dépendance externe (~150 lignes : escaping, folding 75 octets, formats `DTSTART`/`DURATION`).

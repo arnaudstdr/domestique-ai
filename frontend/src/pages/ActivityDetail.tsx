@@ -10,10 +10,14 @@ import {
   YAxis,
 } from "recharts";
 import { api, ApiError, streamCoachAnalyze } from "../api/client";
-import type { ActivityDetail as ActivityDetailType } from "../api/types";
+import type {
+  ActivityDetail as ActivityDetailType,
+  SimilarActivitiesResponse,
+} from "../api/types";
 import ActivityMap from "../components/ActivityMap";
 import ChatBubble from "../components/ChatBubble";
 import MetricCard from "../components/MetricCard";
+import SimilarActivities from "../components/SimilarActivities";
 import ZoneBar from "../components/ZoneBar";
 import { useToast } from "../hooks/useToast";
 
@@ -73,6 +77,7 @@ export default function ActivityDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
   const [detail, setDetail] = useState<ActivityDetailType | null>(null);
+  const [similar, setSimilar] = useState<SimilarActivitiesResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [analyzing, setAnalyzing] = useState(false);
   const [analysis, setAnalysis] = useState<AnalysisState | null>(null);
@@ -135,6 +140,7 @@ export default function ActivityDetail() {
   useEffect(() => {
     let aborted = false;
     setLoading(true);
+    setSimilar(null);
     api.activities
       .detail(Number(id))
       .then((d) => {
@@ -146,6 +152,15 @@ export default function ActivityDetail() {
       })
       .finally(() => {
         if (!aborted) setLoading(false);
+      });
+    // Recherche d'activités similaires en parallèle (best-effort, ne bloque pas).
+    api.activities
+      .similar(Number(id))
+      .then((s) => {
+        if (!aborted) setSimilar(s);
+      })
+      .catch(() => {
+        // Silencieux : l'absence de comparateur ne doit pas perturber la page.
       });
     return () => {
       aborted = true;
@@ -246,6 +261,8 @@ export default function ActivityDetail() {
       {detail.hr_zones && (
         <ZoneBar zones={detail.hr_zones as Record<string, number>} />
       )}
+
+      {similar && <SimilarActivities data={similar} />}
 
       <button
         onClick={runAnalysis}

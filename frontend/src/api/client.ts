@@ -17,6 +17,7 @@ import type {
   PlanSummary,
   Profile,
   RideVolumeResponse,
+  SimilarActivitiesResponse,
   SyncResult,
   SyncStatus,
   TodayWorkoutResponse,
@@ -130,6 +131,10 @@ export const api = {
       return http<ActivitiesList>(`/api/activities?${q.toString()}`);
     },
     detail: (id: number) => http<ActivityDetail>(`/api/activities/${id}`),
+    similar: (id: number, limit = 10) =>
+      http<SimilarActivitiesResponse>(
+        `/api/activities/${id}/similar?limit=${limit}`,
+      ),
   },
   morning: {
     get: (days = 90) => http<MorningResponse>(`/api/morning?days=${days}`),

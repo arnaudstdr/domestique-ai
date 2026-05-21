@@ -728,6 +728,34 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "find_similar_activities",
+            "description": "Retrouve les activités passées au profil "
+                           "similaire à une activité donnée (même bucket de "
+                           "sport indoor/outdoor + distance à ±5 % + dénivelé "
+                           "à ±10 %). Utile pour comparer la performance sur "
+                           "une boucle hebdomadaire ou un parcours récurrent.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "strava_id": {
+                        "type": "integer",
+                        "description": "Identifiant Strava de l'activité de "
+                                       "référence.",
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "Nombre max d'activités similaires "
+                                       "retournées (défaut 10).",
+                        "minimum": 1, "maximum": 100,
+                    },
+                },
+                "required": ["strava_id"],
+            },
+        },
+    },
 ]
 
 
@@ -743,7 +771,24 @@ TOOLS: dict[str, Callable[..., dict[str, Any]]] = {
     "get_planned_workout": get_planned_workout,
     "propose_workout_today": propose_workout_today,
     "propose_workout": propose_workout,
+    "find_similar_activities": None,  # type: ignore[dict-item] — assigné plus bas
 }
+
+
+def find_similar_activities(strava_id: int, limit: int = 10) -> dict[str, Any]:
+    """Recherche les activités au profil similaire (même boucle).
+
+    Délègue à ``processing.similar.find_similar_activities``. Wrapper local
+    pour pouvoir l'enregistrer dans le dict ``TOOLS`` sans créer de cycle
+    d'import au chargement du module.
+    """
+    from domestique_ai.processing.similar import (
+        find_similar_activities as _impl,
+    )
+    return _impl(strava_id, limit=limit)
+
+
+TOOLS["find_similar_activities"] = find_similar_activities
 
 
 def dispatch(name: str, arguments: dict[str, Any]) -> dict[str, Any]:

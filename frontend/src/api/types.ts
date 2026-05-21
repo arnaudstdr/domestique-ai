@@ -50,6 +50,48 @@ export interface RideVolumeResponse {
   week: VolumePeriod;
 }
 
+// ---- Activités similaires ----------------------------------------------------
+
+export type SportBucket = "indoor" | "outdoor" | "other";
+
+export interface SimilarActivityMatch {
+  strava_id: number;
+  date: string;
+  duration_sec: number | null;
+  avg_heart_rate: number | null;
+  avg_power: number | null;
+  elevation_m: number;
+  distance_km: number;
+  training_load: number | null;
+  duration_delta_pct: number | null;
+  tss_delta_pct: number | null;
+  power_delta_pct: number | null;
+}
+
+export interface SimilarActivitiesReference {
+  strava_id: number;
+  date: string;
+  distance_km: number;
+  elevation_m: number;
+  duration_sec: number | null;
+  training_load: number | null;
+  sport_bucket: SportBucket;
+}
+
+export interface SimilarActivitiesCriteria {
+  distance_tolerance_pct: number;
+  elevation_tolerance_pct: number;
+  sport_bucket: SportBucket;
+}
+
+export interface SimilarActivitiesResponse {
+  available: boolean;
+  reason: string | null;
+  reference: SimilarActivitiesReference | null;
+  matches: SimilarActivityMatch[];
+  criteria: SimilarActivitiesCriteria | null;
+}
+
 // ---- Tendances longues -------------------------------------------------------
 
 export type TrendPeriod = "3m" | "6m" | "1y" | "all";

@@ -15,12 +15,14 @@ from domestique_ai.api.schemas import (
     ActivityDetail,
     ActivityStreams,
     ActivitySummary,
+    SimilarActivitiesResponse,
 )
 from domestique_ai.ingestion.strava import StravaAuthError, StravaClient
 from domestique_ai.processing.analyzer import (
     HR_ZONE_KEYS,
     fetch_activities_from_db,
 )
+from domestique_ai.processing.similar import find_similar_activities
 
 router = APIRouter(prefix="/api/activities", tags=["activities"])
 log = get_logger("activities")
@@ -150,3 +152,18 @@ def get_activity(
         if has_hr_zones
         else None,
     )
+
+
+@router.get("/{strava_id}/similar", response_model=SimilarActivitiesResponse)
+def get_similar_activities(
+    strava_id: int,
+    limit: int = Query(20, ge=1, le=100),
+) -> SimilarActivitiesResponse:
+    """Activités passées au profil similaire (distance + dénivelé + sport).
+
+    Heuristique simple sans dépendance Strava : on retourne les activités du
+    **même bucket de sport** (indoor/outdoor) dont la distance est à ±5 % et
+    le dénivelé à ±10 % de la référence. Triées date desc.
+    """
+    raw = find_similar_activities(strava_id, limit=limit)
+    return SimilarActivitiesResponse(**raw)

@@ -77,6 +77,7 @@ def test_tool_schemas_have_required_shape():
         "get_planned_workout",
         "propose_workout",
         "propose_workout_today",
+        "find_similar_activities",
     }
     for schema in TOOL_SCHEMAS:
         assert schema["type"] == "function"

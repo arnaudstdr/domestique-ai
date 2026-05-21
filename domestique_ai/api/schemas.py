@@ -159,6 +159,53 @@ class ActivityDetail(BaseModel):
     hr_zones: dict[str, float] | None = None
 
 
+class SimilarActivityMatch(BaseModel):
+    """Une activité similaire à l'activité de référence."""
+
+    strava_id: int
+    date: str
+    duration_sec: int | None = None
+    avg_heart_rate: float | None = None
+    avg_power: float | None = None
+    elevation_m: float
+    distance_km: float
+    training_load: float | None = None
+    duration_delta_pct: float | None = None
+    tss_delta_pct: float | None = None
+    power_delta_pct: float | None = None
+
+
+class SimilarActivitiesReference(BaseModel):
+    strava_id: int
+    date: str
+    distance_km: float
+    elevation_m: float
+    duration_sec: int | None = None
+    training_load: float | None = None
+    sport_bucket: Literal["indoor", "outdoor", "other"]
+
+
+class SimilarActivitiesCriteria(BaseModel):
+    distance_tolerance_pct: float
+    elevation_tolerance_pct: float
+    sport_bucket: Literal["indoor", "outdoor", "other"]
+
+
+class SimilarActivitiesResponse(BaseModel):
+    """Réponse de ``GET /api/activities/{strava_id}/similar``.
+
+    Si l'activité n'est pas exploitable (introuvable, trop courte), on renvoie
+    ``available=False`` + ``reason``. Sinon ``matches`` peut être vide quand
+    aucune activité ne tombe dans les tolérances.
+    """
+
+    available: bool
+    reason: str | None = None
+    reference: SimilarActivitiesReference | None = None
+    matches: list[SimilarActivityMatch] = Field(default_factory=list)
+    criteria: SimilarActivitiesCriteria | None = None
+
+
 # ---- Morning -----------------------------------------------------------------
 
 
