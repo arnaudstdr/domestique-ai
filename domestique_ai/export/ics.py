@@ -47,20 +47,33 @@ def _fold_line(line: str) -> str:
 
     On compte en octets (UTF-8) parce qu'un accent peut faire basculer une
     ligne au-dessus de la limite alors que ``len()`` côté Python compte des
-    caractères. Les segments de continuation commencent par un espace.
+    caractères. Les segments de continuation commencent par un espace
+    (le ``CRLF + SPACE`` du séparateur compte comme 0 octet utile : on
+    autorise donc 75 octets pour le 1er segment et 74 pour les suivants).
+
+    On itère caractère par caractère pour ne **jamais** couper un codepoint
+    UTF-8 multi-octets en deux (sinon ``decode("utf-8")`` plante avec
+    ``UnicodeDecodeError`` quand un accent tombe sur une frontière).
     """
-    encoded = line.encode("utf-8")
-    if len(encoded) <= 75:
+    if len(line.encode("utf-8")) <= 75:
         return line
-    parts: list[bytes] = []
-    chunk_size = 75
-    parts.append(encoded[:chunk_size])
-    pos = chunk_size
-    # 74 octets utiles + 1 octet pour l'espace de continuation = 75 max.
-    while pos < len(encoded):
-        parts.append(encoded[pos : pos + 74])
-        pos += 74
-    return "\r\n ".join(part.decode("utf-8") for part in parts)
+    parts: list[str] = []
+    current: list[str] = []
+    current_bytes = 0
+    limit = 75  # premier segment ; passe à 74 dès le 2e
+    for ch in line:
+        ch_bytes = len(ch.encode("utf-8"))
+        if current_bytes + ch_bytes > limit and current:
+            parts.append("".join(current))
+            current = [ch]
+            current_bytes = ch_bytes
+            limit = 74
+        else:
+            current.append(ch)
+            current_bytes += ch_bytes
+    if current:
+        parts.append("".join(current))
+    return "\r\n ".join(parts)
 
 
 def _format_dt_floating(date_iso: str, hour: int, minute: int = 0) -> str:

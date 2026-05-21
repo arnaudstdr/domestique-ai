@@ -84,6 +84,82 @@ def test_fold_line_breaks_long_lines_at_75_bytes():
         assert len(segment.encode("utf-8")) <= 75
 
 
+def test_fold_line_respects_utf8_codepoint_boundaries():
+    """Régression : un accent multi-octets ne doit JAMAIS être coupé en deux.
+
+    Avant le fix, ``encoded[:75].decode("utf-8")`` plantait avec
+    ``UnicodeDecodeError: 'utf-8' codec can't decode byte 0xc3 in position
+    73: unexpected end of data`` quand un `é` (0xC3 0xA9) tombait à cheval.
+    """
+    # Beaucoup d'accents → chaque `é` = 2 octets en UTF-8.
+    long_line = "Échauffement Z2 endurance progressive " * 5
+    # Ne doit pas planter.
+    folded = _fold_line(long_line)
+    # Chaque segment doit pouvoir être encodé/décodé sans erreur.
+    for segment in folded.split("\r\n "):
+        encoded = segment.encode("utf-8")
+        assert encoded.decode("utf-8") == segment
+        assert len(encoded) <= 75
+
+
+def test_fold_line_preserves_content_after_concatenation():
+    """La concaténation des segments doit redonner exactement la ligne d'origine."""
+    long_line = (
+        "Séance d'intervalles à haute intensité avec éléments tempo " * 3
+    )
+    folded = _fold_line(long_line)
+    rebuilt = folded.replace("\r\n ", "")
+    assert rebuilt == long_line
+
+
+def test_fold_line_handles_4byte_emoji_safely():
+    """Les emojis (4 octets UTF-8) doivent rester atomiques.
+
+    Ce n'est pas un cas attendu en production (le projet bannit les emojis
+    en français) mais le helper doit rester robuste si l'utilisateur en met
+    dans les notes d'une séance.
+    """
+    # Une longue ligne avec un emoji (4 octets) toutes les ~20 caractères.
+    long_line = "Bloc seuil 🚴 répété " * 10
+    folded = _fold_line(long_line)
+    # Aucune frontière de codepoint cassée.
+    for segment in folded.split("\r\n "):
+        assert segment.encode("utf-8").decode("utf-8") == segment
+
+
+def test_plan_to_ics_with_accented_notes_does_not_raise(tmp_path):
+    """Régression : export complet d'un plan avec notes accentuées."""
+    from domestique_ai.processing.plan_builder import Workout, WorkoutStep
+
+    workout = Workout(
+        date="2026-05-25",
+        name="Séance d'évaluation seuil — bloc principal en zone tempo",
+        sport="cycling",
+        kind="tempo",
+        duration_min=75,
+        target_zone="z3",
+        structure=[
+            WorkoutStep(phase="warmup", zone="z1", duration_sec=600),
+            WorkoutStep(phase="active", zone="z3", duration_sec=3000),
+            WorkoutStep(phase="cooldown", zone="z1", duration_sec=900),
+        ],
+        estimated_tss=90.0,
+        notes=(
+            "Séance d'évaluation pour estimer la FTP — rester régulier, "
+            "éviter les à-coups, contrôler la respiration"
+        ),
+    )
+    # Ne doit plus lever UnicodeDecodeError.
+    payload = plan_to_ics([workout], plan_id=1, now=FIXED_NOW)
+    text = payload.decode("utf-8")
+    # Contenu accentué bien préservé (potentiellement coupé sur plusieurs lignes
+    # avec CRLF + espace, mais reconstructible).
+    rebuilt = text.replace("\r\n ", "")
+    assert "Séance" in rebuilt
+    assert "évaluation" in rebuilt
+    assert "régulier" in rebuilt
+
+
 # ---------- plan_to_ics() ----------------------------------------------------
 
 
