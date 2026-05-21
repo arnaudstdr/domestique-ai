@@ -306,6 +306,8 @@ class TodayWorkoutResponse(BaseModel):
 
     Soit ``rest_day=True`` (jour off selon la disponibilité), soit
     ``workout`` rempli avec une séance structurée et le contexte TSB.
+    Inclut un ``rationale`` (justification courte) et ``signals`` (données
+    contextuelles ayant abouti à la décision) quand disponibles.
     """
 
     rest_day: bool = False
@@ -313,3 +315,6 @@ class TodayWorkoutResponse(BaseModel):
     workout: WorkoutSchema | None = None
     tsb: float | None = None
     tsb_zone: str | None = None
+    rationale: str | None = None
+    signals: dict[str, Any] | None = None
+    source: Literal["cache", "llm", "fallback", "plan"] | None = None

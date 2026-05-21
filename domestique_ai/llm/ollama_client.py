@@ -1,12 +1,16 @@
 """
 Wrapper minimal autour du SDK officiel Ollama.
 
-Entrypoint : `stream_chat()` (async generator) yield des chunks normalisés au
-fil de l'eau pour un vrai streaming SSE.
+Entrypoints :
+- `stream_chat()` : async generator de chunks normalisés (streaming SSE).
+- `chat_structured()` : appel non-stream avec sortie JSON validable côté
+  appelant (best-effort, ne lève jamais).
 """
 
 from __future__ import annotations
 
+import asyncio
+import json
 from collections.abc import AsyncIterator
 from typing import Any
 
@@ -77,3 +81,82 @@ async def stream_chat(
         raise OllamaError(
             f"Ollama a refusé la requête (modèle {target_model}): {exc}"
         ) from exc
+
+
+async def chat_structured(
+    messages: list[dict[str, Any]],
+    *,
+    model: str | None = None,
+    timeout_s: float = 30.0,
+    options: dict[str, Any] | None = None,
+) -> dict[str, Any] | None:
+    """Appel chat non-stream avec ``format="json"`` et parsing du résultat.
+
+    Retourne le dict parsé en cas de succès, ou ``None`` si :
+    - Ollama est injoignable / refuse la requête,
+    - le timeout est atteint,
+    - le contenu retourné n'est pas un JSON valide.
+
+    Cette fonction **ne lève jamais** : l'appelant choisit son fallback.
+    """
+    target_model = model or get_ollama_model()
+    try:
+        response = await asyncio.wait_for(
+            _async_client().chat(
+                model=target_model,
+                messages=messages,
+                stream=False,
+                format="json",
+                options=options or {},
+            ),
+            timeout=timeout_s,
+        )
+    except (
+        ConnectionError,
+        ollama.ResponseError,
+        asyncio.TimeoutError,
+    ):
+        return None
+    except Exception:  # noqa: BLE001 — best-effort, on retombe sur le fallback
+        return None
+
+    content = getattr(getattr(response, "message", None), "content", None) or ""
+    if not content.strip():
+        return None
+    try:
+        parsed = json.loads(content)
+    except json.JSONDecodeError:
+        return None
+    return parsed if isinstance(parsed, dict) else None
+
+
+def chat_structured_sync(
+    messages: list[dict[str, Any]],
+    *,
+    model: str | None = None,
+    timeout_s: float = 30.0,
+    options: dict[str, Any] | None = None,
+) -> dict[str, Any] | None:
+    """Variante synchrone de ``chat_structured``, utilisable même sous event loop.
+
+    Quand une boucle asyncio tourne déjà (cas du coach LLM appelé depuis un
+    handler async), on exécute la coroutine dans un thread séparé pour ne pas
+    se faire bloquer par ``asyncio.run`` qui refuse une boucle imbriquée.
+    """
+    async def _run() -> dict[str, Any] | None:
+        return await chat_structured(
+            messages, model=model, timeout_s=timeout_s, options=options,
+        )
+
+    try:
+        asyncio.get_running_loop()
+        in_loop = True
+    except RuntimeError:
+        in_loop = False
+
+    if not in_loop:
+        return asyncio.run(_run())
+
+    import concurrent.futures
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+        return executor.submit(lambda: asyncio.run(_run())).result()

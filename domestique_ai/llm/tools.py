@@ -418,17 +418,21 @@ def get_planned_workout(date: str) -> dict[str, Any]:
     }
 
 
-def propose_workout_today(available_min: int | None = None) -> dict[str, Any]:
-    """Séance optimale pour aujourd'hui en croisant TSB courant et disponibilité.
+def propose_workout_today(
+    available_min: int | None = None,
+    refresh: bool = False,
+) -> dict[str, Any]:
+    """Séance optimale pour aujourd'hui (TSB + objectif + plan + contexte).
 
-    Délègue au module ``processing.today`` (pur calcul). Retourne soit
-    ``{rest_day: True, reason: ...}``, soit ``{rest_day: False, workout: ...,
-    tsb: ..., tsb_zone: ...}``.
+    Délègue au module ``processing.today``. Retourne soit ``{rest_day: True,
+    reason: ...}``, soit ``{rest_day: False, workout: ..., tsb: ...,
+    tsb_zone: ..., rationale: ..., signals: ..., source: ...}``. ``source``
+    indique d'où vient la décision (cache, llm, fallback, plan).
     """
     from domestique_ai.processing.today import (
         propose_workout_today as _propose_today,
     )
-    return _propose_today(available_min=available_min)
+    return _propose_today(available_min=available_min, refresh=refresh)
 
 
 def propose_workout(target_zone: str, duration_min: int,
@@ -633,11 +637,13 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
         "function": {
             "name": "propose_workout_today",
             "description": "Détermine la séance optimale pour aujourd'hui en "
-                           "croisant le TSB courant et la disponibilité du jour "
-                           "(durée max, indoor/outdoor). Renvoie soit "
-                           "rest_day=True (jour off selon disponibilité), soit "
-                           "un workout structuré (kind, target_zone, durée, "
-                           "structure détaillée, TSS estimé) avec le TSB du jour.",
+                           "croisant TSB, objectif (weeks_to_event), plan "
+                           "persisté, dernière séance, distribution de zones "
+                           "de la semaine et signaux d'alerte. Renvoie soit "
+                           "rest_day=True, soit un workout structuré complet "
+                           "avec un rationale (justification courte) et un "
+                           "dict signals (TSB, last_kind, zone_distribution, "
+                           "alerts) — à reformuler pour l'utilisateur.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -647,6 +653,11 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
                                        "(override de la dispo du jour, "
                                        "débraie le check off-day).",
                         "minimum": 20, "maximum": 240,
+                    },
+                    "refresh": {
+                        "type": "boolean",
+                        "description": "Force la régénération en ignorant "
+                                       "le cache du jour (défaut false).",
                     },
                 },
                 "required": [],

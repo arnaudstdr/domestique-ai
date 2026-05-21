@@ -218,16 +218,23 @@ async def post_chat(payload: CoachChatRequest) -> EventSourceResponse:
 
 
 @router.get("/today", response_model=TodayWorkoutResponse)
-def get_today_workout(available_min: int | None = None) -> TodayWorkoutResponse:
-    """Séance suggérée pour aujourd'hui (TSB + disponibilité, pas de LLM).
+def get_today_workout(
+    available_min: int | None = None,
+    refresh: bool = False,
+) -> TodayWorkoutResponse:
+    """Séance suggérée pour aujourd'hui (TSB + objectif + plan + contexte).
 
-    Pur calcul : lit `data/availability.yaml` et la dernière courbe CTL/ATL/TSB
-    de la base, puis renvoie soit un `rest_day=True`, soit un Workout structuré.
-    Le query param `available_min` force la durée (et débraye le check off-day).
+    Croise objectif, TSB, plan persisté, dernière séance et distribution de
+    zones de la semaine pour choisir le ``kind`` et la durée. Une couche LLM
+    (Ollama, format JSON) gère le jugement fin avec fallback déterministe.
+    Le résultat est mis en cache pour la journée (clé date + objectif + TSB
+    arrondi). ``refresh=true`` force la régénération.
     """
     from domestique_ai.processing.today import propose_workout_today
 
-    result = propose_workout_today(available_min=available_min)
+    result = propose_workout_today(
+        available_min=available_min, refresh=refresh,
+    )
     if result["rest_day"]:
         return TodayWorkoutResponse(
             rest_day=True, reason=result.get("reason")
@@ -237,6 +244,9 @@ def get_today_workout(available_min: int | None = None) -> TodayWorkoutResponse:
         workout=WorkoutSchema(**result["workout"]),
         tsb=result.get("tsb"),
         tsb_zone=result.get("tsb_zone"),
+        rationale=result.get("rationale"),
+        signals=result.get("signals"),
+        source=result.get("source"),
     )
 
 
