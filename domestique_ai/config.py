@@ -8,6 +8,7 @@ ensuite, puis sur le défaut.
 
 from __future__ import annotations
 
+import logging
 import os
 import threading
 from pathlib import Path
@@ -22,6 +23,8 @@ if TYPE_CHECKING:
 
 PACKAGE_ROOT = Path(__file__).resolve().parent
 REPO_ROOT = PACKAGE_ROOT.parent
+
+logger = logging.getLogger(__name__)
 
 
 def get_db_path() -> Path:
@@ -119,7 +122,11 @@ def get_ftp() -> float:
         try:
             return float(raw)
         except ValueError:
-            pass
+            logger.warning(
+                "STRAVA_FTP=%r n'est pas un float valide — fallback à 250.0 W "
+                "(le calcul TSS power utilisera cette valeur par défaut).",
+                raw,
+            )
     return 250.0
 
 
@@ -130,8 +137,20 @@ def _get_optional_float(name: str) -> float | None:
     try:
         value = float(raw)
     except ValueError:
+        logger.warning(
+            "%s=%r n'est pas un float valide — ignoré (fonctionnalité dégradée).",
+            name,
+            raw,
+        )
         return None
-    return value if value > 0 else None
+    if value <= 0:
+        logger.warning(
+            "%s=%r doit être strictement positif — ignoré.",
+            name,
+            raw,
+        )
+        return None
+    return value
 
 
 def get_hr_rest() -> float | None:
@@ -171,8 +190,19 @@ def get_lthr_pct() -> float:
     try:
         value = float(raw)
     except ValueError:
+        logger.warning(
+            "STRAVA_LTHR_PCT=%r n'est pas un float valide — fallback à 0.88.",
+            raw,
+        )
         return 0.88
-    return value if 0.5 <= value <= 1.0 else 0.88
+    if not (0.5 <= value <= 1.0):
+        logger.warning(
+            "STRAVA_LTHR_PCT=%r hors bornes (attendu entre 0.5 et 1.0) — "
+            "fallback à 0.88.",
+            raw,
+        )
+        return 0.88
+    return value
 
 
 def get_strava_credentials() -> tuple[str | None, str | None, str]:
