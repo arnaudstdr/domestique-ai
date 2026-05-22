@@ -147,6 +147,25 @@ Le hook dans `_run_sync` (router strava) enveloppe l'appel dans un `try/except` 
 
 **Extension future** : pour ajouter de nouveaux types de notifs (alerte overtraining qui change d'état, séance suggérée du matin), créer une fonction `notify_<event>()` dans le même module qui appelle `send_pushover` avec son propre formattage. Garder le principe : best-effort, jamais bloquant, et anti-spam via comparaison à un état précédent persisté si pertinent.
 
+### Heartbeat Healthchecks.io (dead man's switch)
+
+`domestique_ai/healthcheck.py` expose `ping_healthcheck()` — un GET best-effort sur l'URL Healthchecks.io. Le scheduler (`api/scheduler.py`) ajoute un 2e job APScheduler `healthcheck_ping` qui appelle cette fonction toutes les 5 min (configurable). Le 1er ping est lancé immédiatement au démarrage (`next_run_time=now`) pour que Healthchecks détecte tout de suite que l'app est UP.
+
+**Pourquoi externe** : un watchdog interne au process FastAPI ne peut pas détecter sa propre mort. Healthchecks.io fonctionne en mode "dead man's switch" — c'est leur infra qui te notifie si nos pings s'arrêtent (app crash, Pi éteint, réseau coupé, peu importe la cause). Le canal de notif (Pushover, email, Slack…) se configure dans **leur** UI, pas chez nous.
+
+**Workflow de setup** :
+1. Créer un compte sur healthchecks.io.
+2. Créer un nouveau check, période 5 min, grace 5 min.
+3. Dans le menu Integrations du check, lier Pushover (token user + token app).
+4. Copier l'URL de ping (format `https://hc-ping.com/<uuid>`) dans `HEALTHCHECKS_PING_URL` du `.env`.
+5. Redémarrer le conteneur. Le check passe en "up" sous 30 s.
+
+**Configuration** :
+- `HEALTHCHECKS_PING_URL` : obligatoire pour activer. Sinon job désactivé silencieusement.
+- `HEALTHCHECKS_PING_INTERVAL_MIN` : optionnel (défaut 5). Doit correspondre à la "Period" configurée côté Healthchecks.io.
+
+Le job ping est indépendant du job sync — on peut activer l'un sans l'autre (ex. `DOMESTIQUE_AI_AUTO_SYNC_MINUTES=0` + URL Healthchecks définie → seul le heartbeat tourne).
+
 ### OAuth Strava
 
 `StravaClient.from_tokens_file()` est le point d'entrée standard côté code. Il :

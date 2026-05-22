@@ -9,8 +9,17 @@ from domestique_ai.api.routers import strava as strava_router
 
 
 @pytest.fixture(autouse=True)
-def _reset_sync_state():
-    """Remet le state global à idle entre chaque test."""
+def _reset_sync_state(monkeypatch):
+    """Remet le state global à idle + neutralise les vars d'env du scheduler."""
+    # Ces tests doivent être indépendants de la config réelle du dev.
+    for key in (
+        "DOMESTIQUE_AI_AUTO_SYNC_MINUTES",
+        "DOMESTIQUE_AI_AUTO_SYNC_FIRST_RUN_DELAY_MIN",
+        "HEALTHCHECKS_PING_URL",
+        "HEALTHCHECKS_PING_INTERVAL_MIN",
+    ):
+        monkeypatch.delenv(key, raising=False)
+
     strava_router._sync_state.update(
         status="idle",
         inserted=None,
@@ -146,3 +155,86 @@ def test_auto_sync_job_swallows_exceptions(monkeypatch):
 
     monkeypatch.setattr(scheduler, "trigger_sync_blocking", boom)
     scheduler._auto_sync_job()  # ne doit pas lever
+
+
+# ---- Healthcheck ping job ---------------------------------------------------
+
+
+def test_healthcheck_interval_default(monkeypatch):
+    monkeypatch.delenv("HEALTHCHECKS_PING_INTERVAL_MIN", raising=False)
+    assert scheduler._healthcheck_interval_minutes() == 5
+
+
+def test_healthcheck_interval_custom(monkeypatch):
+    monkeypatch.setenv("HEALTHCHECKS_PING_INTERVAL_MIN", "10")
+    assert scheduler._healthcheck_interval_minutes() == 10
+
+
+def test_healthcheck_ping_job_swallows_exceptions(monkeypatch):
+    """Toute exception remontant de ping_healthcheck doit être avalée."""
+
+    def boom() -> bool:
+        raise RuntimeError("dns down")
+
+    monkeypatch.setattr(scheduler, "ping_healthcheck", boom)
+    scheduler._healthcheck_ping_job()  # ne doit pas lever
+
+
+def test_scheduler_registers_only_sync_when_healthcheck_disabled(monkeypatch):
+    """HC désactivé (URL absente) — seul le job sync est enregistré."""
+    monkeypatch.setenv("DOMESTIQUE_AI_AUTO_SYNC_MINUTES", "30")
+    monkeypatch.setenv("DOMESTIQUE_AI_AUTO_SYNC_FIRST_RUN_DELAY_MIN", "60")
+    monkeypatch.delenv("HEALTHCHECKS_PING_URL", raising=False)
+    scheduler._scheduler = None
+    try:
+        scheduler.start_scheduler()
+        assert scheduler._scheduler is not None
+        jobs = {j.id for j in scheduler._scheduler.get_jobs()}
+        assert "strava_auto_sync" in jobs
+        assert "healthcheck_ping" not in jobs
+    finally:
+        scheduler.stop_scheduler()
+
+
+def test_scheduler_registers_both_jobs_when_configured(monkeypatch):
+    """Sync + HC activés — les deux jobs sont enregistrés."""
+    monkeypatch.setenv("DOMESTIQUE_AI_AUTO_SYNC_MINUTES", "30")
+    monkeypatch.setenv("DOMESTIQUE_AI_AUTO_SYNC_FIRST_RUN_DELAY_MIN", "60")
+    monkeypatch.setenv(
+        "HEALTHCHECKS_PING_URL", "https://hc-ping.com/abc-123"
+    )
+    scheduler._scheduler = None
+    try:
+        scheduler.start_scheduler()
+        jobs = {j.id for j in scheduler._scheduler.get_jobs()}
+        assert "strava_auto_sync" in jobs
+        assert "healthcheck_ping" in jobs
+    finally:
+        scheduler.stop_scheduler()
+
+
+def test_scheduler_registers_only_healthcheck_when_sync_disabled(monkeypatch):
+    """Sync désactivé (interval=0) mais HC activé — seul le ping tourne."""
+    monkeypatch.setenv("DOMESTIQUE_AI_AUTO_SYNC_MINUTES", "0")
+    monkeypatch.setenv(
+        "HEALTHCHECKS_PING_URL", "https://hc-ping.com/abc-123"
+    )
+    scheduler._scheduler = None
+    try:
+        scheduler.start_scheduler()
+        # Le scheduler doit exister puisqu'on a un job à faire tourner.
+        assert scheduler._scheduler is not None
+        jobs = {j.id for j in scheduler._scheduler.get_jobs()}
+        assert "strava_auto_sync" not in jobs
+        assert "healthcheck_ping" in jobs
+    finally:
+        scheduler.stop_scheduler()
+
+
+def test_scheduler_noop_when_everything_disabled(monkeypatch):
+    """Tout désactivé — aucun scheduler créé."""
+    monkeypatch.setenv("DOMESTIQUE_AI_AUTO_SYNC_MINUTES", "0")
+    monkeypatch.delenv("HEALTHCHECKS_PING_URL", raising=False)
+    scheduler._scheduler = None
+    scheduler.start_scheduler()
+    assert scheduler._scheduler is None
