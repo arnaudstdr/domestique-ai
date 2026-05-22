@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
+import { MessageSquarePlus, Trash2 } from "lucide-react";
 import { api, ApiError, streamCoachChat } from "../api/client";
 import type { CoachMessage, CoachSession } from "../api/types";
 import ChatBubble from "../components/ChatBubble";
@@ -268,16 +269,22 @@ export default function Coach() {
               </option>
             ))}
           </select>
-          <button onClick={startNew} className="btn-ghost" title="Nouvelle session">
-            🆕
+          <button
+            onClick={startNew}
+            className="btn-ghost"
+            title="Nouvelle session"
+            aria-label="Nouvelle session"
+          >
+            <MessageSquarePlus className="h-4 w-4" strokeWidth={1.75} aria-hidden="true" />
           </button>
           <button
             onClick={deleteCurrentSession}
             disabled={!sessionId || streaming}
             className="btn-ghost disabled:opacity-40"
             title="Supprimer cette session"
+            aria-label="Supprimer cette session"
           >
-            🗑️
+            <Trash2 className="h-4 w-4" strokeWidth={1.75} aria-hidden="true" />
           </button>
         </div>
       </div>

@@ -1,5 +1,12 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
+import {
+  Download,
+  RefreshCcw,
+  RefreshCw,
+  Thermometer,
+  TriangleAlert,
+} from "lucide-react";
 import { api, ApiError } from "../api/client";
 import type {
   LoadResponse,
@@ -128,7 +135,18 @@ export default function Dashboard() {
               : "border-orange-500"
           }`}
         >
-          <h3 className="font-medium mb-2 text-sm">🚨 Signaux d'alerte</h3>
+          <h3 className="flex items-center gap-2 font-medium mb-2 text-sm">
+            <TriangleAlert
+              className={`h-4 w-4 ${
+                ot.alerts.some((a) => a.level === "danger")
+                  ? "text-red-400"
+                  : "text-orange-400"
+              }`}
+              strokeWidth={1.75}
+              aria-hidden="true"
+            />
+            Signaux d'alerte
+          </h3>
           <ul className="space-y-1.5 text-sm">
             {ot.alerts.map((a, i) => (
               <li
@@ -209,7 +227,14 @@ export default function Dashboard() {
               )
             }
           >
-            {busy === "Sync Strava" ? "…" : "🔄 Sync Strava"}
+            {busy === "Sync Strava" ? (
+              "…"
+            ) : (
+              <span className="inline-flex items-center justify-center gap-2">
+                <RefreshCw className="h-4 w-4" strokeWidth={1.75} aria-hidden="true" />
+                Sync Strava
+              </span>
+            )}
           </button>
           <button
             className="btn-ghost"
@@ -225,7 +250,10 @@ export default function Dashboard() {
               )
             }
           >
-            🔁 Recalculer
+            <span className="inline-flex items-center justify-center gap-2">
+              <RefreshCcw className="h-4 w-4" strokeWidth={1.75} aria-hidden="true" />
+              Recalculer
+            </span>
           </button>
           <button
             className="btn-ghost"
@@ -241,7 +269,10 @@ export default function Dashboard() {
               )
             }
           >
-            📥 Backfill HR
+            <span className="inline-flex items-center justify-center gap-2">
+              <Download className="h-4 w-4" strokeWidth={1.75} aria-hidden="true" />
+              Backfill HR
+            </span>
           </button>
           <button
             className="btn-ghost"
@@ -257,7 +288,10 @@ export default function Dashboard() {
               )
             }
           >
-            🌡️ Backfill temp.
+            <span className="inline-flex items-center justify-center gap-2">
+              <Thermometer className="h-4 w-4" strokeWidth={1.75} aria-hidden="true" />
+              Backfill temp.
+            </span>
           </button>
         </div>
       </div>

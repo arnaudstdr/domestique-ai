@@ -1,4 +1,5 @@
 import { Link, Route, Routes } from "react-router-dom";
+import { Settings } from "lucide-react";
 import BottomNav from "./components/BottomNav";
 import Dashboard from "./pages/Dashboard";
 import Activities from "./pages/Activities";
@@ -31,9 +32,9 @@ function AuthenticatedLayout() {
             to="/profil"
             aria-label="Profil"
             title="Profil & paramètres"
-            className="text-xl leading-none text-gray-300 hover:text-accent transition-colors"
+            className="text-gray-300 hover:text-accent transition-colors"
           >
-            ⚙️
+            <Settings className="h-5 w-5" strokeWidth={1.75} aria-hidden="true" />
           </Link>
         </div>
       </header>

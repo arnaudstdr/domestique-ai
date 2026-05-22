@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { CalendarDays, Dna, Save, Settings, Target } from "lucide-react";
 import { api, ApiError } from "../api/client";
 import type {
   Availability,
@@ -48,7 +49,10 @@ export default function Profil() {
   return (
     <div className="space-y-4">
       <header>
-        <h2 className="text-base font-medium">⚙️ Profil</h2>
+        <h2 className="flex items-center gap-2 text-base font-medium">
+          <Settings className="h-4 w-4 text-accent" strokeWidth={1.75} aria-hidden="true" />
+          Profil
+        </h2>
         <p className="text-xs text-muted">
           Trois sections pilotent l'app : tes paramètres physiologiques, ton
           objectif courant et ta disponibilité hebdomadaire. Chacune se
@@ -120,8 +124,9 @@ function ProfileSection() {
 
   return (
     <section className="card space-y-3">
-      <h3 className="text-sm font-medium text-gray-200">
-        🧬 Infos perso
+      <h3 className="flex items-center gap-2 text-sm font-medium text-gray-200">
+        <Dna className="h-4 w-4 text-accent" strokeWidth={1.75} aria-hidden="true" />
+        Infos perso
       </h3>
       <p className="text-xs text-muted">
         Pilote le calcul de charge (hr-TSS / TSS power) et les zones HR.
@@ -195,7 +200,14 @@ function ProfileSection() {
         disabled={saving || !loaded}
         className="btn-primary w-full"
       >
-        {saving ? "Enregistrement…" : "💾 Enregistrer le profil"}
+        {saving ? (
+          "Enregistrement…"
+        ) : (
+          <span className="inline-flex items-center justify-center gap-2">
+            <Save className="h-4 w-4" strokeWidth={1.75} aria-hidden="true" />
+            Enregistrer le profil
+          </span>
+        )}
       </button>
     </section>
   );
@@ -247,7 +259,10 @@ function ObjectiveSection() {
 
   return (
     <section className="card space-y-3">
-      <h3 className="text-sm font-medium text-gray-200">🎯 Objectif</h3>
+      <h3 className="flex items-center gap-2 text-sm font-medium text-gray-200">
+        <Target className="h-4 w-4 text-accent" strokeWidth={1.75} aria-hidden="true" />
+        Objectif
+      </h3>
       <p className="text-xs text-muted">
         Lu par le coach et par le générateur de plan.
       </p>
@@ -332,7 +347,14 @@ function ObjectiveSection() {
         disabled={saving || !loaded}
         className="btn-primary w-full"
       >
-        {saving ? "Enregistrement…" : "💾 Enregistrer l'objectif"}
+        {saving ? (
+          "Enregistrement…"
+        ) : (
+          <span className="inline-flex items-center justify-center gap-2">
+            <Save className="h-4 w-4" strokeWidth={1.75} aria-hidden="true" />
+            Enregistrer l'objectif
+          </span>
+        )}
       </button>
     </section>
   );
@@ -465,8 +487,9 @@ function AvailabilitySection() {
 
   return (
     <section className="card space-y-3">
-      <h3 className="text-sm font-medium text-gray-200">
-        📅 Disponibilité hebdo
+      <h3 className="flex items-center gap-2 text-sm font-medium text-gray-200">
+        <CalendarDays className="h-4 w-4 text-accent" strokeWidth={1.75} aria-hidden="true" />
+        Disponibilité hebdo
       </h3>
       <p className="text-xs text-muted">
         Coche les jours où tu peux t'entraîner. Le générateur de plan et la
@@ -582,7 +605,14 @@ function AvailabilitySection() {
         disabled={saving || !loaded}
         className="btn-primary w-full"
       >
-        {saving ? "Enregistrement…" : "💾 Enregistrer la disponibilité"}
+        {saving ? (
+          "Enregistrement…"
+        ) : (
+          <span className="inline-flex items-center justify-center gap-2">
+            <Save className="h-4 w-4" strokeWidth={1.75} aria-hidden="true" />
+            Enregistrer la disponibilité
+          </span>
+        )}
       </button>
     </section>
   );

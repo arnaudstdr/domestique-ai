@@ -1,5 +1,18 @@
 import { useEffect, useState } from "react";
 import {
+  Bot,
+  Calendar,
+  ClipboardList,
+  Cloud,
+  Download,
+  Library,
+  Sparkles,
+  Target,
+  Trash2,
+  TriangleAlert,
+  Check,
+} from "lucide-react";
+import {
   api,
   ApiError,
   streamGarminPush,
@@ -388,7 +401,10 @@ export default function Plan() {
   return (
     <div className="space-y-4">
       <div className="card space-y-2">
-        <h2 className="text-base font-medium">🎯 Objectif courant</h2>
+        <h2 className="flex items-center gap-2 text-base font-medium">
+          <Target className="h-4 w-4 text-accent" strokeWidth={1.75} aria-hidden="true" />
+          Objectif courant
+        </h2>
         {!objective ? (
           <div className="text-sm text-muted">
             Aucun objectif défini. Le plan sera généré en mode « maintenance ».
@@ -440,7 +456,10 @@ export default function Plan() {
       </div>
 
       <div className="card space-y-3">
-        <h2 className="text-base font-medium">📋 Générer un plan</h2>
+        <h2 className="flex items-center gap-2 text-base font-medium">
+          <ClipboardList className="h-4 w-4 text-accent" strokeWidth={1.75} aria-hidden="true" />
+          Générer un plan
+        </h2>
         <div className="flex rounded-lg overflow-hidden border border-white/10 text-xs">
           <button
             type="button"
@@ -503,21 +522,36 @@ export default function Plan() {
           disabled={generating}
           className="btn-primary w-full"
         >
-          {generating
-            ? mode === "llm"
-              ? `Génération IA…${llmStream.weeks.length > 0 ? ` (${llmStream.weeks.length} sem)` : ""}`
-              : "Génération…"
-            : mode === "llm"
-              ? "🤖 Lancer le coach IA"
-              : "✨ Générer un plan"}
+          {generating ? (
+            mode === "llm" ? (
+              `Génération IA…${llmStream.weeks.length > 0 ? ` (${llmStream.weeks.length} sem)` : ""}`
+            ) : (
+              "Génération…"
+            )
+          ) : (
+            <span className="inline-flex items-center justify-center gap-2">
+              {mode === "llm" ? (
+                <>
+                  <Bot className="h-4 w-4" strokeWidth={1.75} aria-hidden="true" />
+                  Lancer le coach IA
+                </>
+              ) : (
+                <>
+                  <Sparkles className="h-4 w-4" strokeWidth={1.75} aria-hidden="true" />
+                  Générer un plan
+                </>
+              )}
+            </span>
+          )}
         </button>
       </div>
 
       {(generating && mode === "llm") || llmStream.weeks.length > 0 || llmStream.error ? (
         <div className="card space-y-2">
           <div className="flex items-center justify-between">
-            <h3 className="text-sm font-medium text-gray-200">
-              🤖 Génération coach IA
+            <h3 className="flex items-center gap-2 text-sm font-medium text-gray-200">
+              <Bot className="h-4 w-4 text-accent" strokeWidth={1.75} aria-hidden="true" />
+              Génération coach IA
             </h3>
             {llmStream.summary && (
               <span className="pill bg-emerald-500/15 text-emerald-300">
@@ -584,7 +618,10 @@ export default function Plan() {
       ) : null}
 
       <div className="card space-y-3">
-        <h2 className="text-base font-medium">📚 Plans persistés</h2>
+        <h2 className="flex items-center gap-2 text-base font-medium">
+          <Library className="h-4 w-4 text-accent" strokeWidth={1.75} aria-hidden="true" />
+          Plans persistés
+        </h2>
         {plans.length === 0 ? (
           <div className="text-sm text-muted">
             Aucun plan pour le moment. Générez-en un ci-dessus.
@@ -613,7 +650,14 @@ export default function Plan() {
                 disabled={downloading || selectedId == null}
                 className="btn-primary flex-1"
               >
-                {downloading ? "Téléchargement…" : "📥 ZIP (.fit)"}
+                {downloading ? (
+                  "Téléchargement…"
+                ) : (
+                  <span className="inline-flex items-center justify-center gap-2">
+                    <Download className="h-4 w-4" strokeWidth={1.75} aria-hidden="true" />
+                    ZIP (.fit)
+                  </span>
+                )}
               </button>
               <button
                 onClick={downloadIcs}
@@ -621,14 +665,25 @@ export default function Plan() {
                 className="btn-ghost flex-1"
                 title="Importer dans Google Calendar, Apple Calendar ou Outlook"
               >
-                {downloadingIcs ? "Téléchargement…" : "📆 Calendrier (.ics)"}
+                {downloadingIcs ? (
+                  "Téléchargement…"
+                ) : (
+                  <span className="inline-flex items-center justify-center gap-2">
+                    <Calendar className="h-4 w-4" strokeWidth={1.75} aria-hidden="true" />
+                    Calendrier (.ics)
+                  </span>
+                )}
               </button>
               <button
                 onClick={remove}
                 disabled={deleting || selectedId == null}
                 className="rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-2 text-sm text-red-400 hover:bg-red-500/20 disabled:opacity-50"
               >
-                {deleting ? "…" : "🗑️"}
+                {deleting ? (
+                  "…"
+                ) : (
+                  <Trash2 className="h-4 w-4" strokeWidth={1.75} aria-hidden="true" />
+                )}
               </button>
             </div>
 
@@ -647,9 +702,14 @@ export default function Plan() {
                 disabled={pushing || selectedId == null}
                 className="btn-primary w-full"
               >
-                {pushing
-                  ? `Envoi en cours… (${pushState.index + (pushState.currentWorkout ? 0 : 1)}/${pushState.total || "?"})`
-                  : "☁️ Pousser sur Garmin Connect"}
+                {pushing ? (
+                  `Envoi en cours… (${pushState.index + (pushState.currentWorkout ? 0 : 1)}/${pushState.total || "?"})`
+                ) : (
+                  <span className="inline-flex items-center justify-center gap-2">
+                    <Cloud className="h-4 w-4" strokeWidth={1.75} aria-hidden="true" />
+                    Pousser sur Garmin Connect
+                  </span>
+                )}
               </button>
             </div>
           </>
@@ -662,8 +722,9 @@ export default function Plan() {
         pushState.error) && (
         <div className="card space-y-2">
           <div className="flex items-center justify-between">
-            <h3 className="text-sm font-medium text-gray-200">
-              ☁️ Push Garmin Connect
+            <h3 className="flex items-center gap-2 text-sm font-medium text-gray-200">
+              <Cloud className="h-4 w-4 text-accent" strokeWidth={1.75} aria-hidden="true" />
+              Push Garmin Connect
             </h3>
             {pushState.summary && (
               <span
@@ -723,15 +784,20 @@ export default function Plan() {
                     {r.date} — {r.name}
                   </span>
                   {r.error ? (
-                    <span className="ml-2 shrink-0 text-red-400">⚠</span>
+                    <TriangleAlert
+                      className="ml-2 h-4 w-4 shrink-0 text-red-400"
+                      strokeWidth={1.75}
+                      aria-hidden="true"
+                    />
                   ) : r.url ? (
                     <a
                       href={r.url}
                       target="_blank"
                       rel="noreferrer"
-                      className="ml-2 shrink-0 text-accent hover:underline"
+                      className="ml-2 flex shrink-0 items-center gap-1 text-accent hover:underline"
                     >
-                      {r.scheduled ? "✓ planifié" : "✓ uploadé"}
+                      <Check className="h-4 w-4" strokeWidth={1.75} aria-hidden="true" />
+                      {r.scheduled ? "planifié" : "uploadé"}
                     </a>
                   ) : (
                     <span className="ml-2 shrink-0 text-muted">—</span>

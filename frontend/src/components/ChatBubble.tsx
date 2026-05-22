@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Lightbulb, Wrench } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
@@ -36,8 +37,9 @@ export default function ChatBubble({ role, content, thinking, toolCalls }: Props
             onToggle={(e) => setOpenThinking((e.target as HTMLDetailsElement).open)}
             className="mt-3 border-t border-white/5 pt-2"
           >
-            <summary className="cursor-pointer text-xs text-muted">
-              💡 Raisonnement
+            <summary className="flex cursor-pointer items-center gap-1.5 text-xs text-muted">
+              <Lightbulb className="h-3.5 w-3.5" strokeWidth={1.75} aria-hidden="true" />
+              Raisonnement
             </summary>
             <pre className="mt-2 whitespace-pre-wrap break-words text-xs text-muted">
               {thinking}
@@ -50,8 +52,9 @@ export default function ChatBubble({ role, content, thinking, toolCalls }: Props
             onToggle={(e) => setOpenTools((e.target as HTMLDetailsElement).open)}
             className="mt-2 border-t border-white/5 pt-2"
           >
-            <summary className="cursor-pointer text-xs text-muted">
-              🔧 Outils appelés ({toolCalls.length})
+            <summary className="flex cursor-pointer items-center gap-1.5 text-xs text-muted">
+              <Wrench className="h-3.5 w-3.5" strokeWidth={1.75} aria-hidden="true" />
+              Outils appelés ({toolCalls.length})
             </summary>
             <div className="mt-2 space-y-2">
               {toolCalls.map((tc, i) => (

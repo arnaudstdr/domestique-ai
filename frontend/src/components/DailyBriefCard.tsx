@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
+import { CircleAlert, TriangleAlert } from "lucide-react";
 import type { DailyBriefResponse, DailyBriefWorkout } from "../api/types";
 import {
   KIND_LABELS,
@@ -100,14 +101,24 @@ export default function DailyBriefCard({ data, loading }: Props) {
           <div className="text-muted uppercase tracking-wide">Alerte</div>
           {data.primary_alert ? (
             <div
-              className={`mt-0.5 text-[11px] font-medium ${
+              className={`mt-0.5 flex items-center gap-1 text-[11px] font-medium ${
                 data.primary_alert.severity === "danger"
                   ? "text-red-300"
                   : "text-orange-300"
               }`}
               title={data.primary_alert.message}
             >
-              {data.primary_alert.severity === "danger" ? "⚠ Critique" : "⚠ Vigilance"}
+              {data.primary_alert.severity === "danger" ? (
+                <>
+                  <CircleAlert className="h-3 w-3" strokeWidth={1.75} aria-hidden="true" />
+                  Critique
+                </>
+              ) : (
+                <>
+                  <TriangleAlert className="h-3 w-3" strokeWidth={1.75} aria-hidden="true" />
+                  Vigilance
+                </>
+              )}
             </div>
           ) : (
             <div className="text-base font-semibold text-emerald-300">RAS</div>

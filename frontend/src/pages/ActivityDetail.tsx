@@ -9,6 +9,7 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
+import { Bot } from "lucide-react";
 import { api, ApiError, streamCoachAnalyze } from "../api/client";
 import type {
   ActivityDetail as ActivityDetailType,
@@ -269,19 +270,23 @@ export default function ActivityDetail() {
         disabled={analyzing}
         className="btn-primary w-full"
       >
-        {analyzing && !analysis?.content
-          ? "Le coach analyse cette sortie…"
-          : analyzing
-            ? "Réception de la réponse…"
-            : analysis
-              ? "🤖 Relancer l'analyse"
-              : "🤖 Analyser cette sortie"}
+        {analyzing && !analysis?.content ? (
+          "Le coach analyse cette sortie…"
+        ) : analyzing ? (
+          "Réception de la réponse…"
+        ) : (
+          <span className="inline-flex items-center justify-center gap-2">
+            <Bot className="h-4 w-4" strokeWidth={1.75} aria-hidden="true" />
+            {analysis ? "Relancer l'analyse" : "Analyser cette sortie"}
+          </span>
+        )}
       </button>
 
       {analysis && (analyzing || analysis.content || analysis.thinking) && (
         <div className="space-y-2">
-          <h3 className="text-sm font-medium text-gray-200">
-            🤖 Analyse du coach
+          <h3 className="flex items-center gap-2 text-sm font-medium text-gray-200">
+            <Bot className="h-4 w-4 text-accent" strokeWidth={1.75} aria-hidden="true" />
+            Analyse du coach
           </h3>
           <ChatBubble
             role="assistant"

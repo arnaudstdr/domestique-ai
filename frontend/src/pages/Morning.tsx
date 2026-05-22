@@ -8,6 +8,7 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
+import { Save, Sunrise } from "lucide-react";
 import { api, ApiError } from "../api/client";
 import type { MorningResponse } from "../api/types";
 import MetricCard from "../components/MetricCard";
@@ -95,7 +96,10 @@ export default function Morning() {
   return (
     <div className="space-y-4">
       <div className="card space-y-3">
-        <h2 className="text-base font-medium">🌅 Saisie du jour</h2>
+        <h2 className="flex items-center gap-2 text-base font-medium">
+          <Sunrise className="h-4 w-4 text-accent" strokeWidth={1.75} aria-hidden="true" />
+          Saisie du jour
+        </h2>
         <label className="block">
           <span className="text-xs text-muted">Date</span>
           <input
@@ -130,7 +134,14 @@ export default function Morning() {
           disabled={saving}
           className="btn-primary w-full"
         >
-          {saving ? "Enregistrement…" : "💾 Enregistrer"}
+          {saving ? (
+            "Enregistrement…"
+          ) : (
+            <span className="inline-flex items-center justify-center gap-2">
+              <Save className="h-4 w-4" strokeWidth={1.75} aria-hidden="true" />
+              Enregistrer
+            </span>
+          )}
         </button>
       </div>
 

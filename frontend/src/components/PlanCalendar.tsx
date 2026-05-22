@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { ChartColumn } from "lucide-react";
 import {
   Bar,
   BarChart,
@@ -97,8 +98,9 @@ export default function PlanCalendar({ workouts }: Props) {
   return (
     <div className="space-y-4">
       <div className="card">
-        <h3 className="mb-2 text-xs font-medium text-gray-200">
-          📊 TSS hebdomadaire
+        <h3 className="mb-2 flex items-center gap-1.5 text-xs font-medium text-gray-200">
+          <ChartColumn className="h-3.5 w-3.5 text-accent" strokeWidth={1.75} aria-hidden="true" />
+          TSS hebdomadaire
         </h3>
         <div className="h-40">
           <ResponsiveContainer width="100%" height="100%">
