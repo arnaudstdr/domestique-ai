@@ -119,6 +119,16 @@ def _run_sync() -> None:
             finished_at=dt.datetime.now(dt.timezone.utc).isoformat(),
         )
 
+    # Notif push best-effort — n'altère ni le sync ni l'état exposé à l'API.
+    # Import local pour éviter un cycle (notifications utilise api.logging).
+    if inserted > 0:
+        from domestique_ai.notifications import notify_sync_completed
+
+        try:
+            notify_sync_completed(inserted)
+        except Exception:  # noqa: BLE001 — log mais ne propage pas
+            log.exception("Sync Strava : notif push échouée")
+
 
 @router.post("/sync", response_model=SyncStatus)
 def post_sync(background_tasks: BackgroundTasks) -> SyncStatus:

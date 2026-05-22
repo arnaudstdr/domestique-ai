@@ -131,6 +131,22 @@ Un `BackgroundScheduler` APScheduler tourne dans le process FastAPI et déclench
 - **Rate limit** : 30 min × 24 = 48 sync/jour. À vide ≈ 1-2 req Strava chacune, soit ~100 req/jour dans le pire cas — large sous le quota (1000/jour, 100/15 min).
 - **Sync incrémentale** : `sync_activities()` dérive automatiquement `after` depuis `MAX(date)` de la table `activities` (moins 1 h de marge). Sans ça, chaque sync re-paginait tout l'historique Strava (~5-15 appels HTTP, jusqu'à 6 min sur Pi 5 quand la base est conséquente). Un appel explicite `sync_activities(client, after=0)` force le re-fetch complet si besoin.
 
+### Notifications push (Pushover) — palier 4 du coach proactif
+
+`domestique_ai/notifications.py` expose deux fonctions best-effort :
+
+- `send_pushover(title, message, priority=None)` : POST sur `api.pushover.net`. No-op silencieux si `PUSHOVER_USER_KEY` ou `PUSHOVER_APP_TOKEN` manque. Toute exception (réseau, 4xx) est loggée en warning et retournée comme `False`.
+- `notify_sync_completed(inserted)` : appelée à la fin de `_run_sync` dans le router strava si `inserted > 0`. No-op sur sync à vide (anti-spam). Pluriel/singulier géré.
+
+Le hook dans `_run_sync` (router strava) enveloppe l'appel dans un `try/except` : une notif qui échoue ne doit jamais altérer l'état du sync ni masquer le log de succès.
+
+**Configuration** :
+- `PUSHOVER_USER_KEY` + `PUSHOVER_APP_TOKEN` : obligatoires pour activer.
+- `PUSHOVER_DEVICE` : optionnel, cible un device précis.
+- `PUSHOVER_PRIORITY_DEFAULT` : optionnel, priorité par défaut (clampée -2..2).
+
+**Extension future** : pour ajouter de nouveaux types de notifs (alerte overtraining qui change d'état, séance suggérée du matin), créer une fonction `notify_<event>()` dans le même module qui appelle `send_pushover` avec son propre formattage. Garder le principe : best-effort, jamais bloquant, et anti-spam via comparaison à un état précédent persisté si pertinent.
+
 ### OAuth Strava
 
 `StravaClient.from_tokens_file()` est le point d'entrée standard côté code. Il :
