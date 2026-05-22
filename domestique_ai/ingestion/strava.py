@@ -542,8 +542,41 @@ def snapshot_athlete_weight(client: StravaClient,
         conn.close()
 
 
+def _last_activity_timestamp(db_path: Path | None = None) -> int | None:
+    """Timestamp epoch (UTC) de la dernière activité connue, ``None`` si vide.
+
+    Soustrait 1 heure de marge pour rattraper d'éventuels uploads tardifs ou
+    décalages d'horloge — la contrainte ``UNIQUE(strava_id)`` garantit
+    l'idempotence si Strava nous renvoie quelques activités déjà connues.
+    """
+    path = Path(db_path) if db_path else get_db_path()
+    conn = sqlite3.connect(path)
+    try:
+        row = conn.execute("SELECT MAX(date) FROM activities").fetchone()
+    finally:
+        conn.close()
+    if not row or row[0] is None:
+        return None
+    raw = row[0]
+    # Strava renvoie ``2025-04-01T08:00:00Z`` ; Python 3.10 ne digère pas ``Z``
+    # dans ``fromisoformat`` — on le normalise.
+    try:
+        when = dt.datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if when.tzinfo is None:
+        when = when.replace(tzinfo=dt.timezone.utc)
+    return int((when - dt.timedelta(hours=1)).timestamp())
+
+
 def sync_activities(client: StravaClient, after: int | None = None) -> int:
     """Récupère et sauvegarde les nouvelles activités. Retourne le nombre d'insertions.
+
+    Sync incrémentale par défaut : si ``after`` n'est pas fourni, on dérive
+    le timestamp depuis la dernière activité en base — Strava ne renvoie
+    alors qu'un volume minimal (souvent 0 activités, 1 seul appel HTTP) au
+    lieu de re-paginer l'historique complet. ``after=0`` force le re-fetch
+    intégral.
 
     Si HRrepos / HRmax sont configurés, télécharge les streams ``heartrate``,
     ``time`` et ``temp`` en un seul appel par activité — ce qui permet à la
@@ -556,6 +589,8 @@ def sync_activities(client: StravaClient, after: int | None = None) -> int:
     silencieux si Strava ne renvoie pas de poids.
     """
     init_db()
+    if after is None:
+        after = _last_activity_timestamp()
     activities = client.fetch_activities(after=after)
     hr_rest = get_hr_rest()
     hr_max = get_hr_max()

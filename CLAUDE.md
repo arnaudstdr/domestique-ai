@@ -129,6 +129,7 @@ Un `BackgroundScheduler` APScheduler tourne dans le process FastAPI et déclench
 - **Anti-chevauchement** : sync manuel (`POST /api/strava/sync`) et auto-sync passent tous les deux par `_claim_sync()` dans `routers/strava.py`. Tant qu'une sync est en cours (`status == "syncing"`), tout claim concurrent retourne `False` (skip silencieux loggé côté scheduler). `coalesce=True, max_instances=1` côté APScheduler en plus, ceinture + bretelles.
 - **Logs et erreurs** : `_auto_sync_job` enveloppe `trigger_sync_blocking` dans un `try/except` global — un job APScheduler qui lève marque le job comme erroné et peut arrêter le scheduler, ce qu'on ne veut surtout pas. Toute exception inattendue est loggée mais n'interrompt pas la cadence.
 - **Rate limit** : 30 min × 24 = 48 sync/jour. À vide ≈ 1-2 req Strava chacune, soit ~100 req/jour dans le pire cas — large sous le quota (1000/jour, 100/15 min).
+- **Sync incrémentale** : `sync_activities()` dérive automatiquement `after` depuis `MAX(date)` de la table `activities` (moins 1 h de marge). Sans ça, chaque sync re-paginait tout l'historique Strava (~5-15 appels HTTP, jusqu'à 6 min sur Pi 5 quand la base est conséquente). Un appel explicite `sync_activities(client, after=0)` force le re-fetch complet si besoin.
 
 ### OAuth Strava
 

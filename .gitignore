@@ -2,6 +2,7 @@
 .env
 .env.*
 !.env.example
+.vscode/
 
 # Données locales (DB, tokens, exports)
 data/
@@ -44,4 +45,4 @@ frontend/vite.config.d.ts
 node_modules/
 dist/
 
-.vscode/
+.code-review.json

@@ -9,6 +9,7 @@ import pytest
 
 from domestique_ai.ingestion.strava import (
     StravaClient,
+    _last_activity_timestamp,
     backfill_activity_fields,
     backfill_sport_types,
     backfill_temperature,
@@ -16,6 +17,7 @@ from domestique_ai.ingestion.strava import (
     save_activity,
     snapshot_athlete_weight,
     summarize_temp_stream,
+    sync_activities,
 )
 
 
@@ -567,3 +569,125 @@ def test_snapshot_athlete_weight_overwrites_same_day(db_path: Path):
         ("2025-04-01", pytest.approx(74.1)),
         ("2025-04-02", pytest.approx(74.2)),
     ]
+
+
+# ---- Sync incrémentale (after auto-dérivé) ----------------------------------
+
+
+def test_last_activity_timestamp_none_when_db_empty(db_path: Path):
+    assert _last_activity_timestamp(db_path=db_path) is None
+
+
+def test_last_activity_timestamp_uses_max_date_minus_1h(
+    db_path: Path, monkeypatch
+):
+    """Retourne MAX(date) - 1h en epoch UTC."""
+    monkeypatch.delenv("STRAVA_HR_REST", raising=False)
+    monkeypatch.delenv("STRAVA_HR_MAX", raising=False)
+    save_activity({
+        "id": 1, "date": "2025-04-01T08:00:00Z", "duration": 3600,
+        "avg_heart_rate": None, "max_heart_rate": None,
+        "avg_power": 200.0, "elevation_gain": 0, "distance": 30000,
+    }, db_path=db_path, ftp=250.0)
+    save_activity({
+        "id": 2, "date": "2025-04-05T18:30:00Z", "duration": 3600,
+        "avg_heart_rate": None, "max_heart_rate": None,
+        "avg_power": 200.0, "elevation_gain": 0, "distance": 30000,
+    }, db_path=db_path, ftp=250.0)
+    save_activity({
+        "id": 3, "date": "2025-04-03T08:00:00Z", "duration": 3600,
+        "avg_heart_rate": None, "max_heart_rate": None,
+        "avg_power": 200.0, "elevation_gain": 0, "distance": 30000,
+    }, db_path=db_path, ftp=250.0)
+
+    # 2025-04-05T18:30:00Z - 1h = 2025-04-05T17:30:00Z
+    import datetime as dt
+    expected = int(
+        dt.datetime(2025, 4, 5, 17, 30, tzinfo=dt.timezone.utc).timestamp()
+    )
+    assert _last_activity_timestamp(db_path=db_path) == expected
+
+
+def test_last_activity_timestamp_handles_invalid_date(db_path: Path):
+    """Une date mal formée en base ne doit pas faire crasher la fonction."""
+    conn = sqlite3.connect(db_path)
+    try:
+        conn.execute(
+            "INSERT INTO activities (strava_id, date) VALUES (?, ?)",
+            (1, "pas-une-date"),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    assert _last_activity_timestamp(db_path=db_path) is None
+
+
+class _SyncStubClient(StravaClient):
+    """Capture l'argument ``after`` passé à fetch_activities."""
+
+    def __init__(self):
+        super().__init__(access_token="stub")
+        self.received_after: int | None = -1  # sentinelle "non appelé"
+        self.fetch_calls = 0
+
+    def fetch_activities(self, after=None, per_page=200):  # type: ignore[override]
+        self.received_after = after
+        self.fetch_calls += 1
+        return []
+
+    def fetch_athlete(self):  # type: ignore[override]
+        return {"weight": 0}  # snapshot_athlete_weight ne fait rien
+
+
+def test_sync_activities_uses_last_timestamp_when_after_omitted(
+    db_path: Path, monkeypatch
+):
+    """Sur DB peuplée, sync_activities sans after doit dériver le timestamp."""
+    monkeypatch.setenv("DOMESTIQUE_AI_DB_PATH", str(db_path))
+    monkeypatch.delenv("STRAVA_HR_REST", raising=False)
+    monkeypatch.delenv("STRAVA_HR_MAX", raising=False)
+    save_activity({
+        "id": 1, "date": "2025-04-01T08:00:00Z", "duration": 3600,
+        "avg_heart_rate": None, "max_heart_rate": None,
+        "avg_power": 200.0, "elevation_gain": 0, "distance": 30000,
+    }, db_path=db_path, ftp=250.0)
+
+    client = _SyncStubClient()
+    sync_activities(client)
+    assert client.fetch_calls == 1
+    assert client.received_after is not None
+    # 2025-04-01T08:00:00Z - 1h = 2025-04-01T07:00:00Z = epoch 1743490800
+    import datetime as dt
+    expected = int(
+        dt.datetime(2025, 4, 1, 7, 0, tzinfo=dt.timezone.utc).timestamp()
+    )
+    assert client.received_after == expected
+
+
+def test_sync_activities_empty_db_passes_none(db_path: Path, monkeypatch):
+    """Sur DB vide, sync_activities doit demander tout l'historique (after=None)."""
+    monkeypatch.setenv("DOMESTIQUE_AI_DB_PATH", str(db_path))
+    monkeypatch.delenv("STRAVA_HR_REST", raising=False)
+    monkeypatch.delenv("STRAVA_HR_MAX", raising=False)
+
+    client = _SyncStubClient()
+    sync_activities(client)
+    assert client.received_after is None
+
+
+def test_sync_activities_explicit_after_overrides_auto(
+    db_path: Path, monkeypatch
+):
+    """Un ``after`` explicite (ex. 0) doit bypasser la dérivation automatique."""
+    monkeypatch.setenv("DOMESTIQUE_AI_DB_PATH", str(db_path))
+    monkeypatch.delenv("STRAVA_HR_REST", raising=False)
+    monkeypatch.delenv("STRAVA_HR_MAX", raising=False)
+    save_activity({
+        "id": 1, "date": "2025-04-01T08:00:00Z", "duration": 3600,
+        "avg_heart_rate": None, "max_heart_rate": None,
+        "avg_power": 200.0, "elevation_gain": 0, "distance": 30000,
+    }, db_path=db_path, ftp=250.0)
+
+    client = _SyncStubClient()
+    sync_activities(client, after=0)
+    assert client.received_after == 0
