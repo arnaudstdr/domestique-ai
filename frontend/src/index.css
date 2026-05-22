@@ -31,9 +31,18 @@
     @apply btn bg-card text-gray-200 hover:bg-cardHover border border-white/5;
   }
   .input {
-    @apply w-full rounded-xl bg-card border border-white/5 px-3 py-2
+    @apply w-full min-w-0 rounded-xl bg-card border border-white/5 px-3 py-2
            text-gray-100 placeholder:text-muted
            focus:outline-none focus:ring-2 focus:ring-accent;
+  }
+  /* iOS Safari : neutraliser le min-width intrinsèque des inputs date/time
+     (qui hérite du placeholder « jj/mm/aaaa ») pour qu'ils respectent
+     `w-full` dans une grille ou un flex parent. */
+  input[type="date"].input,
+  input[type="time"].input,
+  input[type="datetime-local"].input {
+    -webkit-appearance: none;
+    appearance: none;
   }
   .pill {
     @apply inline-flex items-center gap-1 rounded-full px-2.5 py-0.5
