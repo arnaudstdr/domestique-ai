@@ -17,6 +17,7 @@ from domestique_ai.api.schemas import (
     CoachChatRequest,
     CoachMessage,
     CoachSession,
+    DailyBriefResponse,
     TodayWorkoutResponse,
     WorkoutSchema,
 )
@@ -30,6 +31,7 @@ from domestique_ai.llm.conversations import (
     load_session,
     new_session_id,
 )
+from domestique_ai.llm.daily_brief import build_daily_brief
 from domestique_ai.llm.ollama_client import OllamaError
 
 router = APIRouter(prefix="/api/coach", tags=["coach"])
@@ -215,6 +217,19 @@ async def post_chat(payload: CoachChatRequest) -> EventSourceResponse:
             persist_to_session=session_id,
         )
     )
+
+
+@router.get("/daily-brief", response_model=DailyBriefResponse)
+def get_daily_brief(refresh: bool = False) -> DailyBriefResponse:
+    """Brief quotidien proactif : phrase de synthèse + état du jour.
+
+    Agrège TSB, alerte saillante (overtraining + morning), séance suggérée,
+    et génère une phrase courte via LLM (avec fallback déterministe si
+    Ollama est injoignable). Cache journalier en mémoire — un seul appel
+    LLM par jour et par état même si le Dashboard est rouvert plusieurs
+    fois.
+    """
+    return DailyBriefResponse(**build_daily_brief(refresh=refresh))
 
 
 @router.get("/today", response_model=TodayWorkoutResponse)

@@ -5,8 +5,10 @@ import type {
   LoadResponse,
   OvertrainingResponse,
   ActivitiesList,
+  DailyBriefResponse,
   RideVolumeResponse,
 } from "../api/types";
+import DailyBriefCard from "../components/DailyBriefCard";
 import LoadChart from "../components/LoadChart";
 import MetricCard from "../components/MetricCard";
 import TodayCard from "../components/TodayCard";
@@ -46,6 +48,8 @@ export default function Dashboard() {
   const [ot, setOt] = useState<OvertrainingResponse | null>(null);
   const [activities, setActivities] = useState<ActivitiesList | null>(null);
   const [volume, setVolume] = useState<RideVolumeResponse | null>(null);
+  const [brief, setBrief] = useState<DailyBriefResponse | null>(null);
+  const [briefLoading, setBriefLoading] = useState(true);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState<string | null>(null);
   const { push } = useToast();
@@ -71,8 +75,24 @@ export default function Dashboard() {
     }
   }
 
+  async function refreshBrief() {
+    // Le brief peut prendre quelques secondes (appel LLM). On le charge en
+    // parallèle des autres widgets pour ne pas bloquer le rendu, et on
+    // affiche un skeleton pendant ce temps.
+    setBriefLoading(true);
+    try {
+      const b = await api.coach.dailyBrief();
+      setBrief(b);
+    } catch {
+      // Silencieux : l'absence de brief ne doit pas perturber le Dashboard.
+    } finally {
+      setBriefLoading(false);
+    }
+  }
+
   useEffect(() => {
     refresh();
+    refreshBrief();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -99,6 +119,8 @@ export default function Dashboard() {
 
   return (
     <div className="space-y-4">
+      <DailyBriefCard data={brief} loading={briefLoading} />
+
       {ot && ot.alerts.length > 0 && (
         <div
           className={`card border-l-4 ${

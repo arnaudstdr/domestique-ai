@@ -6,6 +6,7 @@ import type {
   Availability,
   CoachMessage,
   CoachSession,
+  DailyBriefResponse,
   FtpProjectionResponse,
   LoadResponse,
   MorningEntry,
@@ -188,6 +189,10 @@ export const api = {
       const q = availableMin ? `?available_min=${availableMin}` : "";
       return http<TodayWorkoutResponse>(`/api/coach/today${q}`);
     },
+    dailyBrief: (refresh = false) =>
+      http<DailyBriefResponse>(
+        `/api/coach/daily-brief${refresh ? "?refresh=true" : ""}`,
+      ),
   },
   plan: {
     list: (limit = 20) =>

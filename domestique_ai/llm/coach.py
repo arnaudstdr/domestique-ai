@@ -76,8 +76,25 @@ def build_initial_messages(history: list[dict[str, Any]] | None,
     user/assistant en texte brut. Les tool_calls et tool_responses des tours
     passés sont volontairement écartés — ils respectent un schéma Pydantic
     strict côté SDK Ollama et ne servent pas à la conversation suivante.
+
+    Palier 2 de la proactivité : si l'historique est vide (nouvelle session),
+    on injecte un bloc contextuel (TSB, séance du jour, alerte saillante) en
+    message ``system`` additionnel. Le coach démarre informé sans avoir à
+    appeler ses tools sur la 1re question banale. Sur les tours suivants
+    (history non vide), le contexte n'est PAS réinjecté — il vit déjà dans
+    la conversation, inutile de gonfler le prompt.
     """
     base: list[dict[str, Any]] = [{"role": "system", "content": SYSTEM_PROMPT}]
+    if not history:
+        # Best-effort : si la construction du contexte échoue (DB vide, Ollama
+        # KO, etc.), on continue sans bloquer le coach.
+        try:
+            from domestique_ai.llm.daily_brief import build_coach_context
+            context = build_coach_context()
+        except Exception:  # noqa: BLE001
+            context = ""
+        if context:
+            base.append({"role": "system", "content": context})
     if history:
         for msg in history:
             role = msg.get("role")

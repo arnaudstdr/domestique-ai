@@ -404,6 +404,36 @@ class PlanPushGarminRequest(BaseModel):
 # ---- Séance du jour ---------------------------------------------------------
 
 
+class DailyBriefAlert(BaseModel):
+    """Alerte la plus saillante du jour (overtraining ou dérive matinale)."""
+
+    type: str
+    severity: Literal["warning", "danger"]
+    message: str
+
+
+class DailyBriefWorkout(BaseModel):
+    """Vue compacte de la séance du jour pour le brief Dashboard."""
+
+    rest_day: bool
+    reason: str | None = None
+    kind: str | None = None
+    duration_min: int | None = None
+    name: str | None = None
+
+
+class DailyBriefResponse(BaseModel):
+    """Réponse de ``GET /api/coach/daily-brief`` — palier 1 de la proactivité."""
+
+    date: str
+    summary: str
+    tsb: float | None = None
+    tsb_zone: str | None = None
+    primary_alert: DailyBriefAlert | None = None
+    today_workout: DailyBriefWorkout
+    source: Literal["cache", "llm", "fallback"]
+
+
 class TodayWorkoutResponse(BaseModel):
     """Réponse de ``GET /api/coach/today``.
 

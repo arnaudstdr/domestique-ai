@@ -334,6 +334,32 @@ export interface Availability {
   preferences: AvailabilityPreferences | null;
 }
 
+// ---- Briefing quotidien (palier 1 proactivité) -------------------------------
+
+export interface DailyBriefAlert {
+  type: string;
+  severity: "warning" | "danger";
+  message: string;
+}
+
+export interface DailyBriefWorkout {
+  rest_day: boolean;
+  reason: string | null;
+  kind: string | null;
+  duration_min: number | null;
+  name: string | null;
+}
+
+export interface DailyBriefResponse {
+  date: string;
+  summary: string;
+  tsb: number | null;
+  tsb_zone: string | null;
+  primary_alert: DailyBriefAlert | null;
+  today_workout: DailyBriefWorkout;
+  source: "cache" | "llm" | "fallback";
+}
+
 // ---- Séance du jour ---------------------------------------------------------
 
 export interface TodayWorkoutResponse {

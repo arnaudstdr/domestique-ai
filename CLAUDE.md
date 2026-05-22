@@ -163,6 +163,23 @@ Persistance : chaque message (user / assistant / tool) est stocké en JSON brut 
 
 Objectif : `data/objective.yaml` (gitignoré, template `data/objective.yaml.example`). Lu par le tool `get_objective`. Champs : `type` (cyclosportive/course/cyclo/maintenance), `date`, `distance_km`, `elevation_m`, `target_ftp`, `notes`. Override du chemin via `DOMESTIQUE_AI_OBJECTIVE_PATH` (utile pour les tests).
 
+### Coach proactif — paliers 1 et 2 (`llm/daily_brief.py`)
+
+Coach qui s'exprime sans être interpellé, en deux étages d'intrusion croissante.
+
+**Palier 1 — Briefing quotidien.** `GET /api/coach/daily-brief` agrège :
+
+- TSB courant + zone (Frais / Optimal / Fatigué / Surentraîné).
+- Séance suggérée du jour (via `propose_workout_today`).
+- Alerte la plus saillante (priorité TSB chronique / strain > monotony / saut volume > dérive matinale).
+- Phrase de synthèse générée par LLM (~25 mots, JSON strict, mode `chat_structured_sync`) avec **fallback déterministe** si Ollama injoignable.
+
+Cache en mémoire avec clé `(date_iso, round(tsb/5), sha1(alerts_sorted))` — un seul appel LLM par jour et par état même si le Dashboard est rouvert. Le cache des jours antérieurs est purgé au passage d'une nouvelle journée. Composant frontal : `DailyBriefCard` en tête du Dashboard avec skeleton loader (le brief peut prendre quelques secondes au premier chargement).
+
+**Palier 2 — Injection contextuelle dans le chat.** `build_initial_messages()` dans `llm/coach.py` ajoute désormais un **message system additionnel** quand `history` est vide (nouvelle session) avec : date, TSB, séance du jour, alerte saillante. Le coach démarre informé sans avoir à appeler ses tools sur la 1re question banale (« comment ça va ? »). Sur les tours suivants, ce contexte n'est **pas** réinjecté — il vit déjà dans la conversation, inutile de gonfler le prompt. Si le builder de contexte échoue (DB vide, Ollama KO), on continue sans contexte plutôt que de bloquer le chat.
+
+**Tests** : 21 tests dans `tests/test_daily_brief.py` (sélection alerte, fallback summary, cache + invalidation par jour, build_coach_context avec/sans alerte/repos) + 4 tests d'injection dans `test_coach.py` (présence/absence selon history, robustesse au crash du builder).
+
 ### Génération de plan par LLM (`llm/plan_generator.py` + `processing/plan_validator.py`)
 
 Alternative au builder déterministe (`processing/plan_builder.py`). Exposé via `POST /api/plan/llm` (streamé SSE, semaine par semaine).
