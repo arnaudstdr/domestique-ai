@@ -348,6 +348,10 @@ export interface DailyBriefWorkout {
   kind: string | null;
   duration_min: number | null;
   name: string | null;
+  target_zone: string | null;
+  estimated_tss: number | null;
+  structure: WorkoutStep[];
+  notes: string | null;
 }
 
 export interface DailyBriefResponse {

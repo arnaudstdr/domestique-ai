@@ -1,4 +1,4 @@
-// Mapping partagé entre PlanCalendar et TodayCard pour les types de séance.
+// Mapping partagé entre PlanCalendar et DailyBriefCard pour les types de séance.
 
 import type { WorkoutStep } from "../api/types";
 

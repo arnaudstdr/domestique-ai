@@ -11,7 +11,6 @@ import type {
 import DailyBriefCard from "../components/DailyBriefCard";
 import LoadChart from "../components/LoadChart";
 import MetricCard from "../components/MetricCard";
-import TodayCard from "../components/TodayCard";
 import ZoneBar from "../components/ZoneBar";
 import { useToast } from "../hooks/useToast";
 
@@ -144,8 +143,6 @@ export default function Dashboard() {
           </ul>
         </div>
       )}
-
-      <TodayCard />
 
       <div className="grid grid-cols-3 gap-3">
         <MetricCard

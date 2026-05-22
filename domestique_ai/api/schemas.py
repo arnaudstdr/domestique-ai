@@ -413,13 +413,21 @@ class DailyBriefAlert(BaseModel):
 
 
 class DailyBriefWorkout(BaseModel):
-    """Vue compacte de la séance du jour pour le brief Dashboard."""
+    """Vue compacte de la séance du jour pour le brief Dashboard.
+
+    Inclut la structure détaillée pour permettre au composant frontal de
+    déplier les steps sans appel HTTP supplémentaire.
+    """
 
     rest_day: bool
     reason: str | None = None
     kind: str | None = None
     duration_min: int | None = None
     name: str | None = None
+    target_zone: str | None = None
+    estimated_tss: float | None = None
+    structure: list[WorkoutStepSchema] = Field(default_factory=list)
+    notes: str | None = None
 
 
 class DailyBriefResponse(BaseModel):

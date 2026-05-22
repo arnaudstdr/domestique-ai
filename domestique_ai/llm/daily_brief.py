@@ -188,7 +188,12 @@ def _generate_summary_with_llm(signals: dict[str, Any]) -> str | None:
 
 
 def _workout_to_brief(workout: dict[str, Any]) -> dict[str, Any]:
-    """Extrait le sous-ensemble pertinent de la séance pour le brief."""
+    """Extrait le sous-ensemble pertinent de la séance pour le brief.
+
+    Inclut la structure détaillée (steps + zone cible + TSS estimé + notes)
+    pour que la `DailyBriefCard` puisse afficher le détail au déroulement,
+    sans nouvel appel HTTP.
+    """
     if workout.get("rest_day"):
         return {
             "rest_day": True,
@@ -196,6 +201,10 @@ def _workout_to_brief(workout: dict[str, Any]) -> dict[str, Any]:
             "kind": None,
             "duration_min": None,
             "name": None,
+            "target_zone": None,
+            "estimated_tss": None,
+            "structure": [],
+            "notes": None,
         }
     w = workout.get("workout") or {}
     return {
@@ -204,6 +213,10 @@ def _workout_to_brief(workout: dict[str, Any]) -> dict[str, Any]:
         "kind": w.get("kind"),
         "duration_min": w.get("duration_min"),
         "name": w.get("name"),
+        "target_zone": w.get("target_zone"),
+        "estimated_tss": w.get("estimated_tss"),
+        "structure": list(w.get("structure") or []),
+        "notes": w.get("notes") or None,
     }
 
 

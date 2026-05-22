@@ -1,5 +1,12 @@
+import { useState } from "react";
 import { Link } from "react-router-dom";
-import type { DailyBriefResponse } from "../api/types";
+import type { DailyBriefResponse, DailyBriefWorkout } from "../api/types";
+import {
+  KIND_LABELS,
+  KIND_TONES,
+  PHASE_LABELS,
+  formatDuration,
+} from "./workoutKind";
 
 interface Props {
   data: DailyBriefResponse | null;
@@ -29,8 +36,11 @@ function alertTone(severity: "warning" | "danger" | undefined): string {
 }
 
 export default function DailyBriefCard({ data, loading }: Props) {
+  // L'état d'expansion est local au composant — fermé par défaut, on s'ouvre
+  // au clic sur la cellule « Aujourd'hui » quand il y a une séance à détailler.
+  const [expanded, setExpanded] = useState(false);
+
   if (loading && !data) {
-    // Skeleton minimaliste — évite le flash de carte vide.
     return (
       <div className="card animate-pulse space-y-2">
         <div className="h-3 w-32 rounded bg-white/10" />
@@ -46,6 +56,7 @@ export default function DailyBriefCard({ data, loading }: Props) {
     data.tsb != null
       ? `${data.tsb >= 0 ? "+" : ""}${data.tsb.toFixed(1)}`
       : "—";
+  const hasDetail = !workout.rest_day && workout.structure.length > 0;
 
   return (
     <div className="card space-y-3 border-l-4 border-accent">
@@ -77,23 +88,14 @@ export default function DailyBriefCard({ data, loading }: Props) {
           </div>
           <div className="text-muted">{data.tsb_zone || "—"}</div>
         </div>
-        <div>
-          <div className="text-muted uppercase tracking-wide">Aujourd'hui</div>
-          {workout.rest_day ? (
-            <div className="text-base font-semibold text-muted">Repos</div>
-          ) : (
-            <>
-              <div className="text-base font-semibold text-gray-100 capitalize">
-                {workout.kind || "—"}
-              </div>
-              <div className="text-muted">
-                {workout.duration_min != null
-                  ? `${workout.duration_min} min`
-                  : "—"}
-              </div>
-            </>
-          )}
-        </div>
+
+        <TodayCell
+          workout={workout}
+          expanded={expanded}
+          onToggle={() => hasDetail && setExpanded((v) => !v)}
+          hasDetail={hasDetail}
+        />
+
         <div>
           <div className="text-muted uppercase tracking-wide">Alerte</div>
           {data.primary_alert ? (
@@ -113,6 +115,8 @@ export default function DailyBriefCard({ data, loading }: Props) {
         </div>
       </div>
 
+      {expanded && hasDetail && <WorkoutDetail workout={workout} />}
+
       {data.primary_alert && (
         <div
           className={`rounded-lg border p-2 text-xs ${alertTone(data.primary_alert.severity)}`}
@@ -126,6 +130,106 @@ export default function DailyBriefCard({ data, loading }: Props) {
           En parler au coach →
         </Link>
       </div>
+    </div>
+  );
+}
+
+interface TodayCellProps {
+  workout: DailyBriefWorkout;
+  expanded: boolean;
+  hasDetail: boolean;
+  onToggle: () => void;
+}
+
+function TodayCell({ workout, expanded, hasDetail, onToggle }: TodayCellProps) {
+  // En repos : pas d'interaction, on affiche juste la mention.
+  if (workout.rest_day) {
+    return (
+      <div>
+        <div className="text-muted uppercase tracking-wide">Aujourd'hui</div>
+        <div className="text-base font-semibold text-muted">Repos</div>
+        {workout.reason && (
+          <div className="text-[11px] text-muted leading-tight mt-0.5">
+            {workout.reason}
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  const label =
+    (workout.kind && KIND_LABELS[workout.kind]) || workout.kind || "—";
+  const tone =
+    (workout.kind && KIND_TONES[workout.kind]) || "bg-muted/15 text-muted";
+
+  return (
+    <button
+      type="button"
+      onClick={onToggle}
+      disabled={!hasDetail}
+      className="text-left disabled:cursor-default group"
+      aria-expanded={expanded}
+      title={hasDetail ? "Voir le détail de la séance" : undefined}
+    >
+      <div className="text-muted uppercase tracking-wide flex items-center gap-1">
+        Aujourd'hui
+        {hasDetail && (
+          <span
+            className="text-[10px] text-muted group-hover:text-accent transition-colors"
+            aria-hidden
+          >
+            {expanded ? "▴" : "▾"}
+          </span>
+        )}
+      </div>
+      <div className="flex items-center gap-1.5 mt-0.5">
+        <span className={`pill ${tone} text-[10px] py-0.5 px-1.5`}>{label}</span>
+      </div>
+      <div className="text-muted">
+        {workout.duration_min != null ? `${workout.duration_min} min` : "—"}
+        {workout.target_zone && (
+          <span className="ml-1">· {workout.target_zone.toUpperCase()}</span>
+        )}
+      </div>
+    </button>
+  );
+}
+
+function WorkoutDetail({ workout }: { workout: DailyBriefWorkout }) {
+  return (
+    <div className="rounded-lg border border-white/10 bg-surface/40 p-3 space-y-2">
+      <div className="flex items-baseline justify-between gap-2">
+        <div className="text-sm font-medium text-gray-100">{workout.name}</div>
+        {workout.estimated_tss != null && (
+          <span className="text-[11px] text-muted">
+            ~{Math.round(workout.estimated_tss)} TSS
+          </span>
+        )}
+      </div>
+      {workout.notes && (
+        <div className="text-xs italic text-muted">{workout.notes}</div>
+      )}
+      <ul className="space-y-1 text-xs">
+        {workout.structure.slice(0, 5).map((step, idx) => (
+          <li
+            key={idx}
+            className="flex items-center justify-between rounded bg-surface/60 px-2 py-1"
+          >
+            <span className="text-gray-200">
+              <span className="text-muted">
+                {PHASE_LABELS[step.phase] || step.phase}
+              </span>{" "}
+              · {step.zone.toUpperCase()}
+            </span>
+            <span className="text-muted">{formatDuration(step.duration_sec)}</span>
+          </li>
+        ))}
+        {workout.structure.length > 5 && (
+          <li className="text-center text-[11px] text-muted">
+            + {workout.structure.length - 5} step(s) supplémentaire(s)
+          </li>
+        )}
+      </ul>
     </div>
   );
 }
