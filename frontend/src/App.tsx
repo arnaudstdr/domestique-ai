@@ -18,8 +18,14 @@ function AuthenticatedLayout() {
                    pt-[env(safe-area-inset-top)]"
       >
         <div className="mx-auto max-w-3xl px-4 py-3 flex items-center justify-between">
-          <h1 className="text-base font-semibold tracking-wide">
-            🚴‍♂️ DomestiqueAI
+          <h1 className="flex items-center gap-2 text-base font-semibold tracking-wide">
+            <img
+              src="/icon-48.png"
+              alt=""
+              aria-hidden="true"
+              className="h-6 w-6 rounded-md"
+            />
+            DomestiqueAI
           </h1>
           <Link
             to="/profil"

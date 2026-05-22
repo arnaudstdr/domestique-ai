@@ -42,7 +42,12 @@ export default function Login() {
         className="w-full max-w-sm space-y-4 rounded-2xl border border-white/10 bg-white/5 p-6 shadow-lg"
       >
         <div className="text-center">
-          <div className="text-2xl">🔐</div>
+          <img
+            src="/icon-192.png"
+            alt=""
+            aria-hidden="true"
+            className="mx-auto h-16 w-16 rounded-xl"
+          />
           <h1 className="mt-2 text-base font-semibold">DomestiqueAI</h1>
           <p className="mt-1 text-xs text-gray-400">
             Authentification requise
