@@ -119,6 +119,17 @@ Colonnes `avg_temp` / `min_temp` / `max_temp` (REAL nullable, °C) calculées à
 - **Convention DB** : `NULL` = stream pas encore lu OU activité sans capteur ; pour distinguer les deux, regarder si le backfill a déjà été lancé pour cette activité (`avg_heart_rate IS NOT NULL` est un proxy raisonnable pour « activité outdoor avec capteurs »).
 - **Exposition** : `ActivitySummary` et le tool LLM `get_activity_details` retournent `avg_temp_c` / `min_temp_c` / `max_temp_c` quand disponibles, ce qui permet au coach d'expliquer une dérive HR par la chaleur.
 
+### Auto-sync Strava (scheduler APScheduler)
+
+Un `BackgroundScheduler` APScheduler tourne dans le process FastAPI et déclenche `sync_activities()` à intervalle régulier — par défaut **toutes les 30 minutes**. Démarré au `lifespan` startup, arrêté proprement au shutdown.
+
+- **Configuration** :
+  - `DOMESTIQUE_AI_AUTO_SYNC_MINUTES` : période en minutes (défaut 30). `0` désactive complètement l'auto-sync.
+  - `DOMESTIQUE_AI_AUTO_SYNC_FIRST_RUN_DELAY_MIN` : délai avant le 1er run (défaut 2 min — laisse l'API se stabiliser).
+- **Anti-chevauchement** : sync manuel (`POST /api/strava/sync`) et auto-sync passent tous les deux par `_claim_sync()` dans `routers/strava.py`. Tant qu'une sync est en cours (`status == "syncing"`), tout claim concurrent retourne `False` (skip silencieux loggé côté scheduler). `coalesce=True, max_instances=1` côté APScheduler en plus, ceinture + bretelles.
+- **Logs et erreurs** : `_auto_sync_job` enveloppe `trigger_sync_blocking` dans un `try/except` global — un job APScheduler qui lève marque le job comme erroné et peut arrêter le scheduler, ce qu'on ne veut surtout pas. Toute exception inattendue est loggée mais n'interrompt pas la cadence.
+- **Rate limit** : 30 min × 24 = 48 sync/jour. À vide ≈ 1-2 req Strava chacune, soit ~100 req/jour dans le pire cas — large sous le quota (1000/jour, 100/15 min).
+
 ### OAuth Strava
 
 `StravaClient.from_tokens_file()` est le point d'entrée standard côté code. Il :

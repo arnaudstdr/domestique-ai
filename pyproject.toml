@@ -22,6 +22,7 @@ dependencies = [
     "uvicorn[standard]>=0.29",
     "sse-starlette>=1.8",
     "python-multipart>=0.0.9",
+    "apscheduler>=3.10",
 ]
 
 [project.optional-dependencies]

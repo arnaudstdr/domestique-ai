@@ -38,6 +38,38 @@ _sync_state: dict[str, object] = {
 _sync_lock = Lock()
 
 
+def _claim_sync() -> bool:
+    """Tente de réserver le slot de sync. Retourne ``True`` si réussi.
+
+    Sync manuel (endpoint ``POST /sync``) et auto-sync (scheduler) passent
+    tous les deux par ce point pour éviter le chevauchement. Si une sync est
+    déjà en cours, l'appelant doit abandonner ou attendre le tick suivant.
+    """
+    with _sync_lock:
+        if _sync_state.get("status") == "syncing":
+            return False
+        _sync_state.update(
+            status="syncing",
+            inserted=None,
+            error=None,
+            started_at=dt.datetime.now(dt.timezone.utc).isoformat(),
+            finished_at=None,
+        )
+    return True
+
+
+def trigger_sync_blocking() -> bool:
+    """Réserve + exécute un sync de manière synchrone dans le thread courant.
+
+    Utilisé par l'auto-sync (scheduler). Retourne ``True`` si l'exécution a
+    eu lieu, ``False`` si une autre sync était déjà en cours.
+    """
+    if not _claim_sync():
+        return False
+    _run_sync()
+    return True
+
+
 def _run_sync() -> None:
     """Exécution du sync en background. Capture les exceptions."""
     import time as _t  # local — évite collision avec time.time global
@@ -91,17 +123,8 @@ def _run_sync() -> None:
 @router.post("/sync", response_model=SyncStatus)
 def post_sync(background_tasks: BackgroundTasks) -> SyncStatus:
     """Déclenche un sync Strava en arrière-plan."""
-    with _sync_lock:
-        if _sync_state.get("status") == "syncing":
-            return SyncStatus(**_sync_state)  # type: ignore[arg-type]
-        _sync_state.update(
-            status="syncing",
-            inserted=None,
-            error=None,
-            started_at=dt.datetime.now(dt.timezone.utc).isoformat(),
-            finished_at=None,
-        )
-    background_tasks.add_task(_run_sync)
+    if _claim_sync():
+        background_tasks.add_task(_run_sync)
     with _sync_lock:
         return SyncStatus(**_sync_state)  # type: ignore[arg-type]
 

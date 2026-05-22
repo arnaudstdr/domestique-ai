@@ -44,6 +44,7 @@ from domestique_ai.api.routers import (
 from domestique_ai.api.routers import (
     strava as strava_router,
 )
+from domestique_ai.api.scheduler import start_scheduler, stop_scheduler
 from domestique_ai.config import REPO_ROOT, get_api_token
 
 _FRONTEND_DIST = REPO_ROOT / "frontend" / "dist"
@@ -104,7 +105,9 @@ async def lifespan(app: FastAPI):  # noqa: ARG001
     # Lancement non bloquant — l'API est prête immédiatement, le backfill
     # tourne en tâche de fond.
     asyncio.create_task(_backfill_session_titles())
+    start_scheduler()
     yield
+    stop_scheduler()
     log.info("DomestiqueAI API arrêtée.")
 
 
