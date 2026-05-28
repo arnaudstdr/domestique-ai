@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import {
   Download,
+  Map,
   RefreshCcw,
   RefreshCw,
   Thermometer,
@@ -291,6 +292,25 @@ export default function Dashboard() {
             <span className="inline-flex items-center justify-center gap-2">
               <Thermometer className="h-4 w-4" strokeWidth={1.75} aria-hidden="true" />
               Backfill temp.
+            </span>
+          </button>
+          <button
+            className="btn-ghost"
+            disabled={busy !== null}
+            onClick={() =>
+              triggerAction(
+                "Backfill tracés",
+                () => api.strava.backfillPolylines(),
+                (r) => {
+                  const updated = (r as { updated?: number }).updated ?? 0;
+                  return `Backfill tracés : ${updated} activité(s)`;
+                },
+              )
+            }
+          >
+            <span className="inline-flex items-center justify-center gap-2">
+              <Map className="h-4 w-4" strokeWidth={1.75} aria-hidden="true" />
+              Backfill tracés
             </span>
           </button>
         </div>

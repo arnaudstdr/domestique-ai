@@ -61,6 +61,7 @@ def _activity_to_summary(row: dict) -> ActivitySummary:
         avg_temp=row.get("avg_temp"),
         min_temp=row.get("min_temp"),
         max_temp=row.get("max_temp"),
+        map_polyline=row.get("map_polyline"),
     )
 
 

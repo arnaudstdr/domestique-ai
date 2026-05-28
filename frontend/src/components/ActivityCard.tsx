@@ -1,5 +1,6 @@
 import { Link } from "react-router-dom";
 import type { ActivitySummary } from "../api/types";
+import RoutePreview from "./RoutePreview";
 
 interface Props {
   activity: ActivitySummary;
@@ -25,30 +26,31 @@ export default function ActivityCard({ activity }: Props) {
   return (
     <Link
       to={`/activites/${activity.strava_id}`}
-      className="card block transition-colors hover:bg-cardHover"
+      className="card flex items-start gap-3 transition-colors hover:bg-cardHover"
     >
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0 flex-1">
-          <h3 className="truncate font-medium text-gray-100">
-            {activity.name || activity.sport_type || "Activité"}
-          </h3>
-          <p className="mt-0.5 text-xs text-muted">{formatDate(activity.date)}</p>
+      <div className="min-w-0 flex-1">
+        <h3 className="truncate font-medium text-gray-100">
+          {activity.name || activity.sport_type || "Activité"}
+        </h3>
+        <p className="mt-0.5 text-xs text-muted">{formatDate(activity.date)}</p>
+        <div className="mt-3 grid grid-cols-3 gap-2 text-xs">
+          <Metric label="Distance" value={`${activity.distance_km.toFixed(1)} km`} />
+          <Metric label="Durée" value={formatHms(activity.duration_sec)} />
+          <Metric
+            label="D+"
+            value={
+              activity.elevation_m != null
+                ? `${Math.round(activity.elevation_m)} m`
+                : "—"
+            }
+          />
         </div>
-        <span className="pill bg-accent/15 text-accent shrink-0">
+      </div>
+      <div className="flex shrink-0 flex-col items-end gap-2">
+        <span className="pill bg-accent/15 text-accent">
           {activity.tss.toFixed(0)} TSS
         </span>
-      </div>
-      <div className="mt-3 grid grid-cols-3 gap-2 text-xs">
-        <Metric label="Distance" value={`${activity.distance_km.toFixed(1)} km`} />
-        <Metric label="Durée" value={formatHms(activity.duration_sec)} />
-        <Metric
-          label="D+"
-          value={
-            activity.elevation_m != null
-              ? `${Math.round(activity.elevation_m)} m`
-              : "—"
-          }
-        />
+        <RoutePreview polyline={activity.map_polyline} />
       </div>
     </Link>
   );

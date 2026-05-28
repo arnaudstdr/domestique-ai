@@ -249,6 +249,10 @@ class StravaClient:
 
     def extract_activity_data(self, activity: dict[str, Any]) -> dict[str, Any]:
         """Extrait les champs utiles d'une activité Strava brute."""
+        map_data = activity.get("map") or {}
+        # `summary_polyline` est un tracé simplifié (encoded Google polyline,
+        # ~500 octets). Vide pour les activités indoor (home trainer / Zwift).
+        polyline = map_data.get("summary_polyline") or None
         return {
             "id": activity.get("id"),
             "date": activity.get("start_date"),
@@ -261,6 +265,7 @@ class StravaClient:
             # `sport_type` est le champ moderne (Ride, VirtualRide, MountainBikeRide,
             # Walk, Swim, …). `type` est l'ancien — fallback de robustesse.
             "sport_type": activity.get("sport_type") or activity.get("type"),
+            "map_polyline": polyline,
         }
 
     @staticmethod
@@ -329,7 +334,8 @@ def init_db(db_path: Path | None = None) -> None:
                 sport_type TEXT,
                 avg_temp REAL,
                 min_temp REAL,
-                max_temp REAL
+                max_temp REAL,
+                map_polyline TEXT
             )
         """)
         _ensure_column(conn, "activities", "max_heart_rate", "REAL")
@@ -339,6 +345,7 @@ def init_db(db_path: Path | None = None) -> None:
         _ensure_column(conn, "activities", "sport_type", "TEXT")
         for temp_col in ("avg_temp", "min_temp", "max_temp"):
             _ensure_column(conn, "activities", temp_col, "REAL")
+        _ensure_column(conn, "activities", "map_polyline", "TEXT")
         conn.execute("""
             CREATE TABLE IF NOT EXISTS conversations (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -488,8 +495,8 @@ def save_activity(activity: dict[str, Any], db_path: Path | None = None,
                 strava_id, date, duration, avg_heart_rate, max_heart_rate,
                 avg_power, elevation_gain, distance, training_load,
                 hr_z1_time, hr_z2_time, hr_z3_time, hr_z4_time, hr_z5_time,
-                sport_type, avg_temp, min_temp, max_temp
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                sport_type, avg_temp, min_temp, max_temp, map_polyline
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             strava_id,
             activity.get("date"),
@@ -503,6 +510,7 @@ def save_activity(activity: dict[str, Any], db_path: Path | None = None,
             *zone_values,
             activity.get("sport_type"),
             *temp_values,
+            activity.get("map_polyline"),
         ))
         conn.commit()
         return True
@@ -770,6 +778,62 @@ def backfill_sport_types(client: StravaClient,
             conn.execute(
                 "UPDATE activities SET sport_type = ? WHERE strava_id = ?",
                 (sport_type, strava_id),
+            )
+            updated += 1
+        conn.commit()
+        return updated
+    finally:
+        conn.close()
+
+
+def backfill_polylines(client: StravaClient,
+                       db_path: Path | None = None) -> int:
+    """
+    Complète la colonne ``map_polyline`` pour les activités déjà en base
+    qui ne l'ont pas encore.
+
+    Stratégie efficace : le ``summary_polyline`` est déjà inclus dans la
+    réponse du listing ``/athlete/activities`` (200 activités par page). Pour
+    1848 activités on ne fait donc qu'une dizaine de requêtes au lieu d'une
+    requête par activité.
+
+    Idempotent : seules les lignes avec ``map_polyline IS NULL`` sont
+    mises à jour. Les activités indoor (home trainer, sans GPS) restent
+    NULL — Strava renvoie une chaîne vide qu'on convertit en ``None``.
+
+    Retourne le nombre de lignes effectivement mises à jour.
+    """
+    init_db(db_path)
+    path = Path(db_path) if db_path else get_db_path()
+    conn = sqlite3.connect(path)
+    try:
+        missing = {
+            row[0]
+            for row in conn.execute(
+                "SELECT strava_id FROM activities WHERE map_polyline IS NULL"
+            )
+        }
+    finally:
+        conn.close()
+
+    if not missing:
+        return 0
+
+    activities = client.fetch_activities()
+    conn = sqlite3.connect(path)
+    try:
+        updated = 0
+        for raw in activities:
+            data = client.extract_activity_data(raw)
+            strava_id = data.get("id")
+            if strava_id not in missing:
+                continue
+            polyline = data.get("map_polyline")
+            if not polyline:
+                continue
+            conn.execute(
+                "UPDATE activities SET map_polyline = ? WHERE strava_id = ?",
+                (polyline, strava_id),
             )
             updated += 1
         conn.commit()

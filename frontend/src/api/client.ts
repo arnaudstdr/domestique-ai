@@ -178,6 +178,8 @@ export const api = {
       http<SyncResult>(`/api/strava/backfill-hr-zones`, { method: "POST" }),
     backfillTemperature: () =>
       http<SyncResult>(`/api/strava/backfill-temperature`, { method: "POST" }),
+    backfillPolylines: () =>
+      http<SyncResult>(`/api/strava/backfill-polylines`, { method: "POST" }),
   },
   coach: {
     sessions: () => http<CoachSession[]>(`/api/coach/sessions`),

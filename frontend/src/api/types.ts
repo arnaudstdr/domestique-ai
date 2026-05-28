@@ -154,6 +154,7 @@ export interface ActivitySummary {
   avg_temp: number | null;
   min_temp: number | null;
   max_temp: number | null;
+  map_polyline: string | null;
 }
 
 export interface ActivitiesList {

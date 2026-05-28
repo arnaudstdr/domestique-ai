@@ -20,6 +20,9 @@ from domestique_ai.ingestion.strava import (
     backfill_hr_zones as _backfill_hr_zones,
 )
 from domestique_ai.ingestion.strava import (
+    backfill_polylines as _backfill_polylines,
+)
+from domestique_ai.ingestion.strava import (
     backfill_temperature as _backfill_temperature,
 )
 from domestique_ai.processing.analyzer import recalculate_training_loads
@@ -205,4 +208,27 @@ def post_backfill_temperature(
             detail=str(exc),
         ) from exc
     log.info("Backfill température : %d activité(s) enrichie(s).", updated)
+    return SyncResult(status="done", updated=updated)
+
+
+@router.post("/backfill-polylines", response_model=SyncResult)
+def post_backfill_polylines(
+    client: StravaClient = Depends(get_strava_client),  # noqa: B008
+) -> SyncResult:
+    """Backfill ``map_polyline`` pour les activités sans tracé persisté.
+
+    Très peu coûteux : le ``summary_polyline`` est inclus dans le listing
+    Strava (200 activités / requête), pas besoin d'un appel par activité.
+    Idempotent : ne touche que les lignes ``map_polyline IS NULL``.
+    """
+    log.info("Backfill tracés : démarrage…")
+    try:
+        updated = _backfill_polylines(client)
+    except StravaAuthError as exc:
+        log.warning("Backfill tracés : auth Strava : %s", exc)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=str(exc),
+        ) from exc
+    log.info("Backfill tracés : %d activité(s) enrichie(s).", updated)
     return SyncResult(status="done", updated=updated)

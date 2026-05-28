@@ -132,6 +132,7 @@ class ActivitySummary(BaseModel):
     avg_temp: float | None = None
     min_temp: float | None = None
     max_temp: float | None = None
+    map_polyline: str | None = None
 
 
 class ActivitiesList(BaseModel):

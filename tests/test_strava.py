@@ -11,6 +11,7 @@ from domestique_ai.ingestion.strava import (
     StravaClient,
     _last_activity_timestamp,
     backfill_activity_fields,
+    backfill_polylines,
     backfill_sport_types,
     backfill_temperature,
     init_db,
@@ -64,7 +65,30 @@ def test_extract_activity_data():
         "elevation_gain": 500.0,
         "distance": 35000.0,
         "sport_type": "Ride",
+        "map_polyline": None,
     }
+
+
+def test_extract_activity_data_captures_summary_polyline():
+    """Le ``summary_polyline`` (tracé simplifié) est récupéré quand présent."""
+    client = StravaClient(access_token="x")
+    extracted = client.extract_activity_data({
+        "id": 1, "start_date": "2025-04-01T08:00:00Z",
+        "elapsed_time": 0, "sport_type": "Ride",
+        "map": {"summary_polyline": "abc_xyz", "polyline": "fulltrace"},
+    })
+    assert extracted["map_polyline"] == "abc_xyz"
+
+
+def test_extract_activity_data_polyline_empty_becomes_none():
+    """Une chaîne vide (activité indoor sans GPS) est normalisée en ``None``."""
+    client = StravaClient(access_token="x")
+    extracted = client.extract_activity_data({
+        "id": 1, "start_date": "2025-04-01T08:00:00Z",
+        "elapsed_time": 0, "sport_type": "VirtualRide",
+        "map": {"summary_polyline": ""},
+    })
+    assert extracted["map_polyline"] is None
 
 
 def test_extract_activity_data_falls_back_to_legacy_type():
@@ -384,6 +408,88 @@ def test_backfill_temperature_idempotent(db_path: Path):
     # Aucune activité du tout → 0 ligne mise à jour, pas de crash.
     client = _TempStreamsClient({})
     assert backfill_temperature(client, db_path=db_path) == 0
+
+
+class _ListingStubClient(StravaClient):
+    """StravaClient renvoyant un payload listing fixé pour ``fetch_activities``."""
+
+    def __init__(self, activities: list[dict]):
+        super().__init__(access_token="stub")
+        self._activities = activities
+
+    def fetch_activities(self, after=None, per_page=200):  # type: ignore[override]
+        return self._activities
+
+
+def test_backfill_polylines_fills_missing_only(db_path: Path, monkeypatch):
+    monkeypatch.delenv("STRAVA_HR_REST", raising=False)
+    monkeypatch.delenv("STRAVA_HR_MAX", raising=False)
+    save_activity({
+        "id": 1, "date": "2025-07-15T08:00:00Z", "duration": 3600,
+        "avg_heart_rate": None, "max_heart_rate": None,
+        "avg_power": 220.0, "elevation_gain": 0, "distance": 30000,
+    }, db_path=db_path, ftp=250.0)
+    # L'activité 2 a déjà un polyline → le backfill ne doit pas la toucher.
+    save_activity({
+        "id": 2, "date": "2025-07-16T08:00:00Z", "duration": 3600,
+        "avg_heart_rate": None, "max_heart_rate": None,
+        "avg_power": 220.0, "elevation_gain": 0, "distance": 30000,
+        "map_polyline": "preexisting",
+    }, db_path=db_path, ftp=250.0)
+
+    client = _ListingStubClient([
+        {"id": 1, "start_date": "2025-07-15T08:00:00Z", "elapsed_time": 3600,
+         "sport_type": "Ride", "map": {"summary_polyline": "newtrack"}},
+        {"id": 2, "start_date": "2025-07-16T08:00:00Z", "elapsed_time": 3600,
+         "sport_type": "Ride", "map": {"summary_polyline": "shouldnotbeused"}},
+    ])
+    assert backfill_polylines(client, db_path=db_path) == 1
+
+    conn = sqlite3.connect(db_path)
+    try:
+        rows = conn.execute(
+            "SELECT strava_id, map_polyline FROM activities ORDER BY strava_id"
+        ).fetchall()
+    finally:
+        conn.close()
+    assert rows == [(1, "newtrack"), (2, "preexisting")]
+
+
+def test_backfill_polylines_skips_when_strava_returns_empty(db_path: Path, monkeypatch):
+    """Une activité indoor sans GPS (polyline vide) est laissée NULL."""
+    monkeypatch.delenv("STRAVA_HR_REST", raising=False)
+    monkeypatch.delenv("STRAVA_HR_MAX", raising=False)
+    save_activity({
+        "id": 42, "date": "2025-07-15T08:00:00Z", "duration": 3600,
+        "avg_heart_rate": None, "max_heart_rate": None,
+        "avg_power": 220.0, "elevation_gain": 0, "distance": 30000,
+    }, db_path=db_path, ftp=250.0)
+    client = _ListingStubClient([
+        {"id": 42, "start_date": "2025-07-15T08:00:00Z", "elapsed_time": 3600,
+         "sport_type": "VirtualRide", "map": {"summary_polyline": ""}},
+    ])
+    assert backfill_polylines(client, db_path=db_path) == 0
+    conn = sqlite3.connect(db_path)
+    try:
+        row = conn.execute(
+            "SELECT map_polyline FROM activities WHERE strava_id = 42"
+        ).fetchone()
+    finally:
+        conn.close()
+    assert row == (None,)
+
+
+def test_backfill_polylines_no_op_when_nothing_missing(db_path: Path):
+    """Si toutes les activités ont déjà un polyline, aucun appel API."""
+    # Aucune activité du tout → 0 ligne mise à jour, pas d'appel ``fetch_activities``.
+    class _BoomClient(StravaClient):
+        def __init__(self):
+            super().__init__(access_token="x")
+
+        def fetch_activities(self, after=None, per_page=200):  # type: ignore[override]
+            raise AssertionError("ne doit pas être appelé quand rien à backfiller")
+
+    assert backfill_polylines(_BoomClient(), db_path=db_path) == 0
 
 
 def test_backfill_temperature_skips_activities_without_stream(db_path: Path, monkeypatch):
