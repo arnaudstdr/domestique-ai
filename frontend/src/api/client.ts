@@ -3,6 +3,7 @@
 import type {
   ActivitiesList,
   ActivityDetail,
+  ActivityFilters,
   Availability,
   CoachMessage,
   CoachSession,
@@ -123,14 +124,40 @@ export const api = {
       http<FtpProjectionResponse>(`/api/metrics/ftp-projection`),
   },
   activities: {
-    list: (page = 1, page_size = 20, days?: number) => {
+    list: (
+      page = 1,
+      page_size = 20,
+      filters: ActivityFilters = {},
+    ) => {
       const q = new URLSearchParams({
         page: String(page),
         page_size: String(page_size),
       });
-      if (days) q.set("days", String(days));
+      if (filters.days) q.set("days", String(filters.days));
+      if (filters.date_from) q.set("date_from", filters.date_from);
+      if (filters.date_to) q.set("date_to", filters.date_to);
+      for (const s of filters.sport_types ?? []) {
+        if (s) q.append("sport_types", s);
+      }
+      const numKeys: (keyof ActivityFilters)[] = [
+        "distance_min_km",
+        "distance_max_km",
+        "elevation_min_m",
+        "elevation_max_m",
+        "duration_min_sec",
+        "duration_max_sec",
+        "tss_min",
+        "tss_max",
+      ];
+      for (const k of numKeys) {
+        const v = filters[k];
+        if (v !== undefined && v !== null && !Number.isNaN(v as number)) {
+          q.set(k, String(v));
+        }
+      }
       return http<ActivitiesList>(`/api/activities?${q.toString()}`);
     },
+    sportTypes: () => http<string[]>(`/api/activities/sport-types`),
     detail: (id: number) => http<ActivityDetail>(`/api/activities/${id}`),
     similar: (id: number, limit = 10) =>
       http<SimilarActivitiesResponse>(

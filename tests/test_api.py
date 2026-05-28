@@ -90,6 +90,137 @@ def test_activities_list_pagination(client: TestClient, tmp_path: Path) -> None:
     assert body["items"][0]["strava_id"] == 104
 
 
+def _insert_full(
+    db: Path,
+    strava_id: int,
+    date: str,
+    *,
+    distance_m: float = 30000.0,
+    elevation_m: float = 300.0,
+    duration_sec: int = 3600,
+    training_load: float = 50.0,
+    sport_type: str = "Ride",
+) -> None:
+    save_activity(
+        {
+            "id": strava_id,
+            "date": date,
+            "duration": duration_sec,
+            "avg_heart_rate": 145,
+            "max_heart_rate": 170,
+            "avg_power": 200,
+            "elevation_gain": elevation_m,
+            "distance": distance_m,
+            "training_load": training_load,
+            "sport_type": sport_type,
+        },
+        db_path=db,
+    )
+
+
+def test_activities_filter_by_date_range(client: TestClient, tmp_path: Path) -> None:
+    db = Path(tmp_path / "api_test.db")
+    _insert_full(db, 1, "2026-04-10T08:00:00Z")
+    _insert_full(db, 2, "2026-04-20T08:00:00Z")
+    _insert_full(db, 3, "2026-04-30T08:00:00Z")
+    # Bornes inclusives au jour près.
+    r = client.get("/api/activities?date_from=2026-04-15&date_to=2026-04-25")
+    assert r.status_code == 200
+    items = r.json()["items"]
+    assert [i["strava_id"] for i in items] == [2]
+
+
+def test_activities_filter_date_to_is_inclusive(
+    client: TestClient, tmp_path: Path,
+) -> None:
+    """``date_to=2026-04-30`` doit inclure les activités du 30 avril en soirée."""
+    db = Path(tmp_path / "api_test.db")
+    _insert_full(db, 1, "2026-04-30T22:00:00Z")
+    r = client.get("/api/activities?date_to=2026-04-30")
+    assert r.status_code == 200
+    assert r.json()["total"] == 1
+
+
+def test_activities_filter_by_sport_types(
+    client: TestClient, tmp_path: Path,
+) -> None:
+    db = Path(tmp_path / "api_test.db")
+    _insert_full(db, 1, "2026-04-10T08:00:00Z", sport_type="Ride")
+    _insert_full(db, 2, "2026-04-11T08:00:00Z", sport_type="VirtualRide")
+    _insert_full(db, 3, "2026-04-12T08:00:00Z", sport_type="Walk")
+    r = client.get("/api/activities?sport_types=Ride&sport_types=Walk")
+    assert r.status_code == 200
+    ids = sorted(i["strava_id"] for i in r.json()["items"])
+    assert ids == [1, 3]
+
+
+def test_activities_filter_by_distance(client: TestClient, tmp_path: Path) -> None:
+    db = Path(tmp_path / "api_test.db")
+    _insert_full(db, 1, "2026-04-10T08:00:00Z", distance_m=20000)  # 20 km
+    _insert_full(db, 2, "2026-04-11T08:00:00Z", distance_m=50000)  # 50 km
+    _insert_full(db, 3, "2026-04-12T08:00:00Z", distance_m=100000)  # 100 km
+    r = client.get("/api/activities?distance_min_km=30&distance_max_km=80")
+    assert r.status_code == 200
+    ids = sorted(i["strava_id"] for i in r.json()["items"])
+    assert ids == [2]
+
+
+def test_activities_filter_by_elevation(client: TestClient, tmp_path: Path) -> None:
+    db = Path(tmp_path / "api_test.db")
+    _insert_full(db, 1, "2026-04-10T08:00:00Z", elevation_m=100)
+    _insert_full(db, 2, "2026-04-11T08:00:00Z", elevation_m=800)
+    r = client.get("/api/activities?elevation_min_m=500")
+    assert [i["strava_id"] for i in r.json()["items"]] == [2]
+
+
+def test_activities_filter_by_duration(client: TestClient, tmp_path: Path) -> None:
+    db = Path(tmp_path / "api_test.db")
+    _insert_full(db, 1, "2026-04-10T08:00:00Z", duration_sec=1800)  # 30 min
+    _insert_full(db, 2, "2026-04-11T08:00:00Z", duration_sec=7200)  # 2 h
+    r = client.get("/api/activities?duration_min_sec=3600")
+    assert [i["strava_id"] for i in r.json()["items"]] == [2]
+
+
+def test_activities_filter_by_tss(client: TestClient, tmp_path: Path) -> None:
+    db = Path(tmp_path / "api_test.db")
+    _insert_full(db, 1, "2026-04-10T08:00:00Z", training_load=30.0)
+    _insert_full(db, 2, "2026-04-11T08:00:00Z", training_load=120.0)
+    r = client.get("/api/activities?tss_min=50&tss_max=200")
+    assert [i["strava_id"] for i in r.json()["items"]] == [2]
+
+
+def test_activities_filter_combinations_are_and(
+    client: TestClient, tmp_path: Path,
+) -> None:
+    """Tous les filtres sont combinés en ET logique."""
+    db = Path(tmp_path / "api_test.db")
+    _insert_full(db, 1, "2026-04-10T08:00:00Z", sport_type="Ride", distance_m=80000)
+    _insert_full(db, 2, "2026-04-11T08:00:00Z", sport_type="VirtualRide", distance_m=80000)
+    _insert_full(db, 3, "2026-04-12T08:00:00Z", sport_type="Ride", distance_m=20000)
+    r = client.get(
+        "/api/activities?sport_types=Ride&distance_min_km=50",
+    )
+    assert [i["strava_id"] for i in r.json()["items"]] == [1]
+
+
+def test_activities_filter_invalid_date_returns_400(client: TestClient) -> None:
+    r = client.get("/api/activities?date_from=not-a-date")
+    assert r.status_code == 400
+
+
+def test_activities_sport_types_endpoint(
+    client: TestClient, tmp_path: Path,
+) -> None:
+    db = Path(tmp_path / "api_test.db")
+    _insert_full(db, 1, "2026-04-10T08:00:00Z", sport_type="Ride")
+    _insert_full(db, 2, "2026-04-11T08:00:00Z", sport_type="VirtualRide")
+    _insert_full(db, 3, "2026-04-12T08:00:00Z", sport_type="Ride")
+    r = client.get("/api/activities/sport-types")
+    assert r.status_code == 200
+    # Tri alpha, dédupliqué.
+    assert r.json() == ["Ride", "VirtualRide"]
+
+
 def test_overtraining_endpoint_empty(client: TestClient) -> None:
     r = client.get("/api/metrics/overtraining")
     assert r.status_code == 200

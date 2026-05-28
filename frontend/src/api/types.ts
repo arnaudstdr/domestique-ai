@@ -164,6 +164,21 @@ export interface ActivitiesList {
   items: ActivitySummary[];
 }
 
+export interface ActivityFilters {
+  days?: number;
+  date_from?: string;
+  date_to?: string;
+  sport_types?: string[];
+  distance_min_km?: number;
+  distance_max_km?: number;
+  elevation_min_m?: number;
+  elevation_max_m?: number;
+  duration_min_sec?: number;
+  duration_max_sec?: number;
+  tss_min?: number;
+  tss_max?: number;
+}
+
 export interface ActivityStreams {
   time: number[] | null;
   heartrate: number[] | null;

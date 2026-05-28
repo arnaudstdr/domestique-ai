@@ -67,7 +67,7 @@ export default function Dashboard() {
       const [l, o, acts, vol] = await Promise.all([
         api.metrics.load(90),
         api.metrics.overtraining(),
-        api.activities.list(1, 50, 28),
+        api.activities.list(1, 50, { days: 28 }),
         api.metrics.rideVolume(),
       ]);
       setLoad(l);

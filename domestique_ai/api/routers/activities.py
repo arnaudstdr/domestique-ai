@@ -65,22 +65,109 @@ def _activity_to_summary(row: dict) -> ActivitySummary:
     )
 
 
+def _parse_iso_utc(value: str) -> dt.datetime:
+    """Parse un ISO date (``YYYY-MM-DD`` ou datetime complet) en UTC."""
+    when = dt.datetime.fromisoformat(value.replace("Z", "+00:00"))
+    if when.tzinfo is None:
+        when = when.replace(tzinfo=dt.timezone.utc)
+    return when
+
+
+def _activity_date(a: dict) -> dt.datetime | None:
+    raw = a.get("date")
+    if not raw:
+        return None
+    try:
+        return _parse_iso_utc(raw)
+    except ValueError:
+        return None
+
+
 @router.get("", response_model=ActivitiesList)
 def list_activities(
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=200),
     days: int | None = Query(None, ge=1, le=3650),
+    date_from: str | None = Query(None, description="Date min (YYYY-MM-DD), inclusive"),
+    date_to: str | None = Query(None, description="Date max (YYYY-MM-DD), inclusive"),
+    sport_types: list[str] | None = Query(None, description="Répétable"),  # noqa: B008
+    distance_min_km: float | None = Query(None, ge=0),
+    distance_max_km: float | None = Query(None, ge=0),
+    elevation_min_m: float | None = Query(None, ge=0),
+    elevation_max_m: float | None = Query(None, ge=0),
+    duration_min_sec: int | None = Query(None, ge=0),
+    duration_max_sec: int | None = Query(None, ge=0),
+    tss_min: float | None = Query(None, ge=0),
+    tss_max: float | None = Query(None, ge=0),
 ) -> ActivitiesList:
-    """Liste paginée, triée par date décroissante."""
+    """Liste paginée, triée par date décroissante, avec filtres optionnels.
+
+    Tous les paramètres de filtre sont combinés en ET logique. Les bornes
+    numériques sont inclusives (``>=`` / ``<=``). ``date_to`` est inclusive
+    au jour près : ``date_to=2025-04-30`` accepte les activités du 30 avril
+    jusqu'à 23h59:59 UTC.
+    """
     activities = fetch_activities_from_db()
     if days is not None:
         cutoff = dt.datetime.now(dt.timezone.utc) - dt.timedelta(days=days)
         activities = [
-            a
-            for a in activities
-            if a.get("date")
-            and dt.datetime.fromisoformat(a["date"].replace("Z", "+00:00")) >= cutoff
+            a for a in activities
+            if (when := _activity_date(a)) is not None and when >= cutoff
         ]
+
+    if date_from:
+        try:
+            from_dt = _parse_iso_utc(date_from)
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"date_from invalide : {date_from!r}",
+            ) from exc
+        activities = [
+            a for a in activities
+            if (when := _activity_date(a)) is not None and when >= from_dt
+        ]
+
+    if date_to:
+        try:
+            to_dt = _parse_iso_utc(date_to) + dt.timedelta(days=1)
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"date_to invalide : {date_to!r}",
+            ) from exc
+        activities = [
+            a for a in activities
+            if (when := _activity_date(a)) is not None and when < to_dt
+        ]
+
+    if sport_types:
+        sport_set = {s for s in sport_types if s}
+        if sport_set:
+            activities = [a for a in activities if a.get("sport_type") in sport_set]
+
+    def _within(field: str, lo: float | None, hi: float | None,
+                multiplier: float = 1.0) -> None:
+        nonlocal activities
+        if lo is None and hi is None:
+            return
+        lo_v = lo * multiplier if lo is not None else None
+        hi_v = hi * multiplier if hi is not None else None
+        filtered = []
+        for a in activities:
+            v = a.get(field)
+            v = float(v) if v is not None else 0.0
+            if lo_v is not None and v < lo_v:
+                continue
+            if hi_v is not None and v > hi_v:
+                continue
+            filtered.append(a)
+        activities = filtered
+
+    _within("distance", distance_min_km, distance_max_km, multiplier=1000.0)
+    _within("elevation_gain", elevation_min_m, elevation_max_m)
+    _within("duration", duration_min_sec, duration_max_sec)
+    _within("training_load", tss_min, tss_max)
 
     activities.sort(key=lambda a: a.get("date") or "", reverse=True)
     total = len(activities)
@@ -88,6 +175,21 @@ def list_activities(
     end = start + page_size
     items = [_activity_to_summary(a) for a in activities[start:end]]
     return ActivitiesList(total=total, page=page, page_size=page_size, items=items)
+
+
+@router.get("/sport-types", response_model=list[str])
+def list_sport_types() -> list[str]:
+    """Liste triée des ``sport_type`` distincts présents en base.
+
+    Sert à peupler dynamiquement les chips de filtre côté frontend — ainsi on
+    n'affiche que les sport types pour lesquels l'utilisateur a au moins une
+    activité (pas la peine de proposer ``Swim`` si l'athlète ne nage pas).
+    """
+    activities = fetch_activities_from_db()
+    return sorted({
+        a["sport_type"] for a in activities
+        if a.get("sport_type")
+    })
 
 
 @router.get("/{strava_id}", response_model=ActivityDetail)
