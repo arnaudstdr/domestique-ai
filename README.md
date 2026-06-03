@@ -1,5 +1,9 @@
 # DomestiqueAI 🚴‍♂️🤖
 
+<p align="center">
+  <img src="frontend/public/icon-192.png" alt="Logo DomestiqueAI" width="120" height="120" />
+</p>
+
 ![Python](https://img.shields.io/badge/python-3.12-slim.svg)
 ![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)
 ![CI](https://github.com/arnaudstdr/domestique-ai/actions/workflows/ci.yml/badge.svg)
