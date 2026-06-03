@@ -1,4 +1,4 @@
-# DomestiqueAI 🚴‍♂️🤖
+# DomestiqueAI
 
 <p align="center">
   <img src="frontend/public/icon-192.png" alt="Logo DomestiqueAI" width="120" height="120" />
