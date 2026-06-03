@@ -18,10 +18,10 @@ export default function ChatBubble({ role, content, thinking, toolCalls }: Props
   return (
     <div className={`flex ${isUser ? "justify-end" : "justify-start"}`}>
       <div
-        className={`max-w-[85%] rounded-2xl px-4 py-3 text-sm leading-relaxed ${
+        className={`max-w-[85%] px-4 py-3 text-sm leading-relaxed ${
           isUser
-            ? "bg-accent text-white whitespace-pre-wrap"
-            : "bg-card border border-white/5 text-gray-100"
+            ? "rounded-[18px_18px_4px_18px] bg-accent font-medium text-surface whitespace-pre-wrap shadow-glow"
+            : "rounded-[18px_18px_18px_4px] bg-card border border-white/[0.07] text-gray-100 shadow-card"
         }`}
       >
         {isUser ? (

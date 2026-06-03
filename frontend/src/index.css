@@ -2,38 +2,111 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ───────────────────────────────────────────────────────────────────────
+   Direction artistique « Instrument cockpit, au crépuscule »
+   - base near-black tiède, accent vert acide signal, chiffres en mono
+     tabulaire, typo Bricolage Grotesque (display) + Hanken Grotesk (corps).
+   - Les valeurs vivent ici en variables CSS (canaux RGB), Tailwind ne fait
+     que les référencer (voir tailwind.config.js).
+   ─────────────────────────────────────────────────────────────────────── */
 @layer base {
+  :root {
+    --surface: 12 13 16; /* #0c0d10 — fond app, near-black légèrement froid  */
+    --card: 21 23 28; /* #15171c — surface élevée                          */
+    --card-hover: 28 31 39; /* #1c1f27                                      */
+    --muted: 142 150 164; /* #8e96a4 — texte secondaire                     */
+    --accent: 199 242 74; /* #c7f24a — vert acide signal                    */
+    --ctl: 74 168 255; /* #4aa8ff — forme (azur)                           */
+    --atl: 255 93 93; /* #ff5d5d — fatigue (corail)                        */
+    --tsb: 52 211 153; /* #34d399 — fraîcheur (émeraude)                    */
+    --tsb-neg: 245 165 36; /* #f5a524 — ambre                               */
+  }
+
   html,
   body,
   #root {
     height: 100%;
   }
+
   body {
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    font-family: "Hanken Grotesk", -apple-system, BlinkMacSystemFont,
+      "Segoe UI", sans-serif;
     -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
     overscroll-behavior-y: none;
+    color: rgb(237 239 243);
+    background-color: rgb(var(--surface));
+  }
+
+  /* Atmosphère : halo accent diffus en haut + dégradé de profondeur.
+     Fixe, sans repaint, pointer-events neutralisés. */
+  body::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    z-index: -2;
+    pointer-events: none;
+    background:
+      radial-gradient(
+        120% 60% at 50% -10%,
+        rgb(var(--accent) / 0.07),
+        transparent 55%
+      ),
+      radial-gradient(
+        90% 50% at 100% 0%,
+        rgb(var(--ctl) / 0.05),
+        transparent 60%
+      ),
+      linear-gradient(180deg, rgb(16 18 22), rgb(var(--surface)) 40%);
+  }
+
+  /* Grain fin par-dessus tout (très basse opacité). */
+  body::after {
+    content: "";
+    position: fixed;
+    inset: 0;
+    z-index: -1;
+    pointer-events: none;
+    opacity: 0.04;
+    mix-blend-mode: overlay;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  }
+
+  /* Chiffres alignés partout (instrument). */
+  .tabular {
+    font-variant-numeric: tabular-nums;
+    font-feature-settings: "tnum" 1;
   }
 }
 
 @layer components {
   .card {
-    @apply rounded-2xl bg-card p-4 shadow-sm border border-white/5;
+    @apply rounded-2xl border border-white/[0.07] p-4 shadow-card;
+    background:
+      linear-gradient(
+        180deg,
+        rgb(var(--card-hover) / 0.55),
+        rgb(var(--card)) 42%
+      );
   }
   .btn {
     @apply inline-flex items-center justify-center gap-2 rounded-xl px-4 py-2.5
-           text-sm font-medium transition-colors disabled:opacity-50
-           disabled:cursor-not-allowed;
+           text-sm font-semibold tracking-tight transition-all duration-150
+           disabled:opacity-50 disabled:cursor-not-allowed;
   }
+  /* Accent lime → texte sombre obligatoire (sinon illisible), glow au survol. */
   .btn-primary {
-    @apply btn bg-accent text-white hover:bg-orange-500;
+    @apply btn bg-accent text-surface hover:shadow-glow
+           hover:-translate-y-px active:translate-y-0;
   }
   .btn-ghost {
-    @apply btn bg-card text-gray-200 hover:bg-cardHover border border-white/5;
+    @apply btn bg-white/[0.04] text-gray-200 border border-white/[0.08]
+           hover:bg-white/[0.07] hover:border-white/[0.14];
   }
   .input {
-    @apply w-full min-w-0 rounded-xl bg-card border border-white/5 px-3 py-2
-           text-gray-100 placeholder:text-muted
-           focus:outline-none focus:ring-2 focus:ring-accent;
+    @apply w-full min-w-0 rounded-xl bg-white/[0.04] border border-white/[0.08]
+           px-3 py-2 text-gray-100 placeholder:text-muted transition-colors
+           focus:outline-none focus:border-accent/60 focus:ring-2 focus:ring-accent/30;
   }
   /* iOS Safari : neutraliser le min-width intrinsèque des inputs date/time
      (qui hérite du placeholder « jj/mm/aaaa ») pour qu'ils respectent
@@ -46,11 +119,61 @@
   }
   .pill {
     @apply inline-flex items-center gap-1 rounded-full px-2.5 py-0.5
-           text-xs font-medium;
+           text-xs font-semibold tracking-tight;
+  }
+
+  /* Étiquette « instrument » : petites capitales tracées (réutilise le style
+     déjà répandu dans l'app, centralisé ici). */
+  .label-eyebrow {
+    @apply text-[11px] font-semibold uppercase tracking-[0.14em] text-muted;
+  }
+
+  /* Valeur métrique : mono tabulaire, serrée. */
+  .metric-num {
+    @apply font-mono tabular tracking-tight;
   }
 }
 
-/* Leaflet : reset blanc par défaut pour qu'on voie la carte sur fond sombre */
+@layer utilities {
+  /* Entrée en cascade : on anime les enfants directs avec un délai croissant.
+     Appliqué aux racines de page pour orchestrer le chargement. */
+  .stagger > * {
+    animation: rise 0.5s cubic-bezier(0.22, 1, 0.36, 1) both;
+  }
+  .stagger > *:nth-child(1) {
+    animation-delay: 0.02s;
+  }
+  .stagger > *:nth-child(2) {
+    animation-delay: 0.06s;
+  }
+  .stagger > *:nth-child(3) {
+    animation-delay: 0.1s;
+  }
+  .stagger > *:nth-child(4) {
+    animation-delay: 0.14s;
+  }
+  .stagger > *:nth-child(5) {
+    animation-delay: 0.18s;
+  }
+  .stagger > *:nth-child(6) {
+    animation-delay: 0.22s;
+  }
+  .stagger > *:nth-child(7) {
+    animation-delay: 0.26s;
+  }
+  .stagger > *:nth-child(n + 8) {
+    animation-delay: 0.3s;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .stagger > *,
+  .animate-rise {
+    animation: none !important;
+  }
+}
+
+/* Leaflet : reset sombre par défaut pour qu'on voie la carte sur fond app. */
 .leaflet-container {
-  background: #0f1117;
+  background: rgb(var(--surface));
 }

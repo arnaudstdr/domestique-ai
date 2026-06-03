@@ -1,5 +1,6 @@
 import { MapContainer, Polyline, TileLayer } from "react-leaflet";
 import { LatLngBounds } from "leaflet";
+import { CHART } from "../chartTheme";
 
 interface Props {
   latlng: [number, number][];
@@ -26,7 +27,9 @@ export default function ActivityMap({ latlng }: Props) {
           attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
           url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
         />
-        <Polyline positions={latlng} pathOptions={{ color: "#f97316", weight: 4 }} />
+        {/* Corail plutôt que le lime de marque : le tracé doit rester lisible
+            sur les tuiles OSM claires (le lime y disparaîtrait). */}
+        <Polyline positions={latlng} pathOptions={{ color: CHART.atl, weight: 4 }} />
       </MapContainer>
     </div>
   );

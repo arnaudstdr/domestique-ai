@@ -118,13 +118,13 @@ export default function RoutePreview({
       viewBox={`0 0 ${width} ${height}`}
       width={width}
       height={height}
-      className={`rounded-md bg-cardHover/40 ${className}`}
+      className={`rounded-md bg-cardHover/40 text-accent ${className}`}
       aria-hidden
     >
       <path
         d={pathD}
         fill="none"
-        stroke="#f97316"
+        stroke="currentColor"
         strokeWidth={1.6}
         strokeLinecap="round"
         strokeLinejoin="round"

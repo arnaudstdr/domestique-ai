@@ -48,7 +48,7 @@ export default function ActivityCard({ activity }: Props) {
       </div>
       <div className="flex shrink-0 flex-col items-end gap-2">
         <span className="pill bg-accent/15 text-accent">
-          {activity.tss.toFixed(0)} TSS
+          <span className="metric-num">{activity.tss.toFixed(0)}</span> TSS
         </span>
         <RoutePreview polyline={activity.map_polyline} />
       </div>
@@ -60,7 +60,7 @@ function Metric({ label, value }: { label: string; value: string }) {
   return (
     <div>
       <div className="text-[10px] uppercase tracking-wider text-muted">{label}</div>
-      <div className="text-sm font-medium text-gray-100">{value}</div>
+      <div className="metric-num text-sm font-medium text-gray-100">{value}</div>
     </div>
   );
 }

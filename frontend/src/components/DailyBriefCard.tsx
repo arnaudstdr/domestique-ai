@@ -62,9 +62,7 @@ export default function DailyBriefCard({ data, loading }: Props) {
   return (
     <div className="card space-y-3 border-l-4 border-accent">
       <div className="flex items-baseline justify-between gap-2">
-        <h2 className="text-sm font-medium uppercase tracking-wider text-muted">
-          Briefing du jour
-        </h2>
+        <h2 className="label-eyebrow">Briefing du jour</h2>
         <span
           className="text-[10px] text-muted"
           title={
@@ -84,7 +82,9 @@ export default function DailyBriefCard({ data, loading }: Props) {
       <div className="grid grid-cols-3 gap-2 text-xs">
         <div>
           <div className="text-muted uppercase tracking-wide">TSB</div>
-          <div className={`text-base font-semibold ${tsbTone(data.tsb_zone)}`}>
+          <div
+            className={`metric-num text-lg font-semibold ${tsbTone(data.tsb_zone)}`}
+          >
             {tsbLabel}
           </div>
           <div className="text-muted">{data.tsb_zone || "—"}</div>

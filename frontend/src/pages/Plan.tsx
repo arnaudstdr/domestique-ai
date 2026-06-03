@@ -399,9 +399,9 @@ export default function Plan() {
   const remainingDays = objective?.date ? daysUntil(objective.date) : null;
 
   return (
-    <div className="space-y-4">
+    <div className="stagger space-y-4">
       <div className="card space-y-2">
-        <h2 className="flex items-center gap-2 text-base font-medium">
+        <h2 className="flex items-center gap-2 font-display text-lg font-bold tracking-tight">
           <Target className="h-4 w-4 text-accent" strokeWidth={1.75} aria-hidden="true" />
           Objectif courant
         </h2>
@@ -456,7 +456,7 @@ export default function Plan() {
       </div>
 
       <div className="card space-y-3">
-        <h2 className="flex items-center gap-2 text-base font-medium">
+        <h2 className="flex items-center gap-2 font-display text-lg font-bold tracking-tight">
           <ClipboardList className="h-4 w-4 text-accent" strokeWidth={1.75} aria-hidden="true" />
           Générer un plan
         </h2>
@@ -466,8 +466,8 @@ export default function Plan() {
             onClick={() => setMode("classic")}
             className={`flex-1 px-3 py-2 transition-colors ${
               mode === "classic"
-                ? "bg-accent text-white"
-                : "bg-white/5 text-muted hover:bg-white/10"
+                ? "bg-accent text-surface font-semibold"
+                : "bg-white/[0.04] text-muted hover:bg-white/[0.08]"
             }`}
           >
             Périodisation classique
@@ -477,8 +477,8 @@ export default function Plan() {
             onClick={() => setMode("llm")}
             className={`flex-1 px-3 py-2 transition-colors ${
               mode === "llm"
-                ? "bg-accent text-white"
-                : "bg-white/5 text-muted hover:bg-white/10"
+                ? "bg-accent text-surface font-semibold"
+                : "bg-white/[0.04] text-muted hover:bg-white/[0.08]"
             }`}
           >
             Coach IA (bêta)
@@ -618,7 +618,7 @@ export default function Plan() {
       ) : null}
 
       <div className="card space-y-3">
-        <h2 className="flex items-center gap-2 text-base font-medium">
+        <h2 className="flex items-center gap-2 font-display text-lg font-bold tracking-tight">
           <Library className="h-4 w-4 text-accent" strokeWidth={1.75} aria-hidden="true" />
           Plans persistés
         </h2>

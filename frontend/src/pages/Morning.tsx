@@ -12,6 +12,7 @@ import { Save, Sunrise } from "lucide-react";
 import { api, ApiError } from "../api/client";
 import type { MorningResponse } from "../api/types";
 import MetricCard from "../components/MetricCard";
+import { CHART, axisProps, tooltipStyle } from "../chartTheme";
 import { useToast } from "../hooks/useToast";
 
 const METRICS: { key: keyof MetricForm; label: string; unit: string; isInt?: boolean }[] = [
@@ -94,10 +95,10 @@ export default function Morning() {
   }
 
   return (
-    <div className="space-y-4">
+    <div className="stagger space-y-4">
       <div className="card space-y-3">
-        <h2 className="flex items-center gap-2 text-base font-medium">
-          <Sunrise className="h-4 w-4 text-accent" strokeWidth={1.75} aria-hidden="true" />
+        <h2 className="flex items-center gap-2 font-display text-lg font-bold tracking-tight">
+          <Sunrise className="h-5 w-5 text-accent" strokeWidth={1.75} aria-hidden="true" />
           Saisie du jour
         </h2>
         <label className="block">
@@ -147,7 +148,7 @@ export default function Morning() {
 
       {data && (
         <>
-          <h3 className="text-sm font-medium text-gray-200">Tendances 90 j</h3>
+          <h3 className="label-eyebrow">Tendances 90 j</h3>
           <div className="grid grid-cols-2 gap-3">
             {METRICS.slice(0, 4).map((m) => {
               const b = data.baselines[m.key];
@@ -216,32 +217,23 @@ function MorningChart({
   if (data.length === 0) return null;
   return (
     <div className="card">
-      <h4 className="mb-2 text-xs font-medium text-gray-200">{title}</h4>
+      <h4 className="label-eyebrow mb-2">{title}</h4>
       <div className="h-32">
         <ResponsiveContainer width="100%" height="100%">
           <LineChart data={data} margin={{ top: 4, right: 8, left: -16, bottom: 0 }}>
-            <CartesianGrid stroke="#2c313a" strokeDasharray="3 3" />
+            <CartesianGrid stroke={CHART.grid} strokeDasharray="3 3" />
             <XAxis
               dataKey="date"
               tickFormatter={(d) => (d as string).slice(5)}
-              stroke="#9aa3af"
-              fontSize={10}
               minTickGap={20}
+              {...axisProps}
             />
-            <YAxis stroke="#9aa3af" fontSize={10} />
-            <Tooltip
-              contentStyle={{
-                backgroundColor: "#23272f",
-                border: "1px solid #2c313a",
-                borderRadius: 8,
-                color: "#e5e7eb",
-                fontSize: 12,
-              }}
-            />
+            <YAxis {...axisProps} />
+            <Tooltip contentStyle={tooltipStyle} />
             <Line
               type="monotone"
               dataKey="value"
-              stroke="#f97316"
+              stroke={CHART.accent}
               strokeWidth={2}
               dot={false}
             />

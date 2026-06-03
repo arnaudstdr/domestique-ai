@@ -125,11 +125,15 @@ export default function Activities() {
   const totalPages = data ? Math.max(1, Math.ceil(data.total / PAGE_SIZE)) : 1;
 
   return (
-    <div className="space-y-3">
-      <div className="flex items-center justify-between">
-        <h2 className="text-lg font-medium">Activités</h2>
+    <div className="stagger space-y-3">
+      <div className="flex items-baseline justify-between">
+        <h2 className="font-display text-2xl font-extrabold tracking-tight text-gray-50">
+          Activités
+        </h2>
         {data && (
-          <span className="text-xs text-muted">{data.total} au total</span>
+          <span className="metric-num text-xs text-muted">
+            {data.total} au total
+          </span>
         )}
       </div>
 

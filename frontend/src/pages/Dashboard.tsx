@@ -125,7 +125,7 @@ export default function Dashboard() {
   const hasZones = Object.values(zones).some((v) => v > 0);
 
   return (
-    <div className="space-y-4">
+    <div className="stagger space-y-4">
       <DailyBriefCard data={brief} loading={briefLoading} />
 
       {ot && ot.alerts.length > 0 && (
@@ -215,7 +215,7 @@ export default function Dashboard() {
       {hasZones && <ZoneBar zones={zones} />}
 
       <div className="card space-y-3">
-        <h3 className="text-sm font-medium text-gray-200">Actions</h3>
+        <h3 className="label-eyebrow">Actions</h3>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
           <button
             className="btn-primary"

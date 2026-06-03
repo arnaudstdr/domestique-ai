@@ -20,6 +20,7 @@ import ChatBubble from "../components/ChatBubble";
 import MetricCard from "../components/MetricCard";
 import SimilarActivities from "../components/SimilarActivities";
 import ZoneBar from "../components/ZoneBar";
+import { CHART, axisProps, tooltipStyle } from "../chartTheme";
 import { useToast } from "../hooks/useToast";
 
 const ANALYSIS_PROMPT = (sid: number) =>
@@ -186,17 +187,21 @@ export default function ActivityDetail() {
   const s = detail.streams;
 
   return (
-    <div className="space-y-3">
+    <div className="stagger space-y-3">
       <button
         onClick={() => navigate(-1)}
-        className="text-sm text-accent hover:underline"
+        className="text-sm font-medium text-accent hover:underline"
       >
         ← Retour
       </button>
 
       <div className="card">
-        <h2 className="text-lg font-medium">{a.name || "Activité"}</h2>
-        <p className="text-xs text-muted">{new Date(a.date).toLocaleString("fr-FR")}</p>
+        <h2 className="font-display text-xl font-bold tracking-tight text-gray-50">
+          {a.name || "Activité"}
+        </h2>
+        <p className="metric-num text-xs text-muted">
+          {new Date(a.date).toLocaleString("fr-FR")}
+        </p>
       </div>
 
       <div className="grid grid-cols-3 gap-3">
@@ -234,28 +239,28 @@ export default function ActivityDetail() {
         title="Fréquence cardiaque (bpm)"
         time={s.time}
         values={s.heartrate}
-        color="#ef4444"
+        color={CHART.atl}
         yKey="hr"
       />
       <StreamChart
         title="Altitude (m)"
         time={s.time}
         values={s.altitude}
-        color="#22c55e"
+        color={CHART.tsb}
         yKey="alt"
       />
       <StreamChart
         title="Puissance (W)"
         time={s.time}
         values={s.watts}
-        color="#f97316"
+        color={CHART.accent}
         yKey="watts"
       />
       <StreamChart
         title="Température (°C)"
         time={s.time}
         values={s.temp}
-        color="#fbbf24"
+        color={CHART.tsbNeg}
         yKey="temp"
       />
 
@@ -284,7 +289,7 @@ export default function ActivityDetail() {
 
       {analysis && (analyzing || analysis.content || analysis.thinking) && (
         <div className="space-y-2">
-          <h3 className="flex items-center gap-2 text-sm font-medium text-gray-200">
+          <h3 className="flex items-center gap-2 font-display text-base font-bold tracking-tight">
             <Bot className="h-4 w-4 text-accent" strokeWidth={1.75} aria-hidden="true" />
             Analyse du coach
           </h3>
@@ -313,7 +318,7 @@ function StreamChart({ title, time, values, color, yKey }: ChartProps) {
   if (data.length === 0) return null;
   return (
     <div className="card">
-      <h3 className="mb-2 text-sm font-medium text-gray-200">{title}</h3>
+      <h3 className="label-eyebrow mb-2">{title}</h3>
       <div className="h-40">
         <ResponsiveContainer width="100%" height="100%">
           <AreaChart data={data} margin={{ top: 4, right: 8, left: -16, bottom: 0 }}>
@@ -323,17 +328,10 @@ function StreamChart({ title, time, values, color, yKey }: ChartProps) {
                 <stop offset="95%" stopColor={color} stopOpacity={0.05} />
               </linearGradient>
             </defs>
-            <CartesianGrid stroke="#2c313a" strokeDasharray="3 3" />
-            <XAxis dataKey="t" stroke="#9aa3af" fontSize={11} />
-            <YAxis stroke="#9aa3af" fontSize={11} />
-            <Tooltip
-              contentStyle={{
-                backgroundColor: "#23272f",
-                border: "1px solid #2c313a",
-                borderRadius: 8,
-                color: "#e5e7eb",
-              }}
-            />
+            <CartesianGrid stroke={CHART.grid} strokeDasharray="3 3" />
+            <XAxis dataKey="t" {...axisProps} />
+            <YAxis {...axisProps} />
+            <Tooltip contentStyle={tooltipStyle} />
             <Area
               type="monotone"
               dataKey={yKey}

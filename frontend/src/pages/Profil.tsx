@@ -47,10 +47,10 @@ const EMPTY_PROFILE: Profile = {
 
 export default function Profil() {
   return (
-    <div className="space-y-4">
+    <div className="stagger space-y-4">
       <header>
-        <h2 className="flex items-center gap-2 text-base font-medium">
-          <Settings className="h-4 w-4 text-accent" strokeWidth={1.75} aria-hidden="true" />
+        <h2 className="flex items-center gap-2 font-display text-2xl font-extrabold tracking-tight text-gray-50">
+          <Settings className="h-6 w-6 text-accent" strokeWidth={1.75} aria-hidden="true" />
           Profil
         </h2>
         <p className="text-xs text-muted">

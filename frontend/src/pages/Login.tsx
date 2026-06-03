@@ -39,16 +39,18 @@ export default function Login() {
     <div className="min-h-screen flex items-center justify-center bg-surface px-4 text-gray-100">
       <form
         onSubmit={submit}
-        className="w-full max-w-sm space-y-4 rounded-2xl border border-white/10 bg-white/5 p-6 shadow-lg"
+        className="card w-full max-w-sm space-y-4 p-6"
       >
         <div className="text-center">
           <img
             src="/icon-192.png"
             alt=""
             aria-hidden="true"
-            className="mx-auto h-16 w-16 rounded-xl"
+            className="mx-auto h-16 w-16 rounded-2xl ring-1 ring-white/10 shadow-card"
           />
-          <h1 className="mt-2 text-base font-semibold">DomestiqueAI</h1>
+          <h1 className="mt-3 font-display text-xl font-extrabold tracking-tight">
+            Domestique<span className="text-accent">AI</span>
+          </h1>
           <p className="mt-1 text-xs text-gray-400">
             Authentification requise
           </p>

@@ -14,11 +14,9 @@ const BADGE_TONES: Record<string, string> = {
 
 export default function MetricCard({ label, value, hint, badge }: Props) {
   return (
-    <div className="card flex flex-col gap-1">
-      <div className="flex items-center justify-between">
-        <span className="text-xs uppercase tracking-wider text-muted">
-          {label}
-        </span>
+    <div className="card flex flex-col gap-1.5">
+      <div className="flex items-center justify-between gap-2">
+        <span className="label-eyebrow">{label}</span>
         {badge && (
           <span
             className={`pill ${BADGE_TONES[badge.tone || "accent"] || BADGE_TONES.accent}`}
@@ -27,7 +25,9 @@ export default function MetricCard({ label, value, hint, badge }: Props) {
           </span>
         )}
       </div>
-      <span className="text-2xl font-semibold text-gray-100">{value}</span>
+      <span className="metric-num text-[28px] font-semibold leading-none text-gray-50">
+        {value}
+      </span>
       {hint && <span className="text-xs text-muted">{hint}</span>}
     </div>
   );

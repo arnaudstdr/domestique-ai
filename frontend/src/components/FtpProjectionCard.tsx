@@ -27,7 +27,7 @@ export default function FtpProjectionCard({ data }: Props) {
   return (
     <div className="card space-y-3">
       <div className="flex items-baseline justify-between">
-        <h3 className="text-sm font-medium text-gray-200">Projection FTP — 4 semaines</h3>
+        <h3 className="label-eyebrow">Projection FTP — 4 semaines</h3>
         <span
           className={`pill ${CONFIDENCE_TONE[data.confidence]}`}
           title="Confiance qualitative (profondeur d'historique + stimulus Z4-Z5 plausible)"
@@ -39,15 +39,15 @@ export default function FtpProjectionCard({ data }: Props) {
       <div className="grid grid-cols-3 gap-3">
         <div>
           <div className="text-xs uppercase tracking-wide text-muted">Actuelle</div>
-          <div className="text-2xl font-semibold text-gray-100">{formatFtp(data.current_ftp)}</div>
+          <div className="metric-num text-2xl font-semibold text-gray-50">{formatFtp(data.current_ftp)}</div>
         </div>
         <div className={`text-center self-end pb-1 ${trendTone}`}>
           <div className="text-3xl leading-none">{trendArrow}</div>
-          <div className="text-sm font-medium">{data.delta_pct.toFixed(2)} %</div>
+          <div className="metric-num text-sm font-medium">{data.delta_pct.toFixed(2)} %</div>
         </div>
         <div className="text-right">
           <div className="text-xs uppercase tracking-wide text-muted">Projetée</div>
-          <div className="text-2xl font-semibold text-accent">{formatFtp(data.projected_ftp)}</div>
+          <div className="metric-num text-2xl font-semibold text-accent">{formatFtp(data.projected_ftp)}</div>
         </div>
       </div>
 

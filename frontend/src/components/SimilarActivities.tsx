@@ -6,6 +6,7 @@ import {
   Tooltip,
 } from "recharts";
 import type { SimilarActivitiesResponse } from "../api/types";
+import { CHART, tooltipStyle } from "../chartTheme";
 
 interface Props {
   data: SimilarActivitiesResponse;
@@ -88,11 +89,9 @@ export default function SimilarActivities({ data }: Props) {
   return (
     <div className="card space-y-3">
       <div className="flex items-baseline justify-between">
-        <h3 className="text-sm font-medium text-gray-200">
-          Activités similaires
-        </h3>
+        <h3 className="label-eyebrow">Activités similaires</h3>
         <span className="pill bg-accent/10 text-accent">
-          {data.matches.length}
+          <span className="metric-num">{data.matches.length}</span>
         </span>
       </div>
       <p className="text-xs text-muted">
@@ -111,20 +110,14 @@ export default function SimilarActivities({ data }: Props) {
           <ResponsiveContainer width="100%" height="100%">
             <LineChart data={sparkData} margin={{ top: 4, right: 4, left: 4, bottom: 0 }}>
               <Tooltip
-                contentStyle={{
-                  backgroundColor: "#23272f",
-                  border: "1px solid #2c313a",
-                  borderRadius: 8,
-                  color: "#e5e7eb",
-                  fontSize: 11,
-                }}
+                contentStyle={tooltipStyle}
                 formatter={(value: number) => [`${Math.round(value)} TSS`, "Charge"]}
                 labelFormatter={(label) => String(label)}
               />
               <Line
                 type="monotone"
                 dataKey="tss"
-                stroke="#f97316"
+                stroke={CHART.accent}
                 strokeWidth={2}
                 dot={{ r: 2 }}
               />

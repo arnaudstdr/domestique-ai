@@ -21,11 +21,11 @@ const EMPTY_PENDING: PendingAssistant = {
 function TypingDots() {
   return (
     <div className="flex justify-start">
-      <div className="bg-card border border-white/5 rounded-2xl px-4 py-3 flex items-center gap-1.5">
+      <div className="bg-card border border-white/[0.07] shadow-card rounded-[18px_18px_18px_4px] px-4 py-3 flex items-center gap-1.5">
         {[0, 150, 300].map((delay) => (
           <span
             key={delay}
-            className="w-2 h-2 rounded-full bg-gray-500 animate-bounce"
+            className="w-2 h-2 rounded-full bg-accent/70 animate-bounce"
             style={{ animationDelay: `${delay}ms` }}
           />
         ))}
@@ -312,8 +312,8 @@ export default function Coach() {
       </div>
 
       <div
-        className="fixed bottom-16 inset-x-0 z-20 bg-surface/95 backdrop-blur
-                   border-t border-white/5 pb-[env(safe-area-inset-bottom)]"
+        className="fixed bottom-16 inset-x-0 z-20 bg-surface/80 backdrop-blur-xl
+                   border-t border-white/[0.06] pb-[env(safe-area-inset-bottom)]"
       >
         <div className="mx-auto max-w-3xl px-4 py-3 flex items-end gap-2">
           <textarea

@@ -10,6 +10,7 @@ import {
   YAxis,
 } from "recharts";
 import type { TrendLoadPoint, TrendResolution } from "../api/types";
+import { CHART, axisProps, legendStyle, tooltipStyle } from "../chartTheme";
 
 interface Props {
   data: TrendLoadPoint[];
@@ -35,38 +36,29 @@ export default function LongTermLoadChart({ data, resolution }: Props) {
   const showBrush = data.length >= 30;
   return (
     <div className="card">
-      <h3 className="mb-2 text-sm font-medium text-gray-200">
-        Charge longue durée (CTL / ATL / TSB)
-      </h3>
+      <h3 className="label-eyebrow mb-2">Charge longue durée — CTL / ATL / TSB</h3>
       <div className="h-72">
         <ResponsiveContainer width="100%" height="100%">
           <LineChart data={data} margin={{ top: 8, right: 8, left: -16, bottom: 0 }}>
-            <CartesianGrid stroke="#2c313a" strokeDasharray="3 3" />
+            <CartesianGrid stroke={CHART.grid} strokeDasharray="3 3" />
             <XAxis
               dataKey="date"
               tickFormatter={(d) => formatTick(d as string, resolution)}
-              stroke="#9aa3af"
-              fontSize={11}
               minTickGap={28}
+              {...axisProps}
             />
-            <YAxis stroke="#9aa3af" fontSize={11} />
-            <Tooltip
-              contentStyle={{
-                backgroundColor: "#23272f",
-                border: "1px solid #2c313a",
-                borderRadius: 8,
-                color: "#e5e7eb",
-              }}
-            />
-            <Legend wrapperStyle={{ fontSize: 12, color: "#9aa3af" }} />
-            <Line type="monotone" dataKey="ctl" name="CTL" stroke="#3b82f6" dot={false} strokeWidth={2} />
-            <Line type="monotone" dataKey="atl" name="ATL" stroke="#ef4444" dot={false} strokeWidth={2} />
-            <Line type="monotone" dataKey="tsb" name="TSB" stroke="#22c55e" dot={false} strokeWidth={2} />
+            <YAxis {...axisProps} />
+            <Tooltip contentStyle={tooltipStyle} />
+            <Legend wrapperStyle={legendStyle} />
+            <Line type="monotone" dataKey="ctl" name="CTL" stroke={CHART.ctl} dot={false} strokeWidth={2} />
+            <Line type="monotone" dataKey="atl" name="ATL" stroke={CHART.atl} dot={false} strokeWidth={2} />
+            <Line type="monotone" dataKey="tsb" name="TSB" stroke={CHART.tsb} dot={false} strokeWidth={2} />
             {showBrush && (
               <Brush
                 dataKey="date"
                 height={22}
-                stroke="#3b82f6"
+                stroke={CHART.ctl}
+                fill="rgba(255,255,255,0.02)"
                 travellerWidth={8}
                 tickFormatter={(d) => formatTick(d as string, resolution)}
               />

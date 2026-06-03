@@ -10,6 +10,7 @@ import {
   YAxis,
 } from "recharts";
 import type { Workout } from "../api/types";
+import { CHART, axisProps, tooltipStyle } from "../chartTheme";
 import {
   KIND_LABELS,
   KIND_TONES,
@@ -98,7 +99,7 @@ export default function PlanCalendar({ workouts }: Props) {
   return (
     <div className="space-y-4">
       <div className="card">
-        <h3 className="mb-2 flex items-center gap-1.5 text-xs font-medium text-gray-200">
+        <h3 className="label-eyebrow mb-2 flex items-center gap-1.5">
           <ChartColumn className="h-3.5 w-3.5 text-accent" strokeWidth={1.75} aria-hidden="true" />
           TSS hebdomadaire
         </h3>
@@ -108,19 +109,11 @@ export default function PlanCalendar({ workouts }: Props) {
               data={chartData}
               margin={{ top: 4, right: 8, left: -16, bottom: 0 }}
             >
-              <CartesianGrid stroke="#2c313a" strokeDasharray="3 3" />
-              <XAxis dataKey="name" stroke="#9aa3af" fontSize={10} />
-              <YAxis stroke="#9aa3af" fontSize={10} />
-              <Tooltip
-                contentStyle={{
-                  backgroundColor: "#23272f",
-                  border: "1px solid #2c313a",
-                  borderRadius: 8,
-                  color: "#e5e7eb",
-                  fontSize: 12,
-                }}
-              />
-              <Bar dataKey="tss" fill="#f97316" radius={[4, 4, 0, 0]} />
+              <CartesianGrid stroke={CHART.grid} strokeDasharray="3 3" />
+              <XAxis dataKey="name" {...axisProps} />
+              <YAxis {...axisProps} />
+              <Tooltip contentStyle={tooltipStyle} />
+              <Bar dataKey="tss" fill={CHART.accent} radius={[4, 4, 0, 0]} />
             </BarChart>
           </ResponsiveContainer>
         </div>

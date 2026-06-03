@@ -52,19 +52,21 @@ export default function Tendances() {
   }, [period, push]);
 
   return (
-    <div className="space-y-4">
+    <div className="stagger space-y-4">
       <div className="flex items-center justify-between gap-3 flex-wrap">
-        <h2 className="text-lg font-semibold text-gray-100">Tendances longues</h2>
-        <div className="flex rounded-lg overflow-hidden border border-white/10 text-xs">
+        <h2 className="font-display text-2xl font-extrabold tracking-tight text-gray-50">
+          Tendances longues
+        </h2>
+        <div className="flex rounded-xl overflow-hidden border border-white/[0.08] text-xs">
           {PERIODS.map((p) => (
             <button
               key={p.value}
               type="button"
               onClick={() => setPeriod(p.value)}
-              className={`px-3 py-1.5 transition-colors ${
+              className={`px-3 py-1.5 font-semibold transition-colors ${
                 period === p.value
-                  ? "bg-accent text-white"
-                  : "bg-white/5 text-muted hover:bg-white/10"
+                  ? "bg-accent text-surface"
+                  : "bg-white/[0.04] text-muted hover:bg-white/[0.08]"
               }`}
             >
               {p.label}

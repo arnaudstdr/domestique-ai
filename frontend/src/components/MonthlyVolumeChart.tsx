@@ -10,6 +10,7 @@ import {
   YAxis,
 } from "recharts";
 import type { TrendMonthlyEntry } from "../api/types";
+import { CHART, axisProps, legendStyle, tooltipStyle } from "../chartTheme";
 
 interface Props {
   data: TrendMonthlyEntry[];
@@ -39,42 +40,36 @@ export default function MonthlyVolumeChart({ data }: Props) {
   const hasN1 = data.some((d) => d.distance_km_n1 != null);
   return (
     <div className="card">
-      <h3 className="mb-2 text-sm font-medium text-gray-200">
+      <h3 className="label-eyebrow mb-2">
         Volumes mensuels (km){hasN1 && " — vs N-1"}
       </h3>
       <div className="h-64">
         <ResponsiveContainer width="100%" height="100%">
           <ComposedChart data={data} margin={{ top: 8, right: 8, left: -16, bottom: 0 }}>
-            <CartesianGrid stroke="#2c313a" strokeDasharray="3 3" />
+            <CartesianGrid stroke={CHART.grid} strokeDasharray="3 3" />
             <XAxis
               dataKey="month"
               tickFormatter={(m) => formatMonth(m as string)}
-              stroke="#9aa3af"
-              fontSize={11}
               minTickGap={16}
+              {...axisProps}
             />
-            <YAxis stroke="#9aa3af" fontSize={11} />
+            <YAxis {...axisProps} />
             <Tooltip
-              contentStyle={{
-                backgroundColor: "#23272f",
-                border: "1px solid #2c313a",
-                borderRadius: 8,
-                color: "#e5e7eb",
-              }}
+              contentStyle={tooltipStyle}
               formatter={(value: number, name: string) => [
                 `${value.toLocaleString("fr-FR")} km`,
                 name,
               ]}
               labelFormatter={(m) => formatMonth(m as string)}
             />
-            <Legend wrapperStyle={{ fontSize: 12, color: "#9aa3af" }} />
-            <Bar dataKey="distance_km" name="Cette année" fill="#f97316" radius={[4, 4, 0, 0]} />
+            <Legend wrapperStyle={legendStyle} />
+            <Bar dataKey="distance_km" name="Cette année" fill={CHART.accent} radius={[4, 4, 0, 0]} />
             {hasN1 && (
               <Line
                 type="monotone"
                 dataKey="distance_km_n1"
                 name="N-1"
-                stroke="#9aa3af"
+                stroke={CHART.muted}
                 strokeDasharray="4 4"
                 dot={{ r: 3 }}
                 strokeWidth={2}

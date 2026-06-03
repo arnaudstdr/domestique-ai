@@ -112,7 +112,7 @@ export default function ActivityFilters({
                   className={
                     "pill text-xs transition-colors " +
                     (active
-                      ? "bg-accent text-white"
+                      ? "bg-accent text-surface"
                       : "bg-cardHover text-gray-200 hover:bg-cardHover/70")
                   }
                 >

@@ -15,24 +15,29 @@ function AuthenticatedLayout() {
   return (
     <div className="min-h-screen bg-surface text-gray-100">
       <header
-        className="sticky top-0 z-[1100] bg-surface/95 backdrop-blur border-b border-white/5
-                   pt-[env(safe-area-inset-top)]"
+        className="sticky top-0 z-[1100] bg-surface/70 backdrop-blur-xl
+                   border-b border-white/[0.06] pt-[env(safe-area-inset-top)]
+                   shadow-[0_1px_0_0_rgb(255_255_255/0.03)]"
       >
         <div className="mx-auto max-w-3xl px-4 py-3 flex items-center justify-between">
-          <h1 className="flex items-center gap-2 text-base font-semibold tracking-wide">
+          <h1 className="flex items-center gap-2.5 font-display text-[17px] font-extrabold tracking-tight">
             <img
               src="/icon-48.png"
               alt=""
               aria-hidden="true"
-              className="h-6 w-6 rounded-md"
+              className="h-7 w-7 rounded-lg ring-1 ring-white/10 shadow-card"
             />
-            DomestiqueAI
+            <span>
+              Domestique<span className="text-accent">AI</span>
+            </span>
           </h1>
           <Link
             to="/profil"
             aria-label="Profil"
             title="Profil & paramètres"
-            className="text-gray-300 hover:text-accent transition-colors"
+            className="grid h-9 w-9 place-items-center rounded-xl text-gray-300
+                       border border-white/[0.06] bg-white/[0.03]
+                       hover:text-accent hover:border-accent/40 transition-colors"
           >
             <Settings className="h-5 w-5" strokeWidth={1.75} aria-hidden="true" />
           </Link>
