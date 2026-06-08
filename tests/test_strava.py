@@ -7,10 +7,12 @@ from pathlib import Path
 
 import pytest
 
+from domestique_ai.athlete_context import AthleteContext
 from domestique_ai.ingestion.strava import (
     StravaClient,
     _last_activity_timestamp,
     backfill_activity_fields,
+    backfill_hr_zones,
     backfill_polylines,
     backfill_sport_types,
     backfill_temperature,
@@ -20,6 +22,49 @@ from domestique_ai.ingestion.strava import (
     summarize_temp_stream,
     sync_activities,
 )
+from domestique_ai.processing.analyzer import calculate_tss
+
+
+def _ctx(db_path, *, ftp=250.0, hr_rest=None, hr_max=None) -> AthleteContext:
+    return AthleteContext(
+        db_path=db_path,
+        tokens_path=db_path.parent / ".tokens.json",
+        profile_path=db_path.parent / "profile.yaml",
+        objective_path=db_path.parent / "objective.yaml",
+        availability_path=db_path.parent / "availability.yaml",
+        ftp=ftp, hr_rest=hr_rest, hr_max=hr_max, sex="M", lthr_pct=0.88,
+    )
+
+
+def test_save_activity_uses_injected_context(tmp_path, monkeypatch):
+    """save_activity écrit dans ctx.db_path et calcule le TSS avec ctx.ftp."""
+    monkeypatch.delenv("STRAVA_HR_REST", raising=False)
+    monkeypatch.delenv("STRAVA_HR_MAX", raising=False)
+    db = tmp_path / "ctx.db"
+    init_db(db)
+    ctx = _ctx(db, ftp=300.0)
+    activity = {
+        "id": 555, "date": "2025-04-01T08:00:00Z",
+        "duration": 3600, "avg_power": 300.0,
+    }
+    assert save_activity(activity, ctx=ctx) is True
+
+    conn = sqlite3.connect(db)
+    try:
+        load = conn.execute(
+            "SELECT training_load FROM activities WHERE strava_id = ?", (555,)
+        ).fetchone()[0]
+    finally:
+        conn.close()
+    assert load == pytest.approx(calculate_tss(3600, 300.0, 300.0))
+
+
+def test_backfill_hr_zones_raises_when_context_has_no_hr(tmp_path):
+    db = tmp_path / "z.db"
+    init_db(db)
+    client = StravaClient(access_token="x")  # aucune requête : le raise est antérieur
+    with pytest.raises(RuntimeError):
+        backfill_hr_zones(client, ctx=_ctx(db, hr_rest=None, hr_max=None))
 
 
 @pytest.fixture()

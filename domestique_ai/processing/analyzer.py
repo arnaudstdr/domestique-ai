@@ -15,6 +15,7 @@ import sqlite3
 from pathlib import Path
 from typing import Any
 
+from domestique_ai.athlete_context import AthleteContext
 from domestique_ai.config import (
     get_db_path,
     get_ftp,
@@ -33,9 +34,10 @@ HR_ZONE_KEYS = ("z1", "z2", "z3", "z4", "z5")
 _HR_ZONE_PAUSE_GAP_SEC = 5.0
 
 
-def fetch_activities_from_db(db_path: Path | None = None) -> list[dict[str, Any]]:
+def fetch_activities_from_db(db_path: Path | None = None, *,
+                             ctx: AthleteContext | None = None) -> list[dict[str, Any]]:
     """Charge toutes les activités depuis SQLite, triées par date croissante."""
-    path = Path(db_path) if db_path else get_db_path()
+    path = Path(db_path) if db_path else (ctx.db_path if ctx else get_db_path())
     if not path.exists():
         return []
     # Import local pour éviter les cycles avec ingestion.strava.
@@ -79,12 +81,13 @@ def fetch_activities_from_db(db_path: Path | None = None) -> list[dict[str, Any]
     ]
 
 
-def fetch_weight_history(db_path: Path | None = None) -> list[dict[str, Any]]:
+def fetch_weight_history(db_path: Path | None = None, *,
+                         ctx: AthleteContext | None = None) -> list[dict[str, Any]]:
     """Charge l'historique du poids depuis SQLite, trié par date croissante.
 
     Retourne une liste de `{"date": "YYYY-MM-DD", "weight": kg}`.
     """
-    path = Path(db_path) if db_path else get_db_path()
+    path = Path(db_path) if db_path else (ctx.db_path if ctx else get_db_path())
     if not path.exists():
         return []
     from domestique_ai.ingestion.strava import init_db
@@ -241,13 +244,18 @@ def compute_training_load(duration_sec: int,
     return 0.0
 
 
-def recalculate_training_loads(db_path: Path | None = None) -> int:
+def recalculate_training_loads(db_path: Path | None = None, *,
+                               ctx: AthleteContext | None = None) -> int:
     """
     Recalcule training_load pour toutes les activités selon la config courante.
 
+    Si ``ctx`` est fourni, le profil HR/FTP de ce contexte est utilisé pour le
+    calcul ; sinon, on retombe sur la config globale (.env + profil YAML),
+    comportement mono-utilisateur historique.
+
     Retourne le nombre de lignes mises à jour (valeur effectivement modifiée).
     """
-    path = Path(db_path) if db_path else get_db_path()
+    path = Path(db_path) if db_path else (ctx.db_path if ctx else get_db_path())
     if not path.exists():
         return 0
     conn = sqlite3.connect(path)
@@ -262,6 +270,11 @@ def recalculate_training_loads(db_path: Path | None = None) -> int:
                 duration_sec=duration or 0,
                 avg_hr=avg_hr,
                 avg_power=avg_power,
+                ftp=ctx.ftp if ctx else None,
+                hr_rest=ctx.hr_rest if ctx else None,
+                hr_max=ctx.hr_max if ctx else None,
+                sex=ctx.sex if ctx else None,
+                lthr_pct=ctx.lthr_pct if ctx else None,
             )
             if abs((current_load or 0.0) - new_load) > 1e-6:
                 conn.execute(

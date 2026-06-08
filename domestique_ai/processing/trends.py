@@ -14,6 +14,7 @@ import datetime as dt
 from pathlib import Path
 from typing import Any, Literal
 
+from domestique_ai.athlete_context import AthleteContext
 from domestique_ai.config import get_ftp
 from domestique_ai.processing.analyzer import (
     HR_ZONE_KEYS,
@@ -324,6 +325,8 @@ def _z4_z5_share(activities: list[dict[str, Any]]) -> float | None:
 def get_ftp_projection(
     db_path: Path | None = None,
     today: dt.date | None = None,
+    *,
+    ctx: AthleteContext | None = None,
 ) -> dict[str, Any]:
     """Projection FTP à 4 semaines à partir de la dynamique CTL + part Z4-Z5.
 
@@ -339,7 +342,7 @@ def get_ftp_projection(
       - ``low`` : moins de 28 jours.
     """
     today = today or dt.date.today()
-    activities = fetch_activities_from_db(db_path)
+    activities = fetch_activities_from_db(db_path, ctx=ctx)
     curves = calculate_ctl_atl_tsb(activities, end_date=today)
 
     ctl_now = _ctl_value_at(curves, today)
@@ -354,7 +357,7 @@ def get_ftp_projection(
         # +1 % FTP pour +5 CTL net, plafonné à ±5 %.
         gain_pct = max(-5.0, min(5.0, delta_ctl_28d / 5.0))
 
-    current_ftp = get_ftp()
+    current_ftp = ctx.ftp if ctx else get_ftp()
     if current_ftp is None or delta_ctl_28d is None:
         projected_ftp: float | None = None
     else:
