@@ -13,11 +13,10 @@ from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
-from fastapi import Depends, FastAPI
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from domestique_ai.api.auth import BearerAuthMiddleware
-from domestique_ai.api.deps import require_coach
 from domestique_ai.api.routers import activities as activities_router
 from domestique_ai.api.routers import auth as auth_router
 from domestique_ai.api.routers import availability as availability_router
@@ -25,8 +24,10 @@ from domestique_ai.api.routers import coach as coach_router
 from domestique_ai.api.routers import metrics as metrics_router
 from domestique_ai.api.routers import morning as morning_router
 from domestique_ai.api.routers import objective as objective_router
+from domestique_ai.api.routers import plan as plan_router
 from domestique_ai.api.routers import profile as profile_router
 from domestique_ai.api.routers import strava as strava_router
+from domestique_ai.llm.plan_storage import save_plan
 
 _LEGACY = "legacy-mt-token"
 
@@ -35,14 +36,13 @@ def _make_app() -> FastAPI:
     app = FastAPI()
     app.add_middleware(BearerAuthMiddleware, token=_LEGACY)
     app.include_router(auth_router.router)
+    # Tous les routeurs data sont désormais scopés par athlète (plus de gate).
     for mod in (
         metrics_router, activities_router, morning_router,
         objective_router, profile_router, availability_router,
-        strava_router,
+        strava_router, coach_router, plan_router,
     ):
         app.include_router(mod.router)
-    # coach reste gaté coach-only (comme dans main.py) → test du 403 athlète.
-    app.include_router(coach_router.router, dependencies=[Depends(require_coach)])
     return app
 
 
@@ -165,9 +165,49 @@ def test_strava_status_reachable_and_isolated(env):
     assert b_status == "idle"
 
 
+def test_coach_sessions_isolated_per_athlete(env):
+    c, root = env["client"], env["root"]
+    a_sess, a_pid = _new_athlete(c)
+    b_sess, _ = _new_athlete(c)
+    # Persiste une session coach dans la DB de A (directement).
+    from domestique_ai.llm.conversations import append_message
+    db_a = root / a_pid / "strava_activities.db"
+    append_message("sess-a", "user", {"role": "user", "content": "salut"}, db_path=db_a)
+
+    a_sessions = c.get("/api/coach/sessions", headers=_bearer(a_sess)).json()
+    b_sessions = c.get("/api/coach/sessions", headers=_bearer(b_sess)).json()
+    assert len(a_sessions) == 1
+    assert b_sessions == []
+
+
+def test_plans_isolated_per_athlete(env):
+    c, root = env["client"], env["root"]
+    a_sess, a_pid = _new_athlete(c)
+    b_sess, _ = _new_athlete(c)
+    # Insère un plan dans la DB de A (directement).
+    from domestique_ai.processing.plan_builder import build_training_plan
+    plan = build_training_plan(target_date=None, ctl_current=30.0, sessions_per_week=3)
+    db_a = root / a_pid / "strava_activities.db"
+    plan_id = save_plan(plan, sessions_per_week=3, db_path=db_a)
+
+    a_plans = c.get("/api/plan", headers=_bearer(a_sess)).json()
+    b_plans = c.get("/api/plan", headers=_bearer(b_sess)).json()
+    assert [p["id"] for p in a_plans] == [plan_id]
+    assert b_plans == []
+    # B ne peut pas charger le plan de A.
+    assert c.get(f"/api/plan/{plan_id}", headers=_bearer(b_sess)).status_code == 404
+    assert c.get(f"/api/plan/{plan_id}", headers=_bearer(a_sess)).status_code == 200
+
+
+def test_coach_and_plan_no_longer_403(env):
+    c = env["client"]
+    sess, _ = _new_athlete(c)
+    assert c.get("/api/coach/sessions", headers=_bearer(sess)).status_code == 200
+    assert c.get("/api/plan", headers=_bearer(sess)).status_code == 200
+
+
 def test_residual_auth(env):
     c = env["client"]
     assert c.get("/api/metrics/load").status_code == 401  # pas de header
-    sess, _ = _new_athlete(c)
-    # Routeur encore gaté coach-only → athlète refusé.
-    assert c.get("/api/coach/sessions", headers=_bearer(sess)).status_code == 403
+    assert c.get("/api/coach/sessions").status_code == 401
+    assert c.get("/api/plan").status_code == 401

@@ -22,6 +22,7 @@ import logging
 import threading
 from typing import Any
 
+from domestique_ai.athlete_context import AthleteContext, context_from_env
 from domestique_ai.llm.ollama_client import chat_structured_sync
 from domestique_ai.processing.morning_metrics import detect_morning_alerts
 from domestique_ai.processing.overtraining import detect_overtraining_signals
@@ -29,7 +30,9 @@ from domestique_ai.processing.today import propose_workout_today
 
 log = logging.getLogger(__name__)
 
-_BRIEF_CACHE: dict[tuple[str, int, str], dict[str, Any]] = {}
+# Clé : (db_path athlète, date ISO, bucket TSB, hash alertes). Le db_path isole
+# le cache par athlète ; la date permet la purge des jours antérieurs.
+_BRIEF_CACHE: dict[tuple[str, str, int, str], dict[str, Any]] = {}
 _BRIEF_LOCK = threading.Lock()
 
 _LLM_SYSTEM_PROMPT = (
@@ -100,16 +103,16 @@ def _select_primary_alert(
     return None
 
 
-def _collect_signals(today: _dt.date) -> dict[str, Any]:
+def _collect_signals(today: _dt.date, ctx: AthleteContext) -> dict[str, Any]:
     """Construit le dossier de signaux : TSB, séance, alerte. Best-effort, ne lève pas."""
-    workout = propose_workout_today(today=today)
+    workout = propose_workout_today(today=today, ctx=ctx)
     try:
-        overtraining = detect_overtraining_signals()
+        overtraining = detect_overtraining_signals(ctx=ctx)
     except Exception:  # noqa: BLE001
         log.debug("Échec overtraining", exc_info=True)
         overtraining = {"alerts": []}
     try:
-        morning = detect_morning_alerts()
+        morning = detect_morning_alerts(db_path=ctx.db_path)
     except Exception:  # noqa: BLE001
         log.debug("Échec morning", exc_info=True)
         morning = []
@@ -125,7 +128,7 @@ def _collect_signals(today: _dt.date) -> dict[str, Any]:
             calculate_ctl_atl_tsb,
             fetch_activities_from_db,
         )
-        curves = calculate_ctl_atl_tsb(fetch_activities_from_db(), end_date=today)
+        curves = calculate_ctl_atl_tsb(fetch_activities_from_db(ctx=ctx), end_date=today)
         if curves:
             tsb = float(curves[-1]["TSB"])
             from domestique_ai.processing.today import _tsb_zone_label
@@ -224,6 +227,8 @@ def build_daily_brief(
     today: _dt.date | None = None,
     refresh: bool = False,
     use_llm: bool = True,
+    *,
+    ctx: AthleteContext | None = None,
 ) -> dict[str, Any]:
     """Construit le brief quotidien.
 
@@ -245,14 +250,16 @@ def build_daily_brief(
         use_llm : si ``False``, génère directement la phrase template (utile
             pour tests / mode hors-ligne).
     """
+    ctx = ctx or context_from_env()
     target = today or _dt.date.today()
-    signals = _collect_signals(target)
+    signals = _collect_signals(target, ctx)
     alert_signature = (
         [signals["primary_alert"]["message"]]
         if signals.get("primary_alert")
         else []
     )
     cache_key = (
+        str(ctx.db_path),
         target.isoformat(),
         _round_tsb(signals.get("tsb") or 0.0),
         _hash_alerts(alert_signature),
@@ -286,13 +293,14 @@ def build_daily_brief(
         # On purge le cache des jours antérieurs : on n'y revient jamais et ça
         # évite de grossir indéfiniment.
         for key in list(_BRIEF_CACHE):
-            if key[0] != target.isoformat():
+            if key[1] != target.isoformat():
                 del _BRIEF_CACHE[key]
         _BRIEF_CACHE[cache_key] = payload
     return payload
 
 
-def build_coach_context(today: _dt.date | None = None) -> str:
+def build_coach_context(today: _dt.date | None = None, *,
+                        ctx: AthleteContext | None = None) -> str:
     """Bloc texte injecté au démarrage d'une nouvelle session coach (palier 2).
 
     Format pensé pour être ajouté en message ``system`` après le SYSTEM_PROMPT
@@ -302,8 +310,9 @@ def build_coach_context(today: _dt.date | None = None) -> str:
     Précise explicitement que ces chiffres sont les chiffres autorisés à
     citer, et que pour creuser le coach peut toujours appeler les tools.
     """
+    ctx = ctx or context_from_env()
     target = today or _dt.date.today()
-    brief = build_daily_brief(today=target)
+    brief = build_daily_brief(today=target, ctx=ctx)
     lines = [
         "Contexte courant injecté par l'app (pas besoin d'appeler les tools "
         "pour ces chiffres — ils sont issus du même calcul que tes tools) :",

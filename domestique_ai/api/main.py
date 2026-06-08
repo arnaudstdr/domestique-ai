@@ -9,14 +9,13 @@ import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import Depends, FastAPI
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from domestique_ai.api.auth import BearerAuthMiddleware
-from domestique_ai.api.deps import require_coach
 from domestique_ai.api.logging import get_logger, setup_logging
 from domestique_ai.api.routers import (
     activities as activities_router,
@@ -249,12 +248,8 @@ app.include_router(objective_router.router)
 app.include_router(profile_router.router)
 app.include_router(availability_router.router)
 app.include_router(strava_router.router)
-
-# Restent gatés coach-only en attendant leur scoping par athlète (1b-iii) :
-# couche LLM/coach et plans.
-_data_gate = [Depends(require_coach)]
-app.include_router(coach_router.router, dependencies=_data_gate)
-app.include_router(plan_router.router, dependencies=_data_gate)
+app.include_router(coach_router.router)
+app.include_router(plan_router.router)
 
 
 @app.get("/api/health", tags=["meta"])

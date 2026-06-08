@@ -14,6 +14,7 @@ import sqlite3
 from pathlib import Path
 from typing import Any
 
+from domestique_ai.athlete_context import AthleteContext
 from domestique_ai.config import get_db_path
 from domestique_ai.processing.plan_builder import Workout, build_training_plan
 
@@ -135,6 +136,8 @@ def delete_plan(plan_id: int, db_path: Path | None = None) -> bool:
 def build_and_save_plan(
     sessions_per_week: int = 4,
     focus: str | None = None,
+    *,
+    ctx: AthleteContext | None = None,
 ) -> tuple[int, list[Workout], dict[str, Any]]:
     """Génère un plan d'entraînement et le persiste.
 
@@ -151,6 +154,7 @@ def build_and_save_plan(
     Lève ``PlanGenerationError`` sur input invalide / plan vide.
     Lève ``AvailabilityError`` si `availability.yaml` est mal formé.
     """
+    from domestique_ai.athlete_context import context_from_env
     from domestique_ai.llm.availability import load_availability
     from domestique_ai.llm.objectives import load_objective
     from domestique_ai.llm.tools import (
@@ -159,17 +163,19 @@ def build_and_save_plan(
     )
     from domestique_ai.processing.plan_builder import days_used
 
+    ctx = ctx or context_from_env()
+
     if sessions_per_week not in (2, 3, 4, 5, 6, 7):
         raise PlanGenerationError(
             f"sessions_per_week doit être entre 2 et 7, reçu {sessions_per_week}."
         )
 
-    activities = fetch_activities_from_db()
+    activities = fetch_activities_from_db(ctx=ctx)
     today = _dt.date.today()
     curves = calculate_ctl_atl_tsb(activities, end_date=today)
     ctl_current = float(curves[-1]["CTL"]) if curves else 0.0
 
-    objective = load_objective()
+    objective = load_objective(ctx.objective_path)
     target_date: _dt.date | None = None
     target_event_type = "cyclosportive"
     if objective is not None:
@@ -180,7 +186,7 @@ def build_and_save_plan(
             except ValueError:
                 target_date = None
 
-    availability = load_availability()
+    availability = load_availability(ctx.availability_path)
 
     plan = build_training_plan(
         target_date=target_date,
@@ -202,6 +208,7 @@ def build_and_save_plan(
         target_date=target_date,
         target_event_type=target_event_type,
         sessions_per_week=sessions_per_week,
+        db_path=ctx.db_path,
     )
 
     context = {
