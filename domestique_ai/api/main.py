@@ -239,16 +239,19 @@ app.add_middleware(
 # Routeur d'identité : non gaté (gère lui-même /me, accept-invite public, etc.).
 app.include_router(auth_router.router)
 
-# Routeurs de données : gatés coach-only en 1a (le seul user est le coach
-# bootstrap ; l'auth-off y retombe aussi). Sera remplacé par le scoping par
-# athlète en 1b.
+# Routeurs scopés par athlète (1b-i) : protégés par l'auth (chaque handler
+# résout son AthleteContext via get_athlete_context) et isolés par espace de
+# données. Plus de gate coach-only.
+app.include_router(metrics_router.router)
+app.include_router(activities_router.router)
+app.include_router(morning_router.router)
+app.include_router(objective_router.router)
+app.include_router(profile_router.router)
+app.include_router(availability_router.router)
+
+# Restent gatés coach-only en attendant leur scoping par athlète (1b-ii) :
+# couche LLM/coach, plans, et sync/backfill Strava.
 _data_gate = [Depends(require_coach)]
-app.include_router(metrics_router.router, dependencies=_data_gate)
-app.include_router(activities_router.router, dependencies=_data_gate)
-app.include_router(morning_router.router, dependencies=_data_gate)
-app.include_router(objective_router.router, dependencies=_data_gate)
-app.include_router(profile_router.router, dependencies=_data_gate)
-app.include_router(availability_router.router, dependencies=_data_gate)
 app.include_router(strava_router.router, dependencies=_data_gate)
 app.include_router(coach_router.router, dependencies=_data_gate)
 app.include_router(plan_router.router, dependencies=_data_gate)

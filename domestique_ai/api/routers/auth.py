@@ -13,6 +13,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, Field
 
 from domestique_ai.api.deps import get_current_user, require_coach
+from domestique_ai.api.logging import get_logger
 from domestique_ai.platform_db import (
     InvitationError,
     accept_invitation,
@@ -22,6 +23,29 @@ from domestique_ai.platform_db import (
 )
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
+log = get_logger("auth")
+
+
+def _provision_athlete_space(user: dict) -> None:
+    """Crée le dossier + la DB activités d'un nouvel athlète. Idempotent, best-effort.
+
+    Le user bootstrap n'a pas d'espace dédié (données legacy). Un échec d'I/O ne
+    doit pas casser l'acceptation d'invitation : l'espace sera recréé à la volée
+    au 1er accès (les fonctions de stockage font ``init_db`` + ``mkdir``).
+    """
+    if user.get("is_bootstrap"):
+        return
+    from domestique_ai.athlete_context import context_for_athlete
+    from domestique_ai.ingestion.strava import init_db
+    ctx = context_for_athlete(user)
+    try:
+        ctx.db_path.parent.mkdir(parents=True, exist_ok=True)
+        init_db(ctx.db_path)
+    except OSError:
+        log.exception(
+            "Provisioning espace athlète %s échoué (sera recréé à l'accès).",
+            user["public_id"][:8],
+        )
 
 
 class MeResponse(BaseModel):
@@ -114,6 +138,7 @@ def accept(body: AcceptInvite) -> SessionTokenOut:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
         ) from exc
+    _provision_athlete_space(user)
     return SessionTokenOut(
         session_token=token, public_id=user["public_id"], role=user["role"]
     )

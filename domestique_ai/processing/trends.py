@@ -181,6 +181,8 @@ def get_trends(
     period: Period = "6m",
     db_path: Path | None = None,
     today: dt.date | None = None,
+    *,
+    ctx: AthleteContext | None = None,
 ) -> dict[str, Any]:
     """Retourne les agrégats longue durée pour la page Tendances.
 
@@ -208,7 +210,7 @@ def get_trends(
     today = today or dt.date.today()
     resolution = _PERIOD_RESOLUTION[period]
 
-    all_activities = fetch_activities_from_db(db_path)
+    all_activities = fetch_activities_from_db(db_path, ctx=ctx)
     period_activities = _filter_by_period(all_activities, period, today)
 
     # Courbe CTL/ATL/TSB sur toute la base puis on coupe à la période, pour que

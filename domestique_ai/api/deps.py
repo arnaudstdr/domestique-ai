@@ -4,9 +4,10 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import HTTPException, Request, status
+from fastapi import Depends, HTTPException, Request, status
 
 from domestique_ai.api.logging import get_logger
+from domestique_ai.athlete_context import AthleteContext, context_for_athlete
 from domestique_ai.config import get_api_token, get_strava_credentials
 from domestique_ai.ingestion.strava import StravaAuthError, StravaClient
 
@@ -40,11 +41,18 @@ def require_coach(request: Request) -> dict[str, Any]:
     return user
 
 
-def get_strava_client() -> StravaClient:
-    """Construit un `StravaClient` à partir du token local.
+def get_athlete_context(request: Request) -> AthleteContext:
+    """Contexte de données de l'utilisateur courant (bootstrap → données legacy)."""
+    return context_for_athlete(get_current_user(request))
 
-    Lève une 503 si les credentials ne sont pas configurés ou si le flow
-    OAuth n'a pas encore été exécuté.
+
+def get_strava_client(
+    ctx: AthleteContext = Depends(get_athlete_context),  # noqa: B008
+) -> StravaClient:
+    """Construit un `StravaClient` à partir des tokens de l'athlète courant.
+
+    Lève une 503 si les credentials d'app ne sont pas configurés ou si l'athlète
+    n'a pas (encore) connecté son Strava (tokens absents — avant l'onboarding 1c).
     """
     client_id, client_secret, _ = get_strava_credentials()
     if not (client_id and client_secret):
@@ -56,7 +64,7 @@ def get_strava_client() -> StravaClient:
             ),
         )
     try:
-        return StravaClient.from_tokens_file(client_id, client_secret)
+        return StravaClient.from_tokens_file(client_id, client_secret, ctx=ctx)
     except StravaAuthError as exc:
         log.warning("Strava client : auth/token KO : %s", exc)
         raise HTTPException(

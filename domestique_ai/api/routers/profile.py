@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, BackgroundTasks, HTTPException, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 
+from domestique_ai.api.deps import get_athlete_context
 from domestique_ai.api.logging import get_logger
 from domestique_ai.api.schemas import ProfileSchema
+from domestique_ai.athlete_context import AthleteContext
 from domestique_ai.config import invalidate_profile_cache
 from domestique_ai.llm.profile import (
     Profile as ProfileModel,
@@ -54,9 +56,11 @@ def _hr_relevant_fields_changed(
 
 
 @router.get("", response_model=ProfileSchema | None)
-def get_profile() -> ProfileSchema | None:
+def get_profile(
+    ctx: AthleteContext = Depends(get_athlete_context),  # noqa: B008
+) -> ProfileSchema | None:
     """Renvoie le profil persisté ou ``null`` si absent."""
-    profile = load_profile()
+    profile = load_profile(ctx.profile_path)
     if profile is None:
         return None
     return _to_schema(profile)
@@ -64,10 +68,12 @@ def get_profile() -> ProfileSchema | None:
 
 @router.put("", response_model=ProfileSchema)
 def put_profile(
-    payload: ProfileSchema, background_tasks: BackgroundTasks
+    payload: ProfileSchema,
+    background_tasks: BackgroundTasks,
+    ctx: AthleteContext = Depends(get_athlete_context),  # noqa: B008
 ) -> ProfileSchema:
     """Remplace le profil. Si HR/sexe/%LTHR a changé, recalcule la charge en tâche de fond."""
-    previous = load_profile()
+    previous = load_profile(ctx.profile_path)
     try:
         save_profile(
             ProfileModel(
@@ -76,7 +82,8 @@ def put_profile(
                 hr_max=payload.hr_max,
                 sex=payload.sex,
                 lthr_pct=payload.lthr_pct,
-            )
+            ),
+            ctx.profile_path,
         )
     except ProfileError as exc:
         raise HTTPException(
@@ -84,13 +91,14 @@ def put_profile(
             detail=str(exc),
         ) from exc
 
-    # Invalide le cache pour que les prochains getters relisent le fichier.
+    # Invalide le cache config (utile pour le bootstrap qui passe par lui ;
+    # no-op sémantique pour les athlètes dont le profil est lu hors cache).
     invalidate_profile_cache()
 
     if _hr_relevant_fields_changed(previous, payload):
         log.info(
             "Profil HR modifié — recalcul training_load lancé en arrière-plan."
         )
-        background_tasks.add_task(recalculate_training_loads)
+        background_tasks.add_task(recalculate_training_loads, ctx=ctx)
 
     return payload

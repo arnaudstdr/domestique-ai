@@ -18,6 +18,7 @@ import statistics
 from pathlib import Path
 from typing import Any
 
+from domestique_ai.athlete_context import AthleteContext
 from domestique_ai.processing.analyzer import (
     calculate_ctl_atl_tsb,
     fetch_activities_from_db,
@@ -171,13 +172,14 @@ def detect_overtraining_signals(
     db_path: Path | None = None,
     *,
     end_date: dt.date | None = None,
+    ctx: AthleteContext | None = None,
 ) -> dict[str, Any]:
     """
     Calcule les 4 indicateurs et renvoie un rapport agrégé.
 
     Le bandeau dashboard / le coach LLM peuvent l'exposer tel quel.
     """
-    activities = fetch_activities_from_db(db_path=db_path)
+    activities = fetch_activities_from_db(db_path=db_path, ctx=ctx)
     chronic = compute_chronic_tsb(activities, end_date=end_date)
     monstrain = compute_monotony_strain(activities, end_date=end_date)
     weekly = compute_weekly_jump(activities, end_date=end_date)

@@ -53,6 +53,19 @@ def get_platform_db_path() -> Path:
     return REPO_ROOT / "data" / "platform.db"
 
 
+def get_athletes_root() -> Path:
+    """Racine des espaces de données par athlète (comptes non-bootstrap).
+
+    Chaque athlète non-propriétaire a son dossier ``<root>/<public_id>/`` (DB,
+    tokens Strava, YAML). Le propriétaire (bootstrap) garde ses données legacy
+    en place. Override via DOMESTIQUE_AI_ATHLETES_ROOT.
+    """
+    custom = os.getenv("DOMESTIQUE_AI_ATHLETES_ROOT")
+    if custom:
+        return Path(custom).expanduser().resolve()
+    return REPO_ROOT / "data" / "athletes"
+
+
 def get_session_secret() -> bytes:
     """Secret (pepper) pour le HMAC des tokens de session/invitation.
 

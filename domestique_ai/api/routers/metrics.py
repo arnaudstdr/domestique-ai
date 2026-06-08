@@ -5,8 +5,9 @@ from __future__ import annotations
 import datetime as dt
 from typing import Literal
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Depends, Query
 
+from domestique_ai.api.deps import get_athlete_context
 from domestique_ai.api.schemas import (
     Alert,
     FtpProjectionResponse,
@@ -19,6 +20,7 @@ from domestique_ai.api.schemas import (
     TrendsResponse,
     VolumePeriod,
 )
+from domestique_ai.athlete_context import AthleteContext
 from domestique_ai.processing.analyzer import (
     calculate_ctl_atl_tsb,
     fetch_activities_from_db,
@@ -42,9 +44,12 @@ def _zone_from_tsb(tsb: float) -> tuple[str, str]:
 
 
 @router.get("/load", response_model=LoadResponse)
-def get_load(days: int = 90) -> LoadResponse:
+def get_load(
+    days: int = 90,
+    ctx: AthleteContext = Depends(get_athlete_context),  # noqa: B008
+) -> LoadResponse:
     """Dernier point CTL/ATL/TSB + historique sur N jours (90 par défaut)."""
-    activities = fetch_activities_from_db()
+    activities = fetch_activities_from_db(ctx=ctx)
     curves = calculate_ctl_atl_tsb(activities, end_date=dt.date.today())
     if not curves:
         return LoadResponse(current=None, history=[])
@@ -78,10 +83,12 @@ _INDICATOR_LEVEL: dict[str, str] = {
 
 
 @router.get("/overtraining", response_model=OvertrainingResponse)
-def get_overtraining() -> OvertrainingResponse:
+def get_overtraining(
+    ctx: AthleteContext = Depends(get_athlete_context),  # noqa: B008
+) -> OvertrainingResponse:
     """Indicateurs auto + dérive matinale, agrégés en un seul payload."""
-    auto = detect_overtraining_signals()
-    morning = detect_morning_alerts()
+    auto = detect_overtraining_signals(ctx=ctx)
+    morning = detect_morning_alerts(db_path=ctx.db_path)
 
     alerts: list[Alert] = []
     for raw in auto.get("alerts") or []:
@@ -129,7 +136,9 @@ def _is_ride(sport_type: str | None) -> bool:
 
 
 @router.get("/ride-volume", response_model=RideVolumeResponse)
-def get_ride_volume() -> RideVolumeResponse:
+def get_ride_volume(
+    ctx: AthleteContext = Depends(get_athlete_context),  # noqa: B008
+) -> RideVolumeResponse:
     """Volume cyclisme (distance + temps) sur l'année civile + la semaine ISO en cours.
 
     N'inclut que les activités dont `sport_type` contient "Ride" (Ride,
@@ -142,7 +151,7 @@ def get_ride_volume() -> RideVolumeResponse:
     year = {"distance_m": 0.0, "duration_sec": 0}
     week = {"distance_m": 0.0, "duration_sec": 0}
 
-    for act in fetch_activities_from_db():
+    for act in fetch_activities_from_db(ctx=ctx):
         if not _is_ride(act.get("sport_type")):
             continue
         date_str = act.get("date")
@@ -178,6 +187,7 @@ def get_ride_volume() -> RideVolumeResponse:
 @router.get("/trends", response_model=TrendsResponse)
 def get_long_term_trends(
     period: Literal["3m", "6m", "1y", "all"] = Query(default="6m"),
+    ctx: AthleteContext = Depends(get_athlete_context),  # noqa: B008
 ) -> TrendsResponse:
     """Tendances longue durée : CTL/ATL/TSB + volumes mensuels + zones par mois.
 
@@ -185,12 +195,14 @@ def get_long_term_trends(
     (jour pour 3 mois, semaine pour 6 mois et 1 an, mois pour ``all``) afin de
     garder un nombre de points raisonnable côté graphique.
     """
-    raw = get_trends(period=period)
+    raw = get_trends(period=period, ctx=ctx)
     return TrendsResponse(**raw)
 
 
 @router.get("/ftp-projection", response_model=FtpProjectionResponse)
-def get_projection_ftp() -> FtpProjectionResponse:
+def get_projection_ftp(
+    ctx: AthleteContext = Depends(get_athlete_context),  # noqa: B008
+) -> FtpProjectionResponse:
     """Projection FTP à 4 semaines, heuristique CTL + part Z4-Z5.
 
     Heuristique : +1 % de FTP par +5 points de CTL net sur 28 jours, plafonné
@@ -198,4 +210,4 @@ def get_projection_ftp() -> FtpProjectionResponse:
     profondeur de l'historique et la présence d'un stimulus seuil/VO2max
     plausible (part Z4-Z5 entre 4 % et 25 %).
     """
-    return FtpProjectionResponse(**get_ftp_projection())
+    return FtpProjectionResponse(**get_ftp_projection(ctx=ctx))
