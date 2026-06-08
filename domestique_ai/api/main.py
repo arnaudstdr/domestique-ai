@@ -9,16 +9,20 @@ import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from domestique_ai.api.auth import BearerAuthMiddleware
+from domestique_ai.api.deps import require_coach
 from domestique_ai.api.logging import get_logger, setup_logging
 from domestique_ai.api.routers import (
     activities as activities_router,
+)
+from domestique_ai.api.routers import (
+    auth as auth_router,
 )
 from domestique_ai.api.routers import (
     availability as availability_router,
@@ -45,7 +49,8 @@ from domestique_ai.api.routers import (
     strava as strava_router,
 )
 from domestique_ai.api.scheduler import start_scheduler, stop_scheduler
-from domestique_ai.config import REPO_ROOT, get_api_token
+from domestique_ai.config import REPO_ROOT, get_api_token, get_platform_db_path
+from domestique_ai.platform_db import init_platform_db
 
 _FRONTEND_DIST = REPO_ROOT / "frontend" / "dist"
 
@@ -102,6 +107,7 @@ async def lifespan(app: FastAPI):  # noqa: ARG001
         _FRONTEND_DIST,
         _FRONTEND_DIST.is_dir(),
     )
+    init_platform_db()
     # Lancement non bloquant — l'API est prête immédiatement, le backfill
     # tourne en tâche de fond.
     asyncio.create_task(_backfill_session_titles())
@@ -215,7 +221,11 @@ def _extract_header(scope: Scope, name: bytes) -> str | None:
 #   handler → BearerAuth → RequestLogging → CORS
 # Ainsi le RequestLogging trace aussi les 401 émis par BearerAuth, et CORS
 # répond aux preflights avant tout filtrage applicatif.
-app.add_middleware(BearerAuthMiddleware, token=get_api_token())
+app.add_middleware(
+    BearerAuthMiddleware,
+    token=get_api_token(),
+    platform_db_path=get_platform_db_path(),
+)
 app.add_middleware(RequestLoggingMiddleware)
 app.add_middleware(
     CORSMiddleware,
@@ -226,15 +236,22 @@ app.add_middleware(
     expose_headers=["x-request-id"],
 )
 
-app.include_router(metrics_router.router)
-app.include_router(activities_router.router)
-app.include_router(morning_router.router)
-app.include_router(objective_router.router)
-app.include_router(profile_router.router)
-app.include_router(availability_router.router)
-app.include_router(strava_router.router)
-app.include_router(coach_router.router)
-app.include_router(plan_router.router)
+# Routeur d'identité : non gaté (gère lui-même /me, accept-invite public, etc.).
+app.include_router(auth_router.router)
+
+# Routeurs de données : gatés coach-only en 1a (le seul user est le coach
+# bootstrap ; l'auth-off y retombe aussi). Sera remplacé par le scoping par
+# athlète en 1b.
+_data_gate = [Depends(require_coach)]
+app.include_router(metrics_router.router, dependencies=_data_gate)
+app.include_router(activities_router.router, dependencies=_data_gate)
+app.include_router(morning_router.router, dependencies=_data_gate)
+app.include_router(objective_router.router, dependencies=_data_gate)
+app.include_router(profile_router.router, dependencies=_data_gate)
+app.include_router(availability_router.router, dependencies=_data_gate)
+app.include_router(strava_router.router, dependencies=_data_gate)
+app.include_router(coach_router.router, dependencies=_data_gate)
+app.include_router(plan_router.router, dependencies=_data_gate)
 
 
 @app.get("/api/health", tags=["meta"])

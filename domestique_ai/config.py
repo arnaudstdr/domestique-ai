@@ -8,6 +8,7 @@ ensuite, puis sur le défaut.
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import os
 import threading
@@ -38,6 +39,40 @@ def get_db_path() -> Path:
 def get_tokens_path() -> Path:
     """Chemin du fichier de stockage local des tokens Strava (jamais commité)."""
     return REPO_ROOT / "data" / ".strava_tokens.json"
+
+
+def get_platform_db_path() -> Path:
+    """Chemin de la DB plateforme (identité : comptes, sessions, invitations).
+
+    Séparée de la DB activités (qui deviendra « une par athlète »). Override via
+    DOMESTIQUE_AI_PLATFORM_DB_PATH.
+    """
+    custom = os.getenv("DOMESTIQUE_AI_PLATFORM_DB_PATH")
+    if custom:
+        return Path(custom).expanduser().resolve()
+    return REPO_ROOT / "data" / "platform.db"
+
+
+def get_session_secret() -> bytes:
+    """Secret (pepper) pour le HMAC des tokens de session/invitation.
+
+    Priorité : DOMESTIQUE_AI_SESSION_SECRET > dérivé de DOMESTIQUE_AI_API_TOKEN
+    (évite d'imposer une nouvelle variable obligatoire en prod) > constante de dev
+    (avec warning). Retourne des bytes prêts pour ``hmac.new``.
+    """
+    raw = os.getenv("DOMESTIQUE_AI_SESSION_SECRET")
+    if raw and raw.strip():
+        return raw.strip().encode("utf-8")
+    api_token = os.getenv("DOMESTIQUE_AI_API_TOKEN")
+    if api_token and api_token.strip():
+        return hashlib.sha256(
+            b"domestique-ai-session-v1:" + api_token.strip().encode("utf-8")
+        ).digest()
+    logger.warning(
+        "DOMESTIQUE_AI_SESSION_SECRET et DOMESTIQUE_AI_API_TOKEN absents — "
+        "secret de session dérivé d'une constante de dev. NE PAS utiliser en prod."
+    )
+    return b"domestique-ai-dev-session-secret"
 
 
 def get_profile_path() -> Path:

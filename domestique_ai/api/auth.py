@@ -21,10 +21,15 @@ Comportement :
 from __future__ import annotations
 
 import hmac
+from pathlib import Path
 
 from starlette.types import ASGIApp, Receive, Scope, Send
 
 from domestique_ai.api.logging import get_logger
+from domestique_ai.platform_db import (
+    get_or_create_bootstrap_coach,
+    resolve_session_token,
+)
 
 
 def _extract_header(scope: Scope, name: bytes) -> str | None:
@@ -63,11 +68,14 @@ class BearerAuthMiddleware:
     """
 
     _LOG = get_logger("auth")
-    _EXEMPT_API_PATHS = {"/api/health"}
+    # accept-invite doit être joignable sans session (point d'entrée des comptes).
+    _EXEMPT_API_PATHS = {"/api/health", "/api/auth/accept-invite"}
 
-    def __init__(self, app: ASGIApp, token: str | None) -> None:
+    def __init__(self, app: ASGIApp, token: str | None,
+                 platform_db_path: Path | None = None) -> None:
         self.app = app
         self._token = (token or "").strip()
+        self._platform_db_path = platform_db_path
         self._enabled = bool(self._token)
         if not self._enabled:
             self._LOG.warning(
@@ -99,17 +107,25 @@ class BearerAuthMiddleware:
             return
 
         provided = header[len(prefix) :].strip()
-        if not hmac.compare_digest(
+
+        # Résolution : (a) token de session par utilisateur, sinon (b) token
+        # legacy partagé → coach propriétaire (bootstrap). Sinon 401.
+        user = resolve_session_token(provided, path=self._platform_db_path)
+        if user is None and hmac.compare_digest(
             provided.encode("utf-8"), self._token.encode("utf-8")
         ):
+            user = get_or_create_bootstrap_coach(path=self._platform_db_path)
+
+        if user is None:
             await _send_401(send)
             return
 
-        # Annoter le scope : utile pour des middlewares en aval qui voudraient
-        # journaliser que la requête est authentifiée.
+        # Annoter le scope : current_user pour les dépendances en aval, et flag
+        # d'authentification pour le logging.
         scope.setdefault("state", {})
         if isinstance(scope["state"], dict):
             scope["state"]["authenticated"] = True
+            scope["state"]["user"] = user
 
         await self.app(scope, receive, send)
 
