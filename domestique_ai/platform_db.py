@@ -216,6 +216,25 @@ def get_user_by_public_id(public_id: str, path: Path | None = None) -> dict[str,
         conn.close()
 
 
+def list_users(role: str | None = None,
+               path: Path | None = None) -> list[dict[str, Any]]:
+    """Liste tous les utilisateurs (optionnellement filtrés par rôle), triés par id.
+
+    Utilisé par le scheduler pour énumérer les athlètes à synchroniser.
+    """
+    conn = _connect(path)
+    try:
+        if role is None:
+            rows = conn.execute("SELECT * FROM users ORDER BY id").fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT * FROM users WHERE role = ? ORDER BY id", (role,)
+            ).fetchall()
+        return [_user_dict(r) for r in rows]
+    finally:
+        conn.close()
+
+
 def get_bootstrap_coach(path: Path | None = None) -> dict[str, Any] | None:
     conn = _connect(path)
     try:

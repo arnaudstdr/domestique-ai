@@ -248,11 +248,11 @@ app.include_router(morning_router.router)
 app.include_router(objective_router.router)
 app.include_router(profile_router.router)
 app.include_router(availability_router.router)
+app.include_router(strava_router.router)
 
-# Restent gatés coach-only en attendant leur scoping par athlète (1b-ii) :
-# couche LLM/coach, plans, et sync/backfill Strava.
+# Restent gatés coach-only en attendant leur scoping par athlète (1b-iii) :
+# couche LLM/coach et plans.
 _data_gate = [Depends(require_coach)]
-app.include_router(strava_router.router, dependencies=_data_gate)
 app.include_router(coach_router.router, dependencies=_data_gate)
 app.include_router(plan_router.router, dependencies=_data_gate)
 

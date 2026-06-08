@@ -26,6 +26,7 @@ from domestique_ai.api.routers import metrics as metrics_router
 from domestique_ai.api.routers import morning as morning_router
 from domestique_ai.api.routers import objective as objective_router
 from domestique_ai.api.routers import profile as profile_router
+from domestique_ai.api.routers import strava as strava_router
 
 _LEGACY = "legacy-mt-token"
 
@@ -37,6 +38,7 @@ def _make_app() -> FastAPI:
     for mod in (
         metrics_router, activities_router, morning_router,
         objective_router, profile_router, availability_router,
+        strava_router,
     ):
         app.include_router(mod.router)
     # coach reste gaté coach-only (comme dans main.py) → test du 403 athlète.
@@ -147,6 +149,20 @@ def test_athlete_without_tokens_503_on_detail(env):
     assert c.get("/api/activities", headers=_bearer(sess)).status_code == 200
     # Le détail exige un client Strava : athlète sans tokens (avant 1c) → 503.
     assert c.get("/api/activities/42", headers=_bearer(sess)).status_code == 503
+
+
+def test_strava_status_reachable_and_isolated(env):
+    c = env["client"]
+    a_sess, _ = _new_athlete(c)
+    b_sess, _ = _new_athlete(c)
+    # strava est dégaté (plus de 403) et scopé par athlète.
+    assert c.get("/api/strava/sync-status", headers=_bearer(a_sess)).status_code == 200
+    # A lance un sync (sans tokens Strava → finira en erreur) ; B reste idle.
+    assert c.post("/api/strava/sync", headers=_bearer(a_sess)).status_code == 200
+    a_status = c.get("/api/strava/sync-status", headers=_bearer(a_sess)).json()["status"]
+    b_status = c.get("/api/strava/sync-status", headers=_bearer(b_sess)).json()["status"]
+    assert a_status != "idle"
+    assert b_status == "idle"
 
 
 def test_residual_auth(env):

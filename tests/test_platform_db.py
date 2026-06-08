@@ -101,6 +101,21 @@ def test_coach_invite_does_not_link_when_role_is_coach():
     assert pdb.list_athletes_for_coach(coach["id"]) == []
 
 
+def test_list_users_all_and_filtered_by_role():
+    coach = pdb.get_or_create_bootstrap_coach()
+    alice = pdb.create_user(role="athlete", display_name="Alice")
+    bob = pdb.create_user(role="athlete", display_name="Bob")
+
+    all_ids = {u["id"] for u in pdb.list_users()}
+    assert all_ids == {coach["id"], alice["id"], bob["id"]}
+
+    athletes = pdb.list_users(role="athlete")
+    assert {u["id"] for u in athletes} == {alice["id"], bob["id"]}
+
+    coaches = pdb.list_users(role="coach")
+    assert [u["id"] for u in coaches] == [coach["id"]]
+
+
 def test_session_resolve_valid_invalid_revoked_expired():
     user = pdb.create_user(role="athlete")
 
