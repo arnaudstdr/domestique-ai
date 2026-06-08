@@ -68,8 +68,13 @@ class BearerAuthMiddleware:
     """
 
     _LOG = get_logger("auth")
-    # accept-invite doit être joignable sans session (point d'entrée des comptes).
-    _EXEMPT_API_PATHS = {"/api/health", "/api/auth/accept-invite"}
+    # Routes joignables sans session : accept-invite (entrée des comptes) et le
+    # callback OAuth Strava (redirection navigateur, validée par son `state`).
+    _EXEMPT_API_PATHS = {
+        "/api/health",
+        "/api/auth/accept-invite",
+        "/api/strava/callback",
+    }
 
     def __init__(self, app: ASGIApp, token: str | None,
                  platform_db_path: Path | None = None) -> None:

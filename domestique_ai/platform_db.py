@@ -136,6 +136,20 @@ def init_platform_db(path: Path | None = None) -> None:
             "ON invitations(created_by)"
         )
         conn.execute("""
+            CREATE TABLE IF NOT EXISTS oauth_states (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                state_hash TEXT NOT NULL UNIQUE,
+                created_at TEXT NOT NULL,
+                expires_at TEXT,
+                used_at TEXT
+            )
+        """)
+        conn.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_oauth_states_hash "
+            "ON oauth_states(state_hash)"
+        )
+        conn.execute("""
             CREATE TABLE IF NOT EXISTS coach_athlete (
                 coach_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
                 athlete_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -210,6 +224,17 @@ def get_user_by_public_id(public_id: str, path: Path | None = None) -> dict[str,
     try:
         row = conn.execute(
             "SELECT * FROM users WHERE public_id = ?", (public_id,)
+        ).fetchone()
+        return _user_dict(row) if row else None
+    finally:
+        conn.close()
+
+
+def get_user_by_id(user_id: int, path: Path | None = None) -> dict[str, Any] | None:
+    conn = _connect(path)
+    try:
+        row = conn.execute(
+            "SELECT * FROM users WHERE id = ?", (user_id,)
         ).fetchone()
         return _user_dict(row) if row else None
     finally:
@@ -456,6 +481,71 @@ def accept_invitation(plaintext: str, display_name: str | None = None,
             "SELECT * FROM users WHERE id = ?", (user_id,)
         ).fetchone()
         return (_user_dict(user), token)
+    finally:
+        conn.close()
+
+
+# ---------------------------------------------------------------------------
+# OAuth state (anti-CSRF + porteur d'identité pour le callback Strava)
+# ---------------------------------------------------------------------------
+
+def create_oauth_state(user_id: int, expires_at: str | None = None,
+                       path: Path | None = None) -> tuple[dict[str, Any], str]:
+    """Crée un ``state`` OAuth lié à ``user_id``. Retourne (row, state_clair)."""
+    conn = _connect(path)
+    try:
+        token = _generate_token()
+        cur = conn.execute(
+            "INSERT INTO oauth_states (user_id, state_hash, created_at, expires_at) "
+            "VALUES (?, ?, ?, ?)",
+            (user_id, _hash_token(token), _now(), expires_at),
+        )
+        conn.commit()
+        row = conn.execute(
+            "SELECT id, user_id, created_at, expires_at, used_at "
+            "FROM oauth_states WHERE id = ?",
+            (cur.lastrowid,),
+        ).fetchone()
+        state = {
+            "id": row["id"],
+            "user_id": row["user_id"],
+            "created_at": row["created_at"],
+            "expires_at": row["expires_at"],
+            "used_at": row["used_at"],
+        }
+        return (state, token)
+    finally:
+        conn.close()
+
+
+def consume_oauth_state(plaintext: str, path: Path | None = None) -> dict[str, Any] | None:
+    """Valide et consomme un ``state`` (usage unique). Retourne le user, ou None.
+
+    None si : state inconnu, déjà utilisé, ou expiré. Marque ``used_at`` au passage.
+    """
+    if not plaintext:
+        return None
+    state_hash = _hash_token(plaintext)
+    conn = _connect(path)
+    try:
+        row = conn.execute(
+            "SELECT id, user_id, expires_at, used_at FROM oauth_states "
+            "WHERE state_hash = ?",
+            (state_hash,),
+        ).fetchone()
+        if row is None or row["used_at"] is not None:
+            return None
+        if _is_expired(row["expires_at"]):
+            return None
+        conn.execute(
+            "UPDATE oauth_states SET used_at = ? WHERE id = ?",
+            (_now(), row["id"]),
+        )
+        conn.commit()
+        user = conn.execute(
+            "SELECT * FROM users WHERE id = ?", (row["user_id"],)
+        ).fetchone()
+        return _user_dict(user) if user else None
     finally:
         conn.close()
 

@@ -7,6 +7,7 @@ from threading import Lock
 from typing import Any
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
+from fastapi.responses import RedirectResponse
 
 from domestique_ai.api.deps import (
     get_athlete_context,
@@ -15,8 +16,8 @@ from domestique_ai.api.deps import (
 )
 from domestique_ai.api.logging import get_logger
 from domestique_ai.api.schemas import SyncResult, SyncStatus
-from domestique_ai.athlete_context import AthleteContext
-from domestique_ai.config import get_strava_credentials
+from domestique_ai.athlete_context import AthleteContext, context_for_athlete
+from domestique_ai.config import get_app_base_url, get_strava_credentials
 from domestique_ai.ingestion.strava import (
     StravaAuthError,
     StravaClient,
@@ -31,10 +32,15 @@ from domestique_ai.ingestion.strava import (
 from domestique_ai.ingestion.strava import (
     backfill_temperature as _backfill_temperature,
 )
+from domestique_ai.platform_db import consume_oauth_state, create_oauth_state
 from domestique_ai.processing.analyzer import recalculate_training_loads
 
 router = APIRouter(prefix="/api/strava", tags=["strava"])
 log = get_logger("strava")
+
+# Durée de vie d'un state OAuth (anti-CSRF) : large pour laisser l'athlète
+# s'authentifier sur Strava, mais borné.
+_OAUTH_STATE_TTL_MIN = 15
 
 # État de la dernière synchro lancée, INDEXÉ PAR athlète (public_id).
 _sync_state: dict[str, dict[str, Any]] = {}
@@ -169,6 +175,97 @@ def get_sync_status(
 ) -> SyncStatus:
     """État courant de la dernière synchro de l'athlète courant."""
     return SyncStatus(**_state_for(user["public_id"]))
+
+
+# ---------------------------------------------------------------------------
+# Onboarding OAuth Strava par athlète (palier 1c)
+# ---------------------------------------------------------------------------
+
+@router.get("/connection")
+def get_connection(
+    ctx: AthleteContext = Depends(get_athlete_context),  # noqa: B008
+) -> dict[str, bool]:
+    """Indique si l'athlète courant a connecté son Strava (fichier tokens présent)."""
+    return {"connected": ctx.tokens_path.exists()}
+
+
+@router.get("/authorize")
+def get_authorize(
+    user: dict = Depends(get_current_user),  # noqa: B008
+) -> dict[str, str]:
+    """Crée un state OAuth lié à l'athlète et renvoie l'URL d'autorisation Strava."""
+    client_id, _client_secret, redirect_uri = get_strava_credentials()
+    if not client_id:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="STRAVA_CLIENT_ID absent de l'environnement.",
+        )
+    expires_at = (
+        dt.datetime.now(dt.timezone.utc)
+        + dt.timedelta(minutes=_OAUTH_STATE_TTL_MIN)
+    ).isoformat()
+    _state_row, state = create_oauth_state(user["id"], expires_at=expires_at)
+    base_url = StravaClient.get_authorization_url(client_id, redirect_uri)
+    sep = "&" if "?" in base_url else "?"
+    return {"authorize_url": f"{base_url}{sep}state={state}"}
+
+
+@router.get("/callback")
+def get_callback(
+    background_tasks: BackgroundTasks,
+    code: str | None = None,
+    state: str | None = None,
+    error: str | None = None,
+) -> RedirectResponse:
+    """Callback OAuth Strava (navigation navigateur, exempté du Bearer).
+
+    Valide le ``state`` (→ athlète), échange le ``code`` contre des tokens,
+    les écrit dans l'espace de l'athlète, lance sa 1re sync, puis redirige le
+    navigateur vers le frontend. Toute erreur redirige vers ``?strava=error``
+    (on ne renvoie pas d'exception HTTP à un client navigateur).
+    """
+    base = get_app_base_url()
+    fail = RedirectResponse(url=f"{base}/?strava=error", status_code=302)
+
+    if error or not (code and state):
+        log.warning("Callback Strava : refus ou paramètres manquants (error=%s).", error)
+        return fail
+
+    user = consume_oauth_state(state)
+    if user is None:
+        log.warning("Callback Strava : state invalide/expiré/déjà utilisé.")
+        return fail
+
+    client_id, client_secret, redirect_uri = get_strava_credentials()
+    if not (client_id and client_secret):
+        log.error("Callback Strava : credentials d'app absents.")
+        return fail
+
+    try:
+        tokens = StravaClient.exchange_code_for_token(
+            client_id, client_secret, code, redirect_uri
+        )
+        client = StravaClient(
+            access_token=tokens["access_token"],
+            refresh_token=tokens.get("refresh_token"),
+            expires_at=tokens.get("expires_at", 0),
+            client_id=client_id,
+            client_secret=client_secret,
+        )
+        ctx = context_for_athlete(user)
+        client.save_tokens(ctx=ctx)
+    except Exception:  # noqa: BLE001 — échec d'échange → retour propre au front
+        log.exception("Callback Strava : échange du code échoué (user=%s).",
+                      user["public_id"][:8])
+        return fail
+
+    # 1re sync en arrière-plan (best-effort).
+    key = user["public_id"]
+    if _claim_sync(key):
+        background_tasks.add_task(_run_sync, ctx, key, user=user)
+
+    log.info("Strava connecté pour l'athlète %s — 1re sync lancée.", key[:8])
+    return RedirectResponse(url=f"{base}/?strava=connected", status_code=302)
 
 
 @router.post("/recalculate", response_model=SyncResult)

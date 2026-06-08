@@ -254,12 +254,26 @@ def get_lthr_pct() -> float:
 
 
 def get_strava_credentials() -> tuple[str | None, str | None, str]:
-    """Retourne (client_id, client_secret, redirect_uri) depuis .env."""
+    """Retourne (client_id, client_secret, redirect_uri) depuis .env.
+
+    En multi-tenant, ``STRAVA_REDIRECT_URI`` doit pointer sur le callback web
+    ``<host>/api/strava/callback`` (et être autorisé dans l'app Strava).
+    """
     return (
         os.getenv("STRAVA_CLIENT_ID"),
         os.getenv("STRAVA_CLIENT_SECRET"),
         os.getenv("STRAVA_REDIRECT_URI", "http://localhost/exchange_token"),
     )
+
+
+def get_app_base_url() -> str:
+    """Base URL publique de l'app, pour la redirection post-OAuth.
+
+    Override via DOMESTIQUE_AI_APP_BASE_URL. Défaut ``""`` → redirection
+    relative same-origin (``/?strava=connected``), suffisant quand le backend
+    sert le frontend. Sans slash final.
+    """
+    return os.getenv("DOMESTIQUE_AI_APP_BASE_URL", "").rstrip("/")
 
 
 def get_objective_path() -> Path:
