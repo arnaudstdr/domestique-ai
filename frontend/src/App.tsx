@@ -10,6 +10,7 @@ import Plan from "./pages/Plan";
 import Profil from "./pages/Profil";
 import Tendances from "./pages/Tendances";
 import Login from "./pages/Login";
+import AcceptInvite from "./pages/AcceptInvite";
 
 function AuthenticatedLayout() {
   return (
@@ -64,6 +65,7 @@ export default function App() {
   return (
     <Routes>
       <Route path="/login" element={<Login />} />
+      <Route path="/accept-invite" element={<AcceptInvite />} />
       <Route path="/*" element={<AuthenticatedLayout />} />
     </Routes>
   );

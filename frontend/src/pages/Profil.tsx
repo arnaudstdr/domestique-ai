@@ -1,9 +1,19 @@
 import { useEffect, useState } from "react";
-import { CalendarDays, Dna, Save, Settings, Target } from "lucide-react";
-import { api, ApiError } from "../api/client";
+import {
+  CalendarDays,
+  Dna,
+  Link2,
+  LogOut,
+  Save,
+  Settings,
+  Target,
+  UserRound,
+} from "lucide-react";
+import { api, ApiError, clearApiToken } from "../api/client";
 import type {
   Availability,
   DayAvailability,
+  MeResponse,
   Objective,
   Profile,
   WeekdayName,
@@ -59,10 +69,125 @@ export default function Profil() {
           sauvegarde indépendamment.
         </p>
       </header>
+      <StravaSection />
       <ProfileSection />
       <ObjectiveSection />
       <AvailabilitySection />
+      <AccountSection />
     </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// 0. Connexion Strava
+// ---------------------------------------------------------------------------
+
+function StravaSection() {
+  const [connected, setConnected] = useState<boolean | null>(null);
+  const [connecting, setConnecting] = useState(false);
+  const { push } = useToast();
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const strava = params.get("strava");
+    if (strava === "connected") {
+      push("Strava connecté. La première synchro est lancée.", "success");
+    } else if (strava === "error") {
+      push("Échec de la connexion Strava.", "error");
+    }
+    if (strava) window.history.replaceState({}, "", "/profil");
+    api.strava
+      .connection()
+      .then((c) => setConnected(c.connected))
+      .catch(() => setConnected(false));
+  }, []);
+
+  async function connect() {
+    setConnecting(true);
+    try {
+      const { authorize_url } = await api.strava.authorize();
+      window.location.assign(authorize_url);
+    } catch (err) {
+      const msg = err instanceof ApiError ? err.message : String(err);
+      push(`Strava : ${msg}`, "error");
+      setConnecting(false);
+    }
+  }
+
+  return (
+    <section className="card space-y-3">
+      <h3 className="flex items-center gap-2 text-sm font-medium text-gray-200">
+        <Link2 className="h-4 w-4 text-accent" strokeWidth={1.75} aria-hidden="true" />
+        Strava
+      </h3>
+      <p className="text-xs text-muted">
+        Connecte ton compte Strava pour importer tes activités et alimenter tes
+        métriques.
+      </p>
+      {connected === null ? (
+        <p className="text-xs text-muted">Vérification…</p>
+      ) : connected ? (
+        <p className="text-sm text-accent">
+          Compte Strava connecté — la synchro tourne automatiquement.
+        </p>
+      ) : (
+        <button
+          type="button"
+          onClick={connect}
+          disabled={connecting}
+          className="btn-primary w-full"
+        >
+          {connecting ? "Redirection…" : "Connecter Strava"}
+        </button>
+      )}
+    </section>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// 4. Compte
+// ---------------------------------------------------------------------------
+
+function AccountSection() {
+  const [me, setMe] = useState<MeResponse | null>(null);
+
+  useEffect(() => {
+    api.auth.me().then(setMe).catch(() => setMe(null));
+  }, []);
+
+  async function logout() {
+    try {
+      await api.auth.logout();
+    } catch {
+      // best-effort : on déconnecte localement même si l'appel échoue.
+    }
+    clearApiToken();
+    window.location.assign("/login");
+  }
+
+  return (
+    <section className="card space-y-3">
+      <h3 className="flex items-center gap-2 text-sm font-medium text-gray-200">
+        <UserRound className="h-4 w-4 text-accent" strokeWidth={1.75} aria-hidden="true" />
+        Compte
+      </h3>
+      {me ? (
+        <p className="text-sm text-gray-300">
+          {me.display_name || "Sans nom"}{" "}
+          <span className="text-muted">· {me.role}</span>
+        </p>
+      ) : (
+        <p className="text-xs text-muted">—</p>
+      )}
+      <button
+        type="button"
+        onClick={logout}
+        className="btn-ghost flex w-full items-center justify-center gap-2"
+      >
+        <LogOut className="h-4 w-4" strokeWidth={1.75} aria-hidden="true" />
+        Se déconnecter
+      </button>
+    </section>
   );
 }
 

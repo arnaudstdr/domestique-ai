@@ -1,6 +1,7 @@
 // Fetch wrapper sans dépendance externe : base URL relative, erreurs typées.
 
 import type {
+  AcceptInviteResponse,
   ActivitiesList,
   ActivityDetail,
   ActivityFilters,
@@ -10,6 +11,7 @@ import type {
   DailyBriefResponse,
   FtpProjectionResponse,
   LoadResponse,
+  MeResponse,
   MorningEntry,
   MorningResponse,
   Objective,
@@ -20,6 +22,8 @@ import type {
   Profile,
   RideVolumeResponse,
   SimilarActivitiesResponse,
+  StravaAuthorize,
+  StravaConnection,
   SyncResult,
   SyncStatus,
   TodayWorkoutResponse,
@@ -199,6 +203,8 @@ export const api = {
   strava: {
     sync: () => http<SyncStatus>(`/api/strava/sync`, { method: "POST" }),
     syncStatus: () => http<SyncStatus>(`/api/strava/sync-status`),
+    connection: () => http<StravaConnection>(`/api/strava/connection`),
+    authorize: () => http<StravaAuthorize>(`/api/strava/authorize`),
     recalculate: () =>
       http<SyncResult>(`/api/strava/recalculate`, { method: "POST" }),
     backfillHrZones: () =>
@@ -266,6 +272,18 @@ export const api = {
       const filename = match ? match[1] : `plan_${id}.ics`;
       return { blob: await response.blob(), filename };
     },
+  },
+  auth: {
+    me: () => http<MeResponse>(`/api/auth/me`),
+    acceptInvite: (inviteToken: string, displayName?: string | null) =>
+      http<AcceptInviteResponse>(`/api/auth/accept-invite`, {
+        method: "POST",
+        body: JSON.stringify({
+          invite_token: inviteToken,
+          display_name: displayName || null,
+        }),
+      }),
+    logout: () => http<{ status: string }>(`/api/auth/logout`, { method: "POST" }),
   },
 };
 
@@ -441,91 +459,4 @@ export function streamLlmPlan(
   signal?: AbortSignal,
 ): Promise<void> {
   return consumeLlmPlanSse(body, onEvent, signal);
-}
-
-// ---- Garmin push -------------------------------------------------------------
-
-export type GarminPushEvent =
-  | { type: "start"; total: number }
-  | {
-      type: "progress";
-      index: number;
-      total: number;
-      workout: { date: string; name: string };
-    }
-  | {
-      type: "result";
-      workout: { date: string; name: string };
-      workout_id: number | null;
-      scheduled: boolean;
-      url?: string;
-      error?: string;
-    }
-  | { type: "error"; value: string }
-  | { type: "done"; uploaded: number; errors: number };
-
-async function consumeGarminSse(
-  path: string,
-  body: unknown,
-  onEvent: (event: GarminPushEvent) => void,
-  signal?: AbortSignal,
-): Promise<void> {
-  const response = await fetch(path, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Accept: "text/event-stream",
-      ...authHeaders(),
-    },
-    body: JSON.stringify(body),
-    signal,
-  });
-  if (response.status === 401) {
-    handleUnauthorized();
-    throw new ApiError(401, "Unauthorized");
-  }
-  if (!response.ok || !response.body) {
-    throw new ApiError(response.status, response.statusText);
-  }
-
-  const reader = response.body.getReader();
-  const decoder = new TextDecoder();
-  let buffer = "";
-
-  while (true) {
-    const { value, done } = await reader.read();
-    if (done) break;
-    buffer += decoder.decode(value, { stream: true }).replace(/\r\n/g, "\n");
-    let idx;
-    while ((idx = buffer.indexOf("\n\n")) !== -1) {
-      const chunk = buffer.slice(0, idx);
-      buffer = buffer.slice(idx + 2);
-      const dataLine = chunk
-        .split("\n")
-        .find((l) => l.startsWith("data:"))
-        ?.replace(/^data:\s?/, "");
-      if (!dataLine) continue;
-      try {
-        const event = JSON.parse(dataLine) as GarminPushEvent;
-        onEvent(event);
-        if (event.type === "done") return;
-      } catch {
-        // ignore malformed frames
-      }
-    }
-  }
-}
-
-export function streamGarminPush(
-  planId: number,
-  schedule: boolean,
-  onEvent: (event: GarminPushEvent) => void,
-  signal?: AbortSignal,
-): Promise<void> {
-  return consumeGarminSse(
-    `/api/plan/${planId}/push-garmin`,
-    { schedule },
-    onEvent,
-    signal,
-  );
 }

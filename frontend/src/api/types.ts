@@ -389,3 +389,25 @@ export interface TodayWorkoutResponse {
   tsb: number | null;
   tsb_zone: string | null;
 }
+
+// ---- Auth / comptes (multi-tenant) ------------------------------------------
+
+export interface MeResponse {
+  public_id: string;
+  role: string;
+  display_name: string | null;
+}
+
+export interface AcceptInviteResponse {
+  session_token: string;
+  public_id: string;
+  role: string;
+}
+
+export interface StravaConnection {
+  connected: boolean;
+}
+
+export interface StravaAuthorize {
+  authorize_url: string;
+}
