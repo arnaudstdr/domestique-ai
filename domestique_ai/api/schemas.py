@@ -398,6 +398,21 @@ class PlanCreateRequest(BaseModel):
     focus: str | None = None
 
 
+class PrescriptionCreate(BaseModel):
+    date: str
+    kind: Literal["recovery", "endurance", "tempo", "intervals"]
+    duration_min: int = Field(ge=20, le=600)
+    notes: str = ""
+
+
+class PrescriptionOut(BaseModel):
+    id: int
+    date: str
+    created_at: str
+    created_by: str | None = None
+    workout: WorkoutSchema
+
+
 class PlanPushGarminRequest(BaseModel):
     schedule: bool = True
 

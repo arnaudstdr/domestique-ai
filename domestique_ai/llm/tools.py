@@ -419,6 +419,7 @@ def get_planned_workout(date: str, *,
     (régénération de plan = ancien plan obsolète).
     """
     from domestique_ai.llm.plan_storage import list_plans, load_plan
+    from domestique_ai.llm.prescription_storage import get_prescription_for_date
 
     ctx = ctx or context_from_env()
     try:
@@ -427,6 +428,16 @@ def get_planned_workout(date: str, *,
         return {
             "available": False,
             "reason": f"date invalide: {date!r}. Format attendu: YYYY-MM-DD.",
+        }
+
+    # Une séance prescrite par le coach prime sur le plan généré ce jour-là.
+    prescribed = get_prescription_for_date(target.isoformat(), db_path=ctx.db_path)
+    if prescribed is not None:
+        return {
+            "available": True,
+            "source": "prescription",
+            "prescribed_by": "coach",
+            "planned_workout": prescribed.to_dict(),
         }
 
     # Tri par id DESC : la précision seconde de `created_at` peut produire des
@@ -446,6 +457,7 @@ def get_planned_workout(date: str, *,
         match = next((w for w in workouts if w.date == target.isoformat()), None)
         base = {
             "available": True,
+            "source": "plan",
             "plan_id": meta["id"],
             "plan_target_date": meta.get("target_date"),
             "plan_target_event_type": meta.get("target_event_type"),

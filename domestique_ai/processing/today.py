@@ -217,7 +217,15 @@ def _weeks_to_event(objective: dict[str, Any] | None, today: _dt.date) -> int | 
 
 
 def _planned_workout_for(today: _dt.date, ctx: AthleteContext) -> dict[str, Any] | None:
-    """Cherche dans les plans persistés une séance prévue exactement à `today`."""
+    """Séance prévue exactement à `today` : prescription coach prioritaire, sinon plan."""
+    # Une séance prescrite par le coach prime sur le plan généré ce jour-là.
+    try:
+        from domestique_ai.llm.prescription_storage import get_prescription_for_date
+        prescribed = get_prescription_for_date(today.isoformat(), db_path=ctx.db_path)
+        if prescribed is not None:
+            return prescribed.to_dict()
+    except Exception:  # noqa: BLE001 — best-effort, ne doit rien casser
+        pass
     try:
         from domestique_ai.llm.plan_storage import list_plans, load_plan
     except Exception:  # noqa: BLE001 — un import qui échoue ne doit rien casser

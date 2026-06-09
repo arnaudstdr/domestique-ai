@@ -42,7 +42,13 @@ from domestique_ai.api.routers import (
     plan as plan_router,
 )
 from domestique_ai.api.routers import (
+    prescriptions as prescriptions_router,
+)
+from domestique_ai.api.routers import (
     profile as profile_router,
+)
+from domestique_ai.api.routers import (
+    roster as roster_router,
 )
 from domestique_ai.api.routers import (
     strava as strava_router,
@@ -250,6 +256,8 @@ app.include_router(availability_router.router)
 app.include_router(strava_router.router)
 app.include_router(coach_router.router)
 app.include_router(plan_router.router)
+app.include_router(roster_router.router)
+app.include_router(prescriptions_router.router)
 
 
 @app.get("/api/health", tags=["meta"])

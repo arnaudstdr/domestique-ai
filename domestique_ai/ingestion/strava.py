@@ -403,6 +403,19 @@ def init_db(db_path: Path | None = None, *,
             "ON training_plans(created_at DESC)"
         )
         conn.execute("""
+            CREATE TABLE IF NOT EXISTS prescriptions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                date TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                created_by TEXT,
+                payload TEXT NOT NULL
+            )
+        """)
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_prescriptions_date "
+            "ON prescriptions(date)"
+        )
+        conn.execute("""
             CREATE TABLE IF NOT EXISTS today_suggestions (
                 date TEXT NOT NULL,
                 objective_hash TEXT NOT NULL,
