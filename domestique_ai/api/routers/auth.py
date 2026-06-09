@@ -19,7 +19,9 @@ from domestique_ai.athlete_context import context_for_athlete
 from domestique_ai.platform_db import (
     InvitationError,
     accept_invitation,
+    consume_reconnect_token,
     create_invitation,
+    create_session,
     list_athletes_for_coach,
     list_invitations,
     revoke_invitation,
@@ -87,6 +89,10 @@ class SessionTokenOut(BaseModel):
     session_token: str
     public_id: str
     role: str
+
+
+class ReconnectRequest(BaseModel):
+    token: str
 
 
 class AthleteSummary(BaseModel):
@@ -206,6 +212,25 @@ def accept(body: AcceptInvite) -> SessionTokenOut:
             status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
         ) from exc
     _provision_athlete_space(user)
+    return SessionTokenOut(
+        session_token=token, public_id=user["public_id"], role=user["role"]
+    )
+
+
+@router.post("/reconnect", response_model=SessionTokenOut)
+def reconnect(body: ReconnectRequest) -> SessionTokenOut:
+    """Échange un token de reconnexion (usage unique) contre une nouvelle session.
+
+    Public (exempté du Bearer) : l'athlète déconnecté ouvre le lien fourni par
+    son coach et récupère l'accès à SON compte existant.
+    """
+    user = consume_reconnect_token(body.token)
+    if user is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Lien de reconnexion invalide, expiré ou déjà utilisé.",
+        )
+    _session, token = create_session(user["id"])
     return SessionTokenOut(
         session_token=token, public_id=user["public_id"], role=user["role"]
     )

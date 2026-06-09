@@ -73,6 +73,7 @@ class BearerAuthMiddleware:
     _EXEMPT_API_PATHS = {
         "/api/health",
         "/api/auth/accept-invite",
+        "/api/auth/reconnect",
         "/api/strava/callback",
     }
 

@@ -150,6 +150,20 @@ def init_platform_db(path: Path | None = None) -> None:
             "ON oauth_states(state_hash)"
         )
         conn.execute("""
+            CREATE TABLE IF NOT EXISTS reconnect_tokens (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                token_hash TEXT NOT NULL UNIQUE,
+                created_at TEXT NOT NULL,
+                expires_at TEXT,
+                used_at TEXT
+            )
+        """)
+        conn.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_reconnect_tokens_hash "
+            "ON reconnect_tokens(token_hash)"
+        )
+        conn.execute("""
             CREATE TABLE IF NOT EXISTS coach_athlete (
                 coach_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
                 athlete_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -567,6 +581,74 @@ def consume_oauth_state(plaintext: str, path: Path | None = None) -> dict[str, A
             return None
         conn.execute(
             "UPDATE oauth_states SET used_at = ? WHERE id = ?",
+            (_now(), row["id"]),
+        )
+        conn.commit()
+        user = conn.execute(
+            "SELECT * FROM users WHERE id = ?", (row["user_id"],)
+        ).fetchone()
+        return _user_dict(user) if user else None
+    finally:
+        conn.close()
+
+
+# ---------------------------------------------------------------------------
+# Tokens de reconnexion (athlète déconnecté → nouvelle session, usage unique)
+# ---------------------------------------------------------------------------
+
+
+def create_reconnect_token(user_id: int, expires_at: str | None = None,
+                           path: Path | None = None) -> tuple[dict[str, Any], str]:
+    """Crée un token de reconnexion lié à ``user_id``. Retourne (row, token_clair)."""
+    conn = _connect(path)
+    try:
+        token = _generate_token()
+        cur = conn.execute(
+            "INSERT INTO reconnect_tokens (user_id, token_hash, created_at, expires_at) "
+            "VALUES (?, ?, ?, ?)",
+            (user_id, _hash_token(token), _now(), expires_at),
+        )
+        conn.commit()
+        row = conn.execute(
+            "SELECT id, user_id, created_at, expires_at, used_at "
+            "FROM reconnect_tokens WHERE id = ?",
+            (cur.lastrowid,),
+        ).fetchone()
+        return (
+            {
+                "id": row["id"],
+                "user_id": row["user_id"],
+                "created_at": row["created_at"],
+                "expires_at": row["expires_at"],
+                "used_at": row["used_at"],
+            },
+            token,
+        )
+    finally:
+        conn.close()
+
+
+def consume_reconnect_token(plaintext: str, path: Path | None = None) -> dict[str, Any] | None:
+    """Valide et consomme un token de reconnexion (usage unique). Retourne le user.
+
+    None si : token inconnu, déjà utilisé, ou expiré. Marque ``used_at`` au passage.
+    """
+    if not plaintext:
+        return None
+    token_hash = _hash_token(plaintext)
+    conn = _connect(path)
+    try:
+        row = conn.execute(
+            "SELECT id, user_id, expires_at, used_at FROM reconnect_tokens "
+            "WHERE token_hash = ?",
+            (token_hash,),
+        ).fetchone()
+        if row is None or row["used_at"] is not None:
+            return None
+        if _is_expired(row["expires_at"]):
+            return None
+        conn.execute(
+            "UPDATE reconnect_tokens SET used_at = ? WHERE id = ?",
             (_now(), row["id"]),
         )
         conn.commit()

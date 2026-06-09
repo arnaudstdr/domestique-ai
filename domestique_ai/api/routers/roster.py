@@ -8,6 +8,8 @@ passent **pas** par la garde d'impersonation lecture seule (``?athlete=``) — l
 
 from __future__ import annotations
 
+import datetime as dt
+
 from fastapi import APIRouter, Depends, HTTPException, status
 
 from domestique_ai.api.deps import require_coach
@@ -17,9 +19,11 @@ from domestique_ai.api.schemas import (
     PlanDetail,
     PrescriptionCreate,
     PrescriptionOut,
+    ReconnectLink,
     WorkoutSchema,
 )
 from domestique_ai.athlete_context import AthleteContext, context_for_athlete
+from domestique_ai.config import get_app_base_url
 from domestique_ai.llm.availability import AvailabilityError
 from domestique_ai.llm.plan_storage import (
     PlanGenerationError,
@@ -32,10 +36,17 @@ from domestique_ai.llm.prescription_storage import (
     list_prescriptions,
     save_prescription,
 )
-from domestique_ai.platform_db import get_user_by_public_id, list_athletes_for_coach
+from domestique_ai.platform_db import (
+    create_reconnect_token,
+    get_user_by_public_id,
+    list_athletes_for_coach,
+)
 
 router = APIRouter(prefix="/api/roster", tags=["roster"])
 log = get_logger("roster")
+
+# Fenêtre de validité d'un lien de reconnexion (envoyé hors bande, ouvert plus tard).
+_RECONNECT_TTL_MIN = 24 * 60
 
 
 def _athlete_ctx(public_id: str, coach: dict) -> tuple[dict, AthleteContext]:
@@ -116,6 +127,38 @@ def remove_prescription(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Prescription {pid} introuvable.",
         )
+
+
+@router.post(
+    "/athletes/{public_id}/reconnect-link",
+    response_model=ReconnectLink,
+    status_code=status.HTTP_201_CREATED,
+)
+def create_reconnect_link(
+    public_id: str,
+    coach: dict = Depends(require_coach),  # noqa: B008
+) -> ReconnectLink:
+    """Génère un lien de reconnexion à usage unique pour un athlète du roster.
+
+    L'athlète l'ouvre (``/reconnect?token=…``) pour récupérer une nouvelle
+    session sur SON compte existant — utile s'il s'est déconnecté (sa session
+    précédente est révoquée et le lien d'invitation est déjà consommé).
+    """
+    target, _ctx = _athlete_ctx(public_id, coach)
+    expires_at = (
+        dt.datetime.now(dt.timezone.utc) + dt.timedelta(minutes=_RECONNECT_TTL_MIN)
+    ).isoformat()
+    _row, token = create_reconnect_token(target["id"], expires_at=expires_at)
+    base = get_app_base_url()
+    log.info(
+        "Coach %s génère un lien de reconnexion pour l'athlète %s",
+        coach["public_id"][:8],
+        public_id[:8],
+    )
+    return ReconnectLink(
+        reconnect_url=f"{base}/reconnect?token={token}",
+        expires_at=expires_at,
+    )
 
 
 @router.post(

@@ -413,6 +413,11 @@ class PrescriptionOut(BaseModel):
     workout: WorkoutSchema
 
 
+class ReconnectLink(BaseModel):
+    reconnect_url: str
+    expires_at: str | None = None
+
+
 class PlanPushGarminRequest(BaseModel):
     schedule: bool = True
 

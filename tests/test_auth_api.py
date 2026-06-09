@@ -16,6 +16,7 @@ from fastapi.testclient import TestClient
 from domestique_ai.api.auth import BearerAuthMiddleware
 from domestique_ai.api.deps import require_coach
 from domestique_ai.api.routers import auth as auth_router
+from domestique_ai.api.routers import roster as roster_router
 
 _LEGACY = "legacy-token-1234"
 
@@ -24,6 +25,7 @@ def _make_app(token: str | None) -> FastAPI:
     app = FastAPI()
     app.add_middleware(BearerAuthMiddleware, token=token)
     app.include_router(auth_router.router)
+    app.include_router(roster_router.router)
 
     @app.get("/api/data", dependencies=[Depends(require_coach)])  # noqa: B008
     def _data() -> dict[str, bool]:
@@ -174,6 +176,59 @@ def test_logout_revokes_session(client: TestClient) -> None:
     assert out.status_code == 200
     # Token révoqué → 401.
     assert client.get("/api/auth/me", headers=_bearer(session_token)).status_code == 401
+
+
+# ---- Reconnexion (athlète déconnecté → nouvelle session) --------------------
+
+
+def test_reconnect_flow_after_logout(client: TestClient) -> None:
+    # Un athlète accepte une invitation puis se déconnecte (session révoquée).
+    session_token = _invite_and_accept(client, role="athlete")
+    pid = client.get("/api/auth/me", headers=_bearer(session_token)).json()["public_id"]
+    client.post("/api/auth/logout", headers=_bearer(session_token))
+    assert client.get("/api/auth/me", headers=_bearer(session_token)).status_code == 401
+
+    # Le coach génère un lien de reconnexion pour cet athlète.
+    link = client.post(
+        f"/api/roster/athletes/{pid}/reconnect-link", headers=_bearer(_LEGACY)
+    )
+    assert link.status_code == 201, link.text
+    url = link.json()["reconnect_url"]
+    token = url.split("token=", 1)[1]
+
+    # L'athlète échange le token (public) contre une NOUVELLE session valide.
+    rec = client.post("/api/auth/reconnect", json={"token": token})
+    assert rec.status_code == 200, rec.text
+    new_session = rec.json()["session_token"]
+    assert rec.json()["public_id"] == pid
+    me = client.get("/api/auth/me", headers=_bearer(new_session))
+    assert me.status_code == 200 and me.json()["public_id"] == pid
+
+
+def test_reconnect_token_is_single_use(client: TestClient) -> None:
+    session_token = _invite_and_accept(client, role="athlete")
+    pid = client.get("/api/auth/me", headers=_bearer(session_token)).json()["public_id"]
+    url = client.post(
+        f"/api/roster/athletes/{pid}/reconnect-link", headers=_bearer(_LEGACY)
+    ).json()["reconnect_url"]
+    token = url.split("token=", 1)[1]
+    assert client.post("/api/auth/reconnect", json={"token": token}).status_code == 200
+    # 2e usage refusé.
+    assert client.post("/api/auth/reconnect", json={"token": token}).status_code == 400
+
+
+def test_reconnect_unknown_token_fails(client: TestClient) -> None:
+    assert client.post("/api/auth/reconnect", json={"token": "nope"}).status_code == 400
+
+
+def test_reconnect_link_forbidden_for_athlete(client: TestClient) -> None:
+    session_token = _invite_and_accept(client, role="athlete")
+    pid = client.get("/api/auth/me", headers=_bearer(session_token)).json()["public_id"]
+    # Un athlète ne peut pas générer de lien de reconnexion.
+    r = client.post(
+        f"/api/roster/athletes/{pid}/reconnect-link", headers=_bearer(session_token)
+    )
+    assert r.status_code == 403
 
 
 # ---- Mode auth-off (dev) ----------------------------------------------------
