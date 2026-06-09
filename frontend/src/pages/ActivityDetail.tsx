@@ -22,6 +22,7 @@ import SimilarActivities from "../components/SimilarActivities";
 import ZoneBar from "../components/ZoneBar";
 import { CHART, axisProps, tooltipStyle } from "../chartTheme";
 import { useToast } from "../hooks/useToast";
+import { useViewing } from "../hooks/useViewing";
 
 const ANALYSIS_PROMPT = (sid: number) =>
   `Analyse l'activité Strava avec strava_id=${sid}. ` +
@@ -85,6 +86,7 @@ export default function ActivityDetail() {
   const [analysis, setAnalysis] = useState<AnalysisState | null>(null);
   const analysisRef = useRef<AnalysisState>(EMPTY_ANALYSIS);
   const { push } = useToast();
+  const viewing = useViewing();
 
   async function runAnalysis() {
     if (analyzing || !detail) return;
@@ -270,22 +272,24 @@ export default function ActivityDetail() {
 
       {similar && <SimilarActivities data={similar} />}
 
-      <button
-        onClick={runAnalysis}
-        disabled={analyzing}
-        className="btn-primary w-full"
-      >
-        {analyzing && !analysis?.content ? (
-          "Le coach analyse cette sortie…"
-        ) : analyzing ? (
-          "Réception de la réponse…"
-        ) : (
-          <span className="inline-flex items-center justify-center gap-2">
-            <Bot className="h-4 w-4" strokeWidth={1.75} aria-hidden="true" />
-            {analysis ? "Relancer l'analyse" : "Analyser cette sortie"}
-          </span>
-        )}
-      </button>
+      {!viewing && (
+        <button
+          onClick={runAnalysis}
+          disabled={analyzing}
+          className="btn-primary w-full"
+        >
+          {analyzing && !analysis?.content ? (
+            "Le coach analyse cette sortie…"
+          ) : analyzing ? (
+            "Réception de la réponse…"
+          ) : (
+            <span className="inline-flex items-center justify-center gap-2">
+              <Bot className="h-4 w-4" strokeWidth={1.75} aria-hidden="true" />
+              {analysis ? "Relancer l'analyse" : "Analyser cette sortie"}
+            </span>
+          )}
+        </button>
+      )}
 
       {analysis && (analyzing || analysis.content || analysis.thinking) && (
         <div className="space-y-2">

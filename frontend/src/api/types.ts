@@ -411,3 +411,27 @@ export interface StravaConnection {
 export interface StravaAuthorize {
   authorize_url: string;
 }
+
+// ---- Roster coach (liste d'athlètes + invitations) --------------------------
+
+export interface AthleteSummary {
+  public_id: string;
+  display_name: string | null;
+  strava_connected: boolean;
+  last_activity_date: string | null;
+  n_activities: number;
+}
+
+export interface InvitationCreated {
+  role: string;
+  invite_token: string;
+  invite_url: string;
+  expires_at: string | null;
+}
+
+export interface InvitationOut {
+  role: string;
+  status: string;
+  created_at: string;
+  accepted_at: string | null;
+}

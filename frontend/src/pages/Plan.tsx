@@ -18,6 +18,7 @@ import {
 import type { Objective, PlanDetail, PlanSummary, Workout } from "../api/types";
 import PlanCalendar from "../components/PlanCalendar";
 import { useToast } from "../hooks/useToast";
+import { useViewing } from "../hooks/useViewing";
 
 type GenerationMode = "classic" | "llm";
 
@@ -112,6 +113,7 @@ export default function Plan() {
   const [mode, setMode] = useState<GenerationMode>("classic");
   const [llmStream, setLlmStream] = useState<LlmStreamState>(EMPTY_LLM_STREAM);
   const { push } = useToast();
+  const viewing = useViewing();
 
   async function refreshList(autoSelect = true): Promise<void> {
     try {
@@ -365,6 +367,7 @@ export default function Plan() {
         )}
       </div>
 
+      {!viewing && (
       <div className="card space-y-3">
         <h2 className="flex items-center gap-2 font-display text-lg font-bold tracking-tight">
           <ClipboardList className="h-4 w-4 text-accent" strokeWidth={1.75} aria-hidden="true" />
@@ -455,6 +458,7 @@ export default function Plan() {
           )}
         </button>
       </div>
+      )}
 
       {(generating && mode === "llm") || llmStream.weeks.length > 0 || llmStream.error ? (
         <div className="card space-y-2">
@@ -584,17 +588,19 @@ export default function Plan() {
                   </span>
                 )}
               </button>
-              <button
-                onClick={remove}
-                disabled={deleting || selectedId == null}
-                className="rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-2 text-sm text-red-400 hover:bg-red-500/20 disabled:opacity-50"
-              >
-                {deleting ? (
-                  "…"
-                ) : (
-                  <Trash2 className="h-4 w-4" strokeWidth={1.75} aria-hidden="true" />
-                )}
-              </button>
+              {!viewing && (
+                <button
+                  onClick={remove}
+                  disabled={deleting || selectedId == null}
+                  className="rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-2 text-sm text-red-400 hover:bg-red-500/20 disabled:opacity-50"
+                >
+                  {deleting ? (
+                    "…"
+                  ) : (
+                    <Trash2 className="h-4 w-4" strokeWidth={1.75} aria-hidden="true" />
+                  )}
+                </button>
+              )}
             </div>
           </>
         )}

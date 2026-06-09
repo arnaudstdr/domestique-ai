@@ -5,11 +5,14 @@ import type {
   ActivitiesList,
   ActivityDetail,
   ActivityFilters,
+  AthleteSummary,
   Availability,
   CoachMessage,
   CoachSession,
   DailyBriefResponse,
   FtpProjectionResponse,
+  InvitationCreated,
+  InvitationOut,
   LoadResponse,
   MeResponse,
   MorningEntry,
@@ -33,6 +36,11 @@ import type {
 
 const API_BASE = "";
 const TOKEN_KEY = "domestique_api_token";
+const VIEWING_KEY = "domestique_viewing_athlete";
+const VIEWING_NAME_KEY = "domestique_viewing_athlete_name";
+
+/** Événement émis quand l'athlète consulté change (pour rafraîchir l'UI). */
+export const VIEWING_EVENT = "domestique:viewing-changed";
 
 export class ApiError extends Error {
   status: number;
@@ -72,6 +80,58 @@ function authHeaders(): Record<string, string> {
   return token ? { Authorization: `Bearer ${token}` } : {};
 }
 
+// --- Consultation d'un athlète par un coach (impersonation lecture seule) -----
+// Quand un coach « entre » dans un athlète, son public_id est mémorisé ici et
+// propagé à toutes les requêtes data via le query param `?athlete=`.
+
+export function getViewingAthlete(): string | null {
+  try {
+    return localStorage.getItem(VIEWING_KEY);
+  } catch {
+    return null;
+  }
+}
+
+export function getViewingAthleteName(): string | null {
+  try {
+    return localStorage.getItem(VIEWING_NAME_KEY);
+  } catch {
+    return null;
+  }
+}
+
+export function setViewingAthlete(publicId: string, name?: string | null): void {
+  try {
+    localStorage.setItem(VIEWING_KEY, publicId);
+    if (name) localStorage.setItem(VIEWING_NAME_KEY, name);
+    else localStorage.removeItem(VIEWING_NAME_KEY);
+  } catch {
+    // no-op
+  }
+  window.dispatchEvent(new Event(VIEWING_EVENT));
+}
+
+export function clearViewingAthlete(): void {
+  try {
+    localStorage.removeItem(VIEWING_KEY);
+    localStorage.removeItem(VIEWING_NAME_KEY);
+  } catch {
+    // no-op
+  }
+  window.dispatchEvent(new Event(VIEWING_EVENT));
+}
+
+/**
+ * Ajoute `?athlete=<public_id>` au chemin quand un athlète est consulté, sauf
+ * pour les routes d'identité (`/api/auth/*`) qui restent sur le compte courant.
+ */
+function withAthlete(path: string): string {
+  const viewing = getViewingAthlete();
+  if (!viewing || path.startsWith("/api/auth/")) return path;
+  const sep = path.includes("?") ? "&" : "?";
+  return `${path}${sep}athlete=${encodeURIComponent(viewing)}`;
+}
+
 /**
  * Intercepte les 401 : nettoie le token et redirige vers /login.
  * Conserve le chemin courant en query (`?next=...`) pour rebondir après auth.
@@ -86,7 +146,7 @@ function handleUnauthorized(): void {
 }
 
 async function http<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(`${API_BASE}${path}`, {
+  const response = await fetch(`${API_BASE}${withAthlete(path)}`, {
     headers: {
       "Content-Type": "application/json",
       ...authHeaders(),
@@ -241,7 +301,7 @@ export const api = {
     remove: (id: number) =>
       http<void>(`/api/plan/${id}`, { method: "DELETE" }),
     exportZip: async (id: number): Promise<{ blob: Blob; filename: string }> => {
-      const response = await fetch(`${API_BASE}/api/plan/${id}/export.zip`, {
+      const response = await fetch(`${API_BASE}${withAthlete(`/api/plan/${id}/export.zip`)}`, {
         headers: { ...authHeaders() },
       });
       if (response.status === 401) {
@@ -257,7 +317,7 @@ export const api = {
       return { blob: await response.blob(), filename };
     },
     exportIcs: async (id: number): Promise<{ blob: Blob; filename: string }> => {
-      const response = await fetch(`${API_BASE}/api/plan/${id}/export.ics`, {
+      const response = await fetch(`${API_BASE}${withAthlete(`/api/plan/${id}/export.ics`)}`, {
         headers: { ...authHeaders() },
       });
       if (response.status === 401) {
@@ -284,6 +344,19 @@ export const api = {
         }),
       }),
     logout: () => http<{ status: string }>(`/api/auth/logout`, { method: "POST" }),
+    athletes: () => http<AthleteSummary[]>(`/api/auth/athletes`),
+    createInvitation: (
+      role: "coach" | "athlete" = "athlete",
+      expiresInDays?: number | null,
+    ) =>
+      http<InvitationCreated>(`/api/auth/invitations`, {
+        method: "POST",
+        body: JSON.stringify({
+          role,
+          expires_in_days: expiresInDays ?? null,
+        }),
+      }),
+    listInvitations: () => http<InvitationOut[]>(`/api/auth/invitations`),
   },
 };
 
