@@ -8,9 +8,10 @@ import time
 from collections.abc import AsyncGenerator
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status
 from sse_starlette.sse import EventSourceResponse
 
+from domestique_ai.api.deps import get_athlete_context
 from domestique_ai.api.logging import get_logger
 from domestique_ai.api.schemas import (
     CoachAnalyzeRequest,
@@ -21,6 +22,7 @@ from domestique_ai.api.schemas import (
     TodayWorkoutResponse,
     WorkoutSchema,
 )
+from domestique_ai.athlete_context import AthleteContext
 from domestique_ai.llm.coach import run_turn_stream
 from domestique_ai.llm.conversations import (
     append_message,
@@ -45,9 +47,12 @@ def _sse_event(event_type: str, payload: dict[str, Any] | str) -> dict[str, str]
 
 
 @router.get("/sessions", response_model=list[CoachSession])
-def get_sessions(limit: int = 20) -> list[CoachSession]:
+def get_sessions(
+    limit: int = 20,
+    ctx: AthleteContext = Depends(get_athlete_context),  # noqa: B008
+) -> list[CoachSession]:
     """Liste des sessions persistées, plus récentes en premier."""
-    sessions = list_sessions(limit=limit)
+    sessions = list_sessions(limit=limit, db_path=ctx.db_path)
     return [
         CoachSession(
             session_id=s["session_id"],
@@ -61,9 +66,12 @@ def get_sessions(limit: int = 20) -> list[CoachSession]:
 
 
 @router.get("/sessions/{session_id}/messages", response_model=list[CoachMessage])
-def get_session_messages(session_id: str) -> list[CoachMessage]:
+def get_session_messages(
+    session_id: str,
+    ctx: AthleteContext = Depends(get_athlete_context),  # noqa: B008
+) -> list[CoachMessage]:
     """Renvoie tous les messages user / assistant d'une session."""
-    raw = load_session(session_id)
+    raw = load_session(session_id, db_path=ctx.db_path)
     out: list[CoachMessage] = []
     for msg in raw:
         role = msg.get("role")
@@ -84,16 +92,20 @@ def get_session_messages(session_id: str) -> list[CoachMessage]:
 
 
 @router.delete("/sessions/{session_id}", status_code=status.HTTP_204_NO_CONTENT)
-def remove_session(session_id: str) -> None:
+def remove_session(
+    session_id: str,
+    ctx: AthleteContext = Depends(get_athlete_context),  # noqa: B008
+) -> None:
     """Supprime une session et tous ses messages."""
     log.info("Suppression session %s", session_id[:8])
-    delete_session(session_id)
+    delete_session(session_id, db_path=ctx.db_path)
 
 
 async def _coach_event_stream(
     label: str,
     user_message: str,
     history: list[dict[str, Any]] | None,
+    ctx: AthleteContext,
     *,
     session_id: str | None = None,
     persist_to_session: str | None = None,
@@ -122,7 +134,7 @@ async def _coach_event_stream(
 
     final_payload: dict[str, Any] | None = None
     try:
-        async for ev in run_turn_stream(user_message, history):
+        async for ev in run_turn_stream(user_message, history, ctx=ctx):
             if ev["type"] == "final":
                 final_payload = ev
                 continue
@@ -162,21 +174,22 @@ async def _coach_event_stream(
                     "thinking": final_payload["thinking"],
                     "tool_calls": final_payload["tool_trace"],
                 },
+                db_path=ctx.db_path,
             )
             # Génère un titre court en arrière-plan après le 1ᵉʳ échange.
             # `asyncio.create_task` ne bloque pas le yield "done" : l'utilisateur
             # voit sa réponse tout de suite, le titre arrive ~5 s plus tard via
             # le poll régulier de /api/coach/sessions côté front.
-            if get_session_title(persist_to_session) is None:
-                asyncio.create_task(_generate_title_safely(persist_to_session))
+            if get_session_title(persist_to_session, db_path=ctx.db_path) is None:
+                asyncio.create_task(_generate_title_safely(persist_to_session, ctx))
 
     yield _sse_event("done", {"type": "done"})
 
 
-async def _generate_title_safely(session_id: str) -> None:
+async def _generate_title_safely(session_id: str, ctx: AthleteContext) -> None:
     """Wrapper qui isole les erreurs de génération de titre (pas de remontée)."""
     try:
-        title = await generate_session_title(session_id)
+        title = await generate_session_title(session_id, db_path=ctx.db_path)
         if title:
             log.info("Titre session %s généré : %r", session_id[:8], title)
     except Exception:  # noqa: BLE001 — best-effort, on n'interrompt jamais le chat
@@ -184,7 +197,10 @@ async def _generate_title_safely(session_id: str) -> None:
 
 
 @router.post("/chat")
-async def post_chat(payload: CoachChatRequest) -> EventSourceResponse:
+async def post_chat(
+    payload: CoachChatRequest,
+    ctx: AthleteContext = Depends(get_athlete_context),  # noqa: B008
+) -> EventSourceResponse:
     """Tour de conversation avec le coach, streamé en Server-Sent Events.
 
     Changement sémantique vs. l'ancienne version : les events `thinking` et
@@ -202,10 +218,13 @@ async def post_chat(payload: CoachChatRequest) -> EventSourceResponse:
     user_message = payload.message
     history = [
         m
-        for m in load_session(session_id)
+        for m in load_session(session_id, db_path=ctx.db_path)
         if m.get("role") in ("user", "assistant") and (m.get("content") or "").strip()
     ]
-    append_message(session_id, "user", {"role": "user", "content": user_message})
+    append_message(
+        session_id, "user", {"role": "user", "content": user_message},
+        db_path=ctx.db_path,
+    )
     label = f"chat[{session_id[:8]}{' new' if is_new_session else ''}]"
 
     return EventSourceResponse(
@@ -213,6 +232,7 @@ async def post_chat(payload: CoachChatRequest) -> EventSourceResponse:
             label,
             user_message,
             history,
+            ctx,
             session_id=session_id,
             persist_to_session=session_id,
         )
@@ -220,7 +240,10 @@ async def post_chat(payload: CoachChatRequest) -> EventSourceResponse:
 
 
 @router.get("/daily-brief", response_model=DailyBriefResponse)
-def get_daily_brief(refresh: bool = False) -> DailyBriefResponse:
+def get_daily_brief(
+    refresh: bool = False,
+    ctx: AthleteContext = Depends(get_athlete_context),  # noqa: B008
+) -> DailyBriefResponse:
     """Brief quotidien proactif : phrase de synthèse + état du jour.
 
     Agrège TSB, alerte saillante (overtraining + morning), séance suggérée,
@@ -229,13 +252,14 @@ def get_daily_brief(refresh: bool = False) -> DailyBriefResponse:
     LLM par jour et par état même si le Dashboard est rouvert plusieurs
     fois.
     """
-    return DailyBriefResponse(**build_daily_brief(refresh=refresh))
+    return DailyBriefResponse(**build_daily_brief(refresh=refresh, ctx=ctx))
 
 
 @router.get("/today", response_model=TodayWorkoutResponse)
 def get_today_workout(
     available_min: int | None = None,
     refresh: bool = False,
+    ctx: AthleteContext = Depends(get_athlete_context),  # noqa: B008
 ) -> TodayWorkoutResponse:
     """Séance suggérée pour aujourd'hui (TSB + objectif + plan + contexte).
 
@@ -248,7 +272,7 @@ def get_today_workout(
     from domestique_ai.processing.today import propose_workout_today
 
     result = propose_workout_today(
-        available_min=available_min, refresh=refresh,
+        available_min=available_min, refresh=refresh, ctx=ctx,
     )
     if result["rest_day"]:
         return TodayWorkoutResponse(
@@ -266,7 +290,10 @@ def get_today_workout(
 
 
 @router.post("/analyze")
-async def post_analyze(payload: CoachAnalyzeRequest) -> EventSourceResponse:
+async def post_analyze(
+    payload: CoachAnalyzeRequest,
+    ctx: AthleteContext = Depends(get_athlete_context),  # noqa: B008
+) -> EventSourceResponse:
     """Analyse one-shot (sans persistance de session) — typiquement appelée
     depuis la page détail d'une activité.
 
@@ -284,7 +311,8 @@ async def post_analyze(payload: CoachAnalyzeRequest) -> EventSourceResponse:
         _coach_event_stream(
             "analyze",
             payload.prompt,
-            history=None,
+            None,
+            ctx,
             session_id=None,
             persist_to_session=None,
         )

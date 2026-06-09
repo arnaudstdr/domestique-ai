@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import datetime as dt
 
-from fastapi import APIRouter, status
+from fastapi import APIRouter, Depends, status
 from fastapi.responses import Response
 
+from domestique_ai.api.deps import get_athlete_context
 from domestique_ai.api.schemas import (
     MorningAlert,
     MorningBaseline,
@@ -14,6 +15,7 @@ from domestique_ai.api.schemas import (
     MorningResponse,
     MorningSubmit,
 )
+from domestique_ai.athlete_context import AthleteContext
 from domestique_ai.processing.morning_metrics import (
     METRIC_COLUMNS,
     compute_baselines,
@@ -26,12 +28,15 @@ router = APIRouter(prefix="/api/morning", tags=["morning"])
 
 
 @router.get("", response_model=MorningResponse)
-def get_morning(days: int = 90) -> MorningResponse:
+def get_morning(
+    days: int = 90,
+    ctx: AthleteContext = Depends(get_athlete_context),  # noqa: B008
+) -> MorningResponse:
     """Historique sur N jours + baselines 14 j + alertes de dérive."""
-    history = fetch_morning_history(days=days)
+    history = fetch_morning_history(days=days, db_path=ctx.db_path)
     baselines: dict[str, MorningBaseline] = {}
     for metric in METRIC_COLUMNS:
-        b = compute_baselines(metric)
+        b = compute_baselines(metric, db_path=ctx.db_path)
         baselines[metric] = MorningBaseline(
             available=b.get("available", False),
             metric=metric,
@@ -52,7 +57,7 @@ def get_morning(days: int = 90) -> MorningResponse:
             latest_date=a["latest_date"],
             severity=a["severity"],
         )
-        for a in detect_morning_alerts()
+        for a in detect_morning_alerts(db_path=ctx.db_path)
     ]
 
     return MorningResponse(
@@ -63,7 +68,10 @@ def get_morning(days: int = 90) -> MorningResponse:
 
 
 @router.post("", status_code=status.HTTP_204_NO_CONTENT)
-def post_morning(payload: MorningSubmit) -> Response:
+def post_morning(
+    payload: MorningSubmit,
+    ctx: AthleteContext = Depends(get_athlete_context),  # noqa: B008
+) -> Response:
     """Enregistre (ou remplace, idempotent sur la date) une entrée matinale."""
     target_date = payload.date or dt.date.today().isoformat()
     save_morning_entry(
@@ -74,5 +82,6 @@ def post_morning(payload: MorningSubmit) -> Response:
         sleep_score=payload.sleep_score,
         stress_score=payload.stress_score,
         notes=payload.notes,
+        db_path=ctx.db_path,
     )
     return Response(status_code=status.HTTP_204_NO_CONTENT)

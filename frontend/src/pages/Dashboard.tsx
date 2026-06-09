@@ -21,6 +21,7 @@ import LoadChart from "../components/LoadChart";
 import MetricCard from "../components/MetricCard";
 import ZoneBar from "../components/ZoneBar";
 import { useToast } from "../hooks/useToast";
+import { useViewing } from "../hooks/useViewing";
 
 function zoneTone(zone: string | undefined) {
   switch (zone) {
@@ -58,6 +59,7 @@ export default function Dashboard() {
   const [brief, setBrief] = useState<DailyBriefResponse | null>(null);
   const [briefLoading, setBriefLoading] = useState(true);
   const [loading, setLoading] = useState(true);
+  const viewing = useViewing();
   const [busy, setBusy] = useState<string | null>(null);
   const { push } = useToast();
 
@@ -214,6 +216,7 @@ export default function Dashboard() {
 
       {hasZones && <ZoneBar zones={zones} />}
 
+      {!viewing && (
       <div className="card space-y-3">
         <h3 className="label-eyebrow">Actions</h3>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
@@ -315,6 +318,7 @@ export default function Dashboard() {
           </button>
         </div>
       </div>
+      )}
 
       {loading && <p className="text-center text-sm text-muted">Chargement…</p>}
     </div>

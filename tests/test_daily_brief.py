@@ -29,7 +29,7 @@ def _isolated_cache():
 @pytest.fixture()
 def stable_signals(monkeypatch):
     """Stub ``_collect_signals`` pour rendre les tests déterministes."""
-    def fake_collect(today):
+    def fake_collect(today, ctx=None):
         return {
             "today": today.isoformat(),
             "tsb": 5.2,
@@ -246,7 +246,8 @@ def test_build_daily_brief_purges_old_cache_keys(stable_signals, monkeypatch):
     build_daily_brief(today=dt.date(2026, 5, 20))
     build_daily_brief(today=dt.date(2026, 5, 21))
     # Le cache ne doit plus contenir d'entrée pour la veille.
-    assert all(key[0] == "2026-05-21" for key in daily_brief._BRIEF_CACHE)
+    # Clé = (db_path, date ISO, bucket TSB, hash alertes) → la date est en [1].
+    assert all(key[1] == "2026-05-21" for key in daily_brief._BRIEF_CACHE)
 
 
 # ---------- build_coach_context (palier 2) -----------------------------------
@@ -266,7 +267,7 @@ def test_build_coach_context_mentions_no_alert_when_clean(stable_signals):
 
 
 def test_build_coach_context_mentions_alert_when_present(monkeypatch):
-    def alerted_collect(today):
+    def alerted_collect(today, ctx=None):
         return {
             "today": today.isoformat(),
             "tsb": -22.0,
@@ -293,7 +294,7 @@ def test_build_coach_context_mentions_alert_when_present(monkeypatch):
 
 
 def test_build_coach_context_handles_rest_day(monkeypatch):
-    def rest_collect(today):
+    def rest_collect(today, ctx=None):
         return {
             "today": today.isoformat(),
             "tsb": 5.0,

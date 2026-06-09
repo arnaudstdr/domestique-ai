@@ -27,6 +27,7 @@ import json
 import logging
 from typing import Any
 
+from domestique_ai.athlete_context import AthleteContext, context_from_env
 from domestique_ai.llm import today_cache
 from domestique_ai.llm.availability import (
     Availability,
@@ -112,10 +113,10 @@ def _resolve_duration(
     return int(duration)
 
 
-def _load_availability_safely() -> Availability | None:
+def _load_availability_safely(ctx: AthleteContext) -> Availability | None:
     """Renvoie l'``Availability`` ou ``None`` si fichier absent / mal formé."""
     try:
-        return load_availability()
+        return load_availability(ctx.availability_path)
     except AvailabilityError:
         return None
 
@@ -215,20 +216,30 @@ def _weeks_to_event(objective: dict[str, Any] | None, today: _dt.date) -> int | 
     return (delta + 6) // 7
 
 
-def _planned_workout_for(today: _dt.date) -> dict[str, Any] | None:
-    """Cherche dans les plans persistés une séance prévue exactement à `today`."""
+def _planned_workout_for(today: _dt.date, ctx: AthleteContext) -> dict[str, Any] | None:
+    """Séance prévue exactement à `today` : prescription coach prioritaire, sinon plan."""
+    # Une séance prescrite par le coach prime sur le plan généré ce jour-là.
+    try:
+        from domestique_ai.llm.prescription_storage import get_prescription_for_date
+        prescribed = get_prescription_for_date(today.isoformat(), db_path=ctx.db_path)
+        if prescribed is not None:
+            return prescribed.to_dict()
+    except Exception:  # noqa: BLE001 — best-effort, ne doit rien casser
+        pass
     try:
         from domestique_ai.llm.plan_storage import list_plans, load_plan
     except Exception:  # noqa: BLE001 — un import qui échoue ne doit rien casser
         return None
     try:
-        plans = sorted(list_plans(limit=20), key=lambda m: m["id"], reverse=True)
+        plans = sorted(
+            list_plans(limit=20, db_path=ctx.db_path), key=lambda m: m["id"], reverse=True
+        )
     except Exception:  # noqa: BLE001
         return None
     target = today.isoformat()
     for meta in plans:
         try:
-            workouts = load_plan(meta["id"])
+            workouts = load_plan(meta["id"], db_path=ctx.db_path)
         except Exception:  # noqa: BLE001
             continue
         if not workouts:
@@ -244,12 +255,12 @@ def _planned_workout_for(today: _dt.date) -> dict[str, Any] | None:
     return None
 
 
-def _alerts_summary() -> dict[str, Any]:
+def _alerts_summary(ctx: AthleteContext) -> dict[str, Any]:
     """Renvoie un résumé des alertes overtraining + matin (best-effort, ne lève pas)."""
     summary: dict[str, Any] = {"critical": False, "messages": []}
     try:
         from domestique_ai.processing.overtraining import detect_overtraining_signals
-        report = detect_overtraining_signals()
+        report = detect_overtraining_signals(ctx=ctx)
         for alert in report.get("alerts", []) or []:
             summary["messages"].append(
                 f"{alert.get('indicator')}: {alert.get('message')}"
@@ -260,7 +271,7 @@ def _alerts_summary() -> dict[str, Any]:
         log.debug("Échec calcul overtraining", exc_info=True)
     try:
         from domestique_ai.processing.morning_metrics import detect_morning_alerts
-        for alert in detect_morning_alerts() or []:
+        for alert in detect_morning_alerts(db_path=ctx.db_path) or []:
             summary["messages"].append(
                 f"morning/{alert.get('metric')}: "
                 f"delta {alert.get('delta_pct'):.1f}% ({alert.get('severity')})"
@@ -276,6 +287,7 @@ def _build_decision_dossier(
     today: _dt.date,
     availability: Availability | None,
     available_min: int | None,
+    ctx: AthleteContext,
 ) -> dict[str, Any]:
     """Collecte toutes les données utiles à la décision dans un seul dict."""
     weekday = today.weekday()
@@ -286,7 +298,7 @@ def _build_decision_dossier(
         and availability.intervals_day == weekday
     )
 
-    activities = fetch_activities_from_db()
+    activities = fetch_activities_from_db(ctx=ctx)
     curves = calculate_ctl_atl_tsb(activities, end_date=today)
     if curves:
         last = curves[-1]
@@ -301,17 +313,17 @@ def _build_decision_dossier(
     objective_dict: dict[str, Any] | None = None
     try:
         from domestique_ai.llm.objectives import load_objective
-        obj = load_objective()
+        obj = load_objective(ctx.objective_path)
         if obj is not None:
             objective_dict = obj.to_dict()
     except Exception:  # noqa: BLE001
         objective_dict = None
 
     weeks_to_event = _weeks_to_event(objective_dict, today)
-    planned_today = _planned_workout_for(today)
+    planned_today = _planned_workout_for(today, ctx)
     last_kind, last_days_ago = _last_session_kind(activities, today)
     weekly_zones = _weekly_zone_distribution(activities, today, days=7)
-    alerts = _alerts_summary()
+    alerts = _alerts_summary(ctx)
 
     return {
         "today": today.isoformat(),
@@ -644,6 +656,8 @@ def propose_workout_today(
     available_min: int | None = None,
     refresh: bool = False,
     use_llm: bool = True,
+    *,
+    ctx: AthleteContext | None = None,
 ) -> dict[str, Any]:
     """Propose une séance pour aujourd'hui.
 
@@ -664,8 +678,9 @@ def propose_workout_today(
     - ``use_llm`` : si ``False``, saute directement au fallback déterministe
       (utile pour tests / mode hors-ligne).
     """
+    ctx = ctx or context_from_env()
     target = today or _dt.date.today()
-    availability = _load_availability_safely()
+    availability = _load_availability_safely(ctx)
 
     # Jour off (et pas d'override explicite) → repos.
     if (
@@ -681,14 +696,14 @@ def propose_workout_today(
             ),
         }
 
-    dossier = _build_decision_dossier(target, availability, available_min)
+    dossier = _build_decision_dossier(target, availability, available_min, ctx)
 
     obj_hash = today_cache.objective_hash(dossier.get("objective"))
     tsb_key = today_cache.round_tsb(dossier["tsb"])
     cache_key = (target.isoformat(), obj_hash, tsb_key)
 
     if not refresh:
-        cached = today_cache.load(*cache_key)
+        cached = today_cache.load(*cache_key, db_path=ctx.db_path)
         if cached is not None:
             cached["source"] = "cache"
             return cached
@@ -698,7 +713,7 @@ def propose_workout_today(
     planned = dossier.get("planned_today")
     if planned and not dossier.get("alerts", {}).get("critical"):
         payload = _planned_workout_to_payload(target, dossier, planned)
-        today_cache.save(*cache_key, payload, source="plan")
+        today_cache.save(*cache_key, payload, source="plan", db_path=ctx.db_path)
         return payload
 
     decision: dict[str, Any] | None = None
@@ -712,7 +727,7 @@ def propose_workout_today(
         decision = _decide_kind_fallback(dossier)
 
     payload = _build_workout_payload(target, dossier, decision, source=source)
-    today_cache.save(*cache_key, payload, source=source)
+    today_cache.save(*cache_key, payload, source=source, db_path=ctx.db_path)
     return payload
 
 

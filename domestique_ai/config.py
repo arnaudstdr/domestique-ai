@@ -8,6 +8,7 @@ ensuite, puis sur le défaut.
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import os
 import threading
@@ -38,6 +39,53 @@ def get_db_path() -> Path:
 def get_tokens_path() -> Path:
     """Chemin du fichier de stockage local des tokens Strava (jamais commité)."""
     return REPO_ROOT / "data" / ".strava_tokens.json"
+
+
+def get_platform_db_path() -> Path:
+    """Chemin de la DB plateforme (identité : comptes, sessions, invitations).
+
+    Séparée de la DB activités (qui deviendra « une par athlète »). Override via
+    DOMESTIQUE_AI_PLATFORM_DB_PATH.
+    """
+    custom = os.getenv("DOMESTIQUE_AI_PLATFORM_DB_PATH")
+    if custom:
+        return Path(custom).expanduser().resolve()
+    return REPO_ROOT / "data" / "platform.db"
+
+
+def get_athletes_root() -> Path:
+    """Racine des espaces de données par athlète (comptes non-bootstrap).
+
+    Chaque athlète non-propriétaire a son dossier ``<root>/<public_id>/`` (DB,
+    tokens Strava, YAML). Le propriétaire (bootstrap) garde ses données legacy
+    en place. Override via DOMESTIQUE_AI_ATHLETES_ROOT.
+    """
+    custom = os.getenv("DOMESTIQUE_AI_ATHLETES_ROOT")
+    if custom:
+        return Path(custom).expanduser().resolve()
+    return REPO_ROOT / "data" / "athletes"
+
+
+def get_session_secret() -> bytes:
+    """Secret (pepper) pour le HMAC des tokens de session/invitation.
+
+    Priorité : DOMESTIQUE_AI_SESSION_SECRET > dérivé de DOMESTIQUE_AI_API_TOKEN
+    (évite d'imposer une nouvelle variable obligatoire en prod) > constante de dev
+    (avec warning). Retourne des bytes prêts pour ``hmac.new``.
+    """
+    raw = os.getenv("DOMESTIQUE_AI_SESSION_SECRET")
+    if raw and raw.strip():
+        return raw.strip().encode("utf-8")
+    api_token = os.getenv("DOMESTIQUE_AI_API_TOKEN")
+    if api_token and api_token.strip():
+        return hashlib.sha256(
+            b"domestique-ai-session-v1:" + api_token.strip().encode("utf-8")
+        ).digest()
+    logger.warning(
+        "DOMESTIQUE_AI_SESSION_SECRET et DOMESTIQUE_AI_API_TOKEN absents — "
+        "secret de session dérivé d'une constante de dev. NE PAS utiliser en prod."
+    )
+    return b"domestique-ai-dev-session-secret"
 
 
 def get_profile_path() -> Path:
@@ -206,12 +254,26 @@ def get_lthr_pct() -> float:
 
 
 def get_strava_credentials() -> tuple[str | None, str | None, str]:
-    """Retourne (client_id, client_secret, redirect_uri) depuis .env."""
+    """Retourne (client_id, client_secret, redirect_uri) depuis .env.
+
+    En multi-tenant, ``STRAVA_REDIRECT_URI`` doit pointer sur le callback web
+    ``<host>/api/strava/callback`` (et être autorisé dans l'app Strava).
+    """
     return (
         os.getenv("STRAVA_CLIENT_ID"),
         os.getenv("STRAVA_CLIENT_SECRET"),
         os.getenv("STRAVA_REDIRECT_URI", "http://localhost/exchange_token"),
     )
+
+
+def get_app_base_url() -> str:
+    """Base URL publique de l'app, pour la redirection post-OAuth.
+
+    Override via DOMESTIQUE_AI_APP_BASE_URL. Défaut ``""`` → redirection
+    relative same-origin (``/?strava=connected``), suffisant quand le backend
+    sert le frontend. Sans slash final.
+    """
+    return os.getenv("DOMESTIQUE_AI_APP_BASE_URL", "").rstrip("/")
 
 
 def get_objective_path() -> Path:

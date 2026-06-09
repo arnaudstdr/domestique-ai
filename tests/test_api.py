@@ -307,7 +307,7 @@ def test_coach_chat_streaming_with_mocked_run_turn_stream(
     L'event interne `final` ne doit pas traverser le wire.
     """
 
-    async def fake_stream(message: str, history=None):  # noqa: ANN001
+    async def fake_stream(message: str, history=None, *, ctx=None):  # noqa: ANN001
         yield {"type": "thinking", "value": "ref"}
         yield {"type": "thinking", "value": "lexion"}
         yield {
@@ -388,7 +388,6 @@ def test_app_routes_registered() -> None:
         "/api/plan",
         "/api/plan/{plan_id}",
         "/api/plan/{plan_id}/export.zip",
-        "/api/plan/{plan_id}/push-garmin",
     }
     missing = expected - paths
     assert not missing, f"Endpoints manquants : {missing}"

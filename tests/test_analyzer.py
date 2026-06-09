@@ -7,6 +7,7 @@ import sqlite3
 
 import pytest
 
+from domestique_ai.athlete_context import AthleteContext
 from domestique_ai.ingestion.strava import init_db
 from domestique_ai.processing.analyzer import (
     calculate_ctl_atl_tsb,
@@ -18,6 +19,92 @@ from domestique_ai.processing.analyzer import (
     fetch_weight_history,
     recalculate_training_loads,
 )
+
+
+def _ctx(db_path, *, ftp=250.0, hr_rest=None, hr_max=None,
+         sex="M", lthr_pct=0.88) -> AthleteContext:
+    """Construit un AthleteContext de test (chemins YAML factices, non utilisés ici)."""
+    return AthleteContext(
+        db_path=db_path,
+        tokens_path=db_path.parent / ".tokens.json",
+        profile_path=db_path.parent / "profile.yaml",
+        objective_path=db_path.parent / "objective.yaml",
+        availability_path=db_path.parent / "availability.yaml",
+        ftp=ftp, hr_rest=hr_rest, hr_max=hr_max, sex=sex, lthr_pct=lthr_pct,
+    )
+
+
+def _insert_activity(db_path, *, strava_id, duration, avg_hr, avg_power):
+    conn = sqlite3.connect(db_path)
+    try:
+        conn.execute(
+            "INSERT INTO activities "
+            "(strava_id, date, duration, avg_heart_rate, avg_power, training_load) "
+            "VALUES (?, ?, ?, ?, ?, NULL)",
+            (strava_id, "2025-04-01T08:00:00Z", duration, avg_hr, avg_power),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def _load_for(db_path, strava_id):
+    conn = sqlite3.connect(db_path)
+    try:
+        row = conn.execute(
+            "SELECT training_load FROM activities WHERE strava_id = ?",
+            (strava_id,),
+        ).fetchone()
+    finally:
+        conn.close()
+    return row[0]
+
+
+def test_recalculate_with_injected_context_isolates_per_athlete(tmp_path):
+    """Deux contextes (HR distincts, db_path distincts) → résultats isolés.
+
+    Aucune variable d'env ni cache profil n'est touché : la valeur calculée ne
+    peut provenir que des HR injectées dans chaque AthleteContext.
+    """
+    db_a = tmp_path / "a.db"
+    db_b = tmp_path / "b.db"
+    init_db(db_a)
+    init_db(db_b)
+    _insert_activity(db_a, strava_id=1, duration=3600, avg_hr=150, avg_power=200)
+    _insert_activity(db_b, strava_id=1, duration=3600, avg_hr=150, avg_power=200)
+
+    ctx_a = _ctx(db_a, hr_rest=50, hr_max=190)
+    ctx_b = _ctx(db_b, hr_rest=50, hr_max=170)
+
+    assert recalculate_training_loads(ctx=ctx_a) == 1
+    assert recalculate_training_loads(ctx=ctx_b) == 1
+
+    load_a = _load_for(db_a, 1)
+    load_b = _load_for(db_b, 1)
+    # Chaque base reflète exactement le profil HR de SON contexte (hr-TSS).
+    assert load_a == pytest.approx(
+        calculate_hr_tss(3600, 150, 50, 190, "M", 0.88), abs=0.01
+    )
+    assert load_b == pytest.approx(
+        calculate_hr_tss(3600, 150, 50, 170, "M", 0.88), abs=0.01
+    )
+    assert load_a != load_b  # isolation effective
+
+
+def test_recalculate_with_injected_context_uses_ctx_ftp_on_power_branch(
+    tmp_path, monkeypatch
+):
+    """Contexte sans HR → branche power, avec le FTP injecté (non l'env)."""
+    # Neutralise l'éventuel HR de l'environnement du dev pour cibler la branche power.
+    monkeypatch.delenv("STRAVA_HR_REST", raising=False)
+    monkeypatch.delenv("STRAVA_HR_MAX", raising=False)
+    db = tmp_path / "pow.db"
+    init_db(db)
+    _insert_activity(db, strava_id=1, duration=3600, avg_hr=150, avg_power=300)
+
+    ctx = _ctx(db, ftp=300.0, hr_rest=None, hr_max=None)
+    assert recalculate_training_loads(ctx=ctx) == 1
+    assert _load_for(db, 1) == pytest.approx(calculate_tss(3600, 300.0, 300.0))
 
 
 def test_calculate_tss_nominal():

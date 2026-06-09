@@ -8,7 +8,7 @@ from threading import Lock
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
-from domestique_ai.api.deps import get_strava_client
+from domestique_ai.api.deps import get_athlete_context, get_strava_client
 from domestique_ai.api.logging import get_logger
 from domestique_ai.api.schemas import (
     ActivitiesList,
@@ -17,6 +17,7 @@ from domestique_ai.api.schemas import (
     ActivitySummary,
     SimilarActivitiesResponse,
 )
+from domestique_ai.athlete_context import AthleteContext
 from domestique_ai.ingestion.strava import StravaAuthError, StravaClient
 from domestique_ai.processing.analyzer import (
     HR_ZONE_KEYS,
@@ -39,7 +40,8 @@ _DETAIL_STREAM_KEYS = [
     "temp",
 ]
 _DETAIL_TTL_SEC = 3600.0
-_detail_cache: dict[int, tuple[float, dict]] = {}
+# Clé préfixée par l'espace de données (db_path) pour isoler le cache par athlète.
+_detail_cache: dict[tuple[str, int], tuple[float, dict]] = {}
 _cache_lock = Lock()
 
 
@@ -99,6 +101,7 @@ def list_activities(
     duration_max_sec: int | None = Query(None, ge=0),
     tss_min: float | None = Query(None, ge=0),
     tss_max: float | None = Query(None, ge=0),
+    ctx: AthleteContext = Depends(get_athlete_context),  # noqa: B008
 ) -> ActivitiesList:
     """Liste paginée, triée par date décroissante, avec filtres optionnels.
 
@@ -107,7 +110,7 @@ def list_activities(
     au jour près : ``date_to=2025-04-30`` accepte les activités du 30 avril
     jusqu'à 23h59:59 UTC.
     """
-    activities = fetch_activities_from_db()
+    activities = fetch_activities_from_db(ctx=ctx)
     if days is not None:
         cutoff = dt.datetime.now(dt.timezone.utc) - dt.timedelta(days=days)
         activities = [
@@ -178,14 +181,16 @@ def list_activities(
 
 
 @router.get("/sport-types", response_model=list[str])
-def list_sport_types() -> list[str]:
+def list_sport_types(
+    ctx: AthleteContext = Depends(get_athlete_context),  # noqa: B008
+) -> list[str]:
     """Liste triée des ``sport_type`` distincts présents en base.
 
     Sert à peupler dynamiquement les chips de filtre côté frontend — ainsi on
     n'affiche que les sport types pour lesquels l'utilisateur a au moins une
     activité (pas la peine de proposer ``Swim`` si l'athlète ne nage pas).
     """
-    activities = fetch_activities_from_db()
+    activities = fetch_activities_from_db(ctx=ctx)
     return sorted({
         a["sport_type"] for a in activities
         if a.get("sport_type")
@@ -196,10 +201,11 @@ def list_sport_types() -> list[str]:
 def get_activity(
     strava_id: int,
     client: StravaClient = Depends(get_strava_client),  # noqa: B008
+    ctx: AthleteContext = Depends(get_athlete_context),  # noqa: B008
 ) -> ActivityDetail:
     """Détails complets d'une activité (streams inclus, cache 1 h)."""
     base = next(
-        (a for a in fetch_activities_from_db() if a.get("strava_id") == strava_id),
+        (a for a in fetch_activities_from_db(ctx=ctx) if a.get("strava_id") == strava_id),
         None,
     )
     if base is None:
@@ -208,9 +214,10 @@ def get_activity(
             detail=f"Activité {strava_id} introuvable en base.",
         )
 
+    cache_key = (str(ctx.db_path), strava_id)
     now = time.time()
     with _cache_lock:
-        cached = _detail_cache.get(strava_id)
+        cached = _detail_cache.get(cache_key)
         payload = cached[1] if cached and now - cached[0] < _DETAIL_TTL_SEC else None
 
     if payload is None:
@@ -226,7 +233,7 @@ def get_activity(
             ) from exc
         payload = {"streams": streams, "summary": summary}
         with _cache_lock:
-            _detail_cache[strava_id] = (now, payload)
+            _detail_cache[cache_key] = (now, payload)
     else:
         log.debug("Activité %d : cache hit", strava_id)
 
@@ -261,6 +268,7 @@ def get_activity(
 def get_similar_activities(
     strava_id: int,
     limit: int = Query(20, ge=1, le=100),
+    ctx: AthleteContext = Depends(get_athlete_context),  # noqa: B008
 ) -> SimilarActivitiesResponse:
     """Activités passées au profil similaire (distance + dénivelé + sport).
 
@@ -268,5 +276,5 @@ def get_similar_activities(
     **même bucket de sport** (indoor/outdoor) dont la distance est à ±5 % et
     le dénivelé à ±10 % de la référence. Triées date desc.
     """
-    raw = find_similar_activities(strava_id, limit=limit)
+    raw = find_similar_activities(strava_id, limit=limit, db_path=ctx.db_path)
     return SimilarActivitiesResponse(**raw)

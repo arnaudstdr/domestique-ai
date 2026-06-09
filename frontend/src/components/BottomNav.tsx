@@ -3,12 +3,16 @@ import {
   Bike,
   Bot,
   ClipboardList,
+  Dumbbell,
   LayoutDashboard,
+  LineChart,
   Sunrise,
   type LucideIcon,
 } from "lucide-react";
 
-const ITEMS: { to: string; label: string; Icon: LucideIcon }[] = [
+type NavItem = { to: string; label: string; Icon: LucideIcon };
+
+const ITEMS: NavItem[] = [
   { to: "/", label: "Dashboard", Icon: LayoutDashboard },
   { to: "/activites", label: "Activités", Icon: Bike },
   { to: "/matin", label: "Matin", Icon: Sunrise },
@@ -16,7 +20,18 @@ const ITEMS: { to: string; label: string; Icon: LucideIcon }[] = [
   { to: "/coach", label: "Coach", Icon: Bot },
 ];
 
-export default function BottomNav() {
+// En consultation coach (lecture seule), on n'expose que les pages de lecture :
+// pas de saisie matinale ni de chat coach, et on ajoute les tendances.
+const VIEWING_ITEMS: NavItem[] = [
+  { to: "/", label: "Dashboard", Icon: LayoutDashboard },
+  { to: "/activites", label: "Activités", Icon: Bike },
+  { to: "/prescrire", label: "Prescrire", Icon: Dumbbell },
+  { to: "/tendances", label: "Tendances", Icon: LineChart },
+  { to: "/plan", label: "Plan", Icon: ClipboardList },
+];
+
+export default function BottomNav({ viewing = false }: { viewing?: boolean }) {
+  const items = viewing ? VIEWING_ITEMS : ITEMS;
   return (
     <nav
       className="fixed bottom-0 inset-x-0 z-[1100] bg-surface/80 backdrop-blur-xl
@@ -25,8 +40,11 @@ export default function BottomNav() {
                  will-change-transform [transform:translateZ(0)]
                  [-webkit-backface-visibility:hidden]"
     >
-      <ul className="mx-auto grid max-w-3xl grid-cols-5">
-        {ITEMS.map(({ to, label, Icon }) => (
+      <ul
+        className="mx-auto grid max-w-3xl"
+        style={{ gridTemplateColumns: `repeat(${items.length}, minmax(0, 1fr))` }}
+      >
+        {items.map(({ to, label, Icon }) => (
           <li key={to}>
             <NavLink
               to={to}

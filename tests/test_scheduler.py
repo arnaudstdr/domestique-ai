@@ -7,10 +7,12 @@ import pytest
 from domestique_ai.api import scheduler
 from domestique_ai.api.routers import strava as strava_router
 
+_CTX = object()  # sentinelle : _run_sync est mocké, le ctx réel n'importe pas
+
 
 @pytest.fixture(autouse=True)
 def _reset_sync_state(monkeypatch):
-    """Remet le state global à idle + neutralise les vars d'env du scheduler."""
+    """Vide le state (indexé par athlète) + neutralise les vars d'env scheduler."""
     # Ces tests doivent être indépendants de la config réelle du dev.
     for key in (
         "DOMESTIQUE_AI_AUTO_SYNC_MINUTES",
@@ -20,62 +22,51 @@ def _reset_sync_state(monkeypatch):
     ):
         monkeypatch.delenv(key, raising=False)
 
-    strava_router._sync_state.update(
-        status="idle",
-        inserted=None,
-        error=None,
-        started_at=None,
-        finished_at=None,
-    )
+    strava_router._sync_state.clear()
     yield
-    strava_router._sync_state.update(
-        status="idle",
-        inserted=None,
-        error=None,
-        started_at=None,
-        finished_at=None,
-    )
+    strava_router._sync_state.clear()
 
 
-# ---- _claim_sync / trigger_sync_blocking ------------------------------------
+# ---- _claim_sync / trigger_sync_blocking (par athlète) ----------------------
 
 
 def test_claim_sync_passes_through_idle_state():
-    assert strava_router._claim_sync() is True
-    assert strava_router._sync_state["status"] == "syncing"
+    assert strava_router._claim_sync("alice") is True
+    assert strava_router._sync_state["alice"]["status"] == "syncing"
 
 
-def test_claim_sync_refuses_concurrent_call():
-    # 1er claim réussit, le 2e doit échouer tant que l'état est "syncing".
-    assert strava_router._claim_sync() is True
-    assert strava_router._claim_sync() is False
+def test_claim_sync_refuses_concurrent_call_same_athlete():
+    assert strava_router._claim_sync("alice") is True
+    assert strava_router._claim_sync("alice") is False
+
+
+def test_claim_sync_isolated_between_athletes():
+    # Un sync en cours pour A ne bloque pas B.
+    assert strava_router._claim_sync("alice") is True
+    assert strava_router._claim_sync("bob") is True
 
 
 def test_trigger_sync_blocking_skips_when_busy(monkeypatch):
-    # Simule un sync en cours : trigger doit retourner False sans appeler
-    # _run_sync.
-    strava_router._sync_state["status"] = "syncing"
+    strava_router._sync_state["alice"] = {"status": "syncing"}
     called = {"n": 0}
 
-    def fake_run_sync() -> None:
+    def fake_run_sync(ctx, key, *, user=None) -> None:
         called["n"] += 1
 
     monkeypatch.setattr(strava_router, "_run_sync", fake_run_sync)
-    assert strava_router.trigger_sync_blocking() is False
+    assert strava_router.trigger_sync_blocking(_CTX, "alice") is False
     assert called["n"] == 0
 
 
 def test_trigger_sync_blocking_executes_when_idle(monkeypatch):
     called = {"n": 0}
 
-    def fake_run_sync() -> None:
+    def fake_run_sync(ctx, key, *, user=None) -> None:
         called["n"] += 1
-        # Simule la fin du sync (état done) pour refléter ce que ferait
-        # le vrai _run_sync.
-        strava_router._sync_state["status"] = "done"
+        strava_router._set_state(key, status="done")
 
     monkeypatch.setattr(strava_router, "_run_sync", fake_run_sync)
-    assert strava_router.trigger_sync_blocking() is True
+    assert strava_router.trigger_sync_blocking(_CTX, "alice") is True
     assert called["n"] == 1
 
 
@@ -133,28 +124,79 @@ def test_start_stop_scheduler_lifecycle(monkeypatch):
     assert scheduler._scheduler is None
 
 
-def test_auto_sync_job_delegates_to_trigger(monkeypatch):
-    """Le job du scheduler doit appeler trigger_sync_blocking."""
-    calls = {"n": 0}
+def test_sync_targets_includes_tokened_skips_others(tmp_path, monkeypatch):
+    """_sync_targets retient les athlètes ayant un fichier tokens, saute les autres."""
+    from domestique_ai import athlete_context, platform_db
+    from domestique_ai.athlete_context import AthleteContext
 
-    def fake_trigger() -> bool:
-        calls["n"] += 1
-        return False  # simule "déjà en cours" pour rester safe
+    users = [
+        {"public_id": "owner", "is_bootstrap": True, "role": "coach"},
+        {"public_id": "alice", "is_bootstrap": False, "role": "athlete"},
+        {"public_id": "bob", "is_bootstrap": False, "role": "athlete"},
+    ]
+    monkeypatch.setattr(platform_db, "list_users", lambda path=None: users)
+
+    def fake_ctx(user: dict) -> AthleteContext:
+        root = tmp_path / user["public_id"]
+        return AthleteContext(
+            db_path=root / "x.db", tokens_path=root / ".tok",
+            profile_path=root / "p.yaml", objective_path=root / "o.yaml",
+            availability_path=root / "a.yaml",
+            ftp=250.0, hr_rest=None, hr_max=None, sex="M", lthr_pct=0.88,
+        )
+
+    monkeypatch.setattr(athlete_context, "context_for_athlete", fake_ctx)
+    # owner + alice ont des tokens, bob non.
+    for pid in ("owner", "alice"):
+        d = tmp_path / pid
+        d.mkdir(parents=True)
+        (d / ".tok").write_text("{}")
+
+    targets = scheduler._sync_targets()
+    assert [u["public_id"] for u, _ in targets] == ["owner", "alice"]
+
+
+def test_auto_sync_job_triggers_each_target(monkeypatch):
+    """Le job doit appeler trigger_sync_blocking une fois par athlète cible."""
+    targets = [
+        ({"public_id": "alice"}, _CTX),
+        ({"public_id": "bob"}, _CTX),
+    ]
+    monkeypatch.setattr(scheduler, "_sync_targets", lambda: targets)
+    seen: list[str] = []
+
+    def fake_trigger(ctx, key, *, user=None) -> bool:
+        seen.append(key)
+        return True
 
     monkeypatch.setattr(scheduler, "trigger_sync_blocking", fake_trigger)
     scheduler._auto_sync_job()
-    assert calls["n"] == 1
+    assert seen == ["alice", "bob"]
 
 
-def test_auto_sync_job_swallows_exceptions(monkeypatch):
-    """Un APScheduler job qui lève marque le job comme erroné et arrête le
-    scheduler. On s'assure que _auto_sync_job avale toute exception."""
-
-    def boom() -> bool:
+def test_auto_sync_job_swallows_target_enumeration_errors(monkeypatch):
+    def boom() -> list:
         raise RuntimeError("boom")
 
-    monkeypatch.setattr(scheduler, "trigger_sync_blocking", boom)
+    monkeypatch.setattr(scheduler, "_sync_targets", boom)
     scheduler._auto_sync_job()  # ne doit pas lever
+
+
+def test_auto_sync_job_isolates_per_athlete_errors(monkeypatch):
+    targets = [({"public_id": "alice"}, _CTX), ({"public_id": "bob"}, _CTX)]
+    monkeypatch.setattr(scheduler, "_sync_targets", lambda: targets)
+    seen: list[str] = []
+
+    def fake_trigger(ctx, key, *, user=None) -> bool:
+        seen.append(key)
+        if key == "alice":
+            raise RuntimeError("alice KO")
+        return True
+
+    monkeypatch.setattr(scheduler, "trigger_sync_blocking", fake_trigger)
+    scheduler._auto_sync_job()  # ne doit pas lever
+    # bob est quand même traité malgré l'échec d'alice.
+    assert seen == ["alice", "bob"]
 
 
 # ---- Healthcheck ping job ---------------------------------------------------

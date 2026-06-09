@@ -2,13 +2,15 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status
 
+from domestique_ai.api.deps import get_athlete_context
 from domestique_ai.api.schemas import (
     AvailabilityPreferencesSchema,
     AvailabilitySchema,
     DayAvailabilityIn,
 )
+from domestique_ai.athlete_context import AthleteContext
 from domestique_ai.llm.availability import (
     _WEEKDAY_BY_INDEX,
     _WEEKDAY_NAMES,
@@ -88,20 +90,25 @@ def _schema_to_model(payload: AvailabilitySchema) -> Availability:
 
 
 @router.get("", response_model=AvailabilitySchema | None)
-def get_availability() -> AvailabilitySchema | None:
+def get_availability(
+    ctx: AthleteContext = Depends(get_athlete_context),  # noqa: B008
+) -> AvailabilitySchema | None:
     """Renvoie la disponibilité persistée ou ``null`` si absente."""
-    av = load_availability()
+    av = load_availability(ctx.availability_path)
     if av is None:
         return None
     return _model_to_schema(av)
 
 
 @router.put("", response_model=AvailabilitySchema)
-def put_availability(payload: AvailabilitySchema) -> AvailabilitySchema:
-    """Remplace la disponibilité hebdomadaire (réécrit ``data/availability.yaml``)."""
+def put_availability(
+    payload: AvailabilitySchema,
+    ctx: AthleteContext = Depends(get_athlete_context),  # noqa: B008
+) -> AvailabilitySchema:
+    """Remplace la disponibilité hebdomadaire (réécrit le YAML de l'athlète)."""
     try:
         model = _schema_to_model(payload)
-        save_availability(model)
+        save_availability(model, ctx.availability_path)
     except AvailabilityError as exc:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,

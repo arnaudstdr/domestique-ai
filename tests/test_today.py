@@ -422,7 +422,7 @@ def test_planned_workout_short_circuits(tmp_path, monkeypatch):
         "notes": "",
     }
 
-    monkeypatch.setattr(today_mod, "_planned_workout_for", lambda _today: planned)
+    monkeypatch.setattr(today_mod, "_planned_workout_for", lambda _today, _ctx=None: planned)
 
     result = propose_workout_today(today=monday)
     assert result["source"] == "plan"
@@ -441,7 +441,7 @@ def test_critical_alert_forces_recovery(tmp_path, monkeypatch):
     monkeypatch.setattr(
         today_mod,
         "_alerts_summary",
-        lambda: {"critical": True, "messages": ["tsb_chronic: fatigue durable"]},
+        lambda _ctx=None: {"critical": True, "messages": ["tsb_chronic: fatigue durable"]},
     )
     monday = dt.date(2026, 1, 5)
     result = propose_workout_today(today=monday)

@@ -3,51 +3,29 @@ import {
   Bot,
   Calendar,
   ClipboardList,
-  Cloud,
   Download,
+  Dumbbell,
   Library,
   Sparkles,
   Target,
   Trash2,
-  TriangleAlert,
-  Check,
 } from "lucide-react";
 import {
   api,
   ApiError,
-  streamGarminPush,
   streamLlmPlan,
   type LlmPlanEvent,
 } from "../api/client";
-import type { Objective, PlanDetail, PlanSummary, Workout } from "../api/types";
+import type {
+  Objective,
+  PlanDetail,
+  PlanSummary,
+  PrescriptionOut,
+  Workout,
+} from "../api/types";
 import PlanCalendar from "../components/PlanCalendar";
 import { useToast } from "../hooks/useToast";
-
-interface PushResult {
-  date: string;
-  name: string;
-  url?: string;
-  error?: string;
-  scheduled: boolean;
-}
-
-interface PushState {
-  index: number;
-  total: number;
-  currentWorkout: { date: string; name: string } | null;
-  results: PushResult[];
-  summary: { uploaded: number; errors: number } | null;
-  error: string | null;
-}
-
-const EMPTY_PUSH: PushState = {
-  index: 0,
-  total: 0,
-  currentWorkout: null,
-  results: [],
-  summary: null,
-  error: null,
-};
+import { useViewing } from "../hooks/useViewing";
 
 type GenerationMode = "classic" | "llm";
 
@@ -139,12 +117,10 @@ export default function Plan() {
   const [deleting, setDeleting] = useState(false);
   const [downloading, setDownloading] = useState(false);
   const [downloadingIcs, setDownloadingIcs] = useState(false);
-  const [pushing, setPushing] = useState(false);
-  const [pushSchedule, setPushSchedule] = useState(true);
-  const [pushState, setPushState] = useState<PushState>(EMPTY_PUSH);
   const [mode, setMode] = useState<GenerationMode>("classic");
   const [llmStream, setLlmStream] = useState<LlmStreamState>(EMPTY_LLM_STREAM);
   const { push } = useToast();
+  const viewing = useViewing();
 
   async function refreshList(autoSelect = true): Promise<void> {
     try {
@@ -309,63 +285,6 @@ export default function Plan() {
     }
   }
 
-  async function pushGarmin(): Promise<void> {
-    if (selectedId == null || pushing) return;
-    setPushing(true);
-    setPushState({ ...EMPTY_PUSH });
-    try {
-      await streamGarminPush(selectedId, pushSchedule, (ev) => {
-        setPushState((prev) => {
-          if (ev.type === "start") {
-            return { ...EMPTY_PUSH, total: ev.total };
-          }
-          if (ev.type === "progress") {
-            return {
-              ...prev,
-              index: ev.index,
-              total: ev.total,
-              currentWorkout: ev.workout,
-            };
-          }
-          if (ev.type === "result") {
-            return {
-              ...prev,
-              currentWorkout: null,
-              results: [
-                ...prev.results,
-                {
-                  date: ev.workout.date,
-                  name: ev.workout.name,
-                  url: ev.url,
-                  error: ev.error,
-                  scheduled: ev.scheduled,
-                },
-              ],
-            };
-          }
-          if (ev.type === "error") {
-            return { ...prev, error: ev.value };
-          }
-          if (ev.type === "done") {
-            return {
-              ...prev,
-              currentWorkout: null,
-              summary: { uploaded: ev.uploaded, errors: ev.errors },
-            };
-          }
-          return prev;
-        });
-      });
-      push("Push Garmin terminé.", "success");
-    } catch (err) {
-      const msg = err instanceof ApiError ? err.message : String(err);
-      push(`Erreur Garmin : ${msg}`, "error");
-      setPushState((prev) => ({ ...prev, error: msg }));
-    } finally {
-      setPushing(false);
-    }
-  }
-
   async function downloadZip(): Promise<void> {
     if (selectedId == null) return;
     setDownloading(true);
@@ -455,6 +374,9 @@ export default function Plan() {
         )}
       </div>
 
+      <PrescriptionsSection />
+
+      {!viewing && (
       <div className="card space-y-3">
         <h2 className="flex items-center gap-2 font-display text-lg font-bold tracking-tight">
           <ClipboardList className="h-4 w-4 text-accent" strokeWidth={1.75} aria-hidden="true" />
@@ -545,6 +467,7 @@ export default function Plan() {
           )}
         </button>
       </div>
+      )}
 
       {(generating && mode === "llm") || llmStream.weeks.length > 0 || llmStream.error ? (
         <div className="card space-y-2">
@@ -674,146 +597,80 @@ export default function Plan() {
                   </span>
                 )}
               </button>
-              <button
-                onClick={remove}
-                disabled={deleting || selectedId == null}
-                className="rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-2 text-sm text-red-400 hover:bg-red-500/20 disabled:opacity-50"
-              >
-                {deleting ? (
-                  "…"
-                ) : (
-                  <Trash2 className="h-4 w-4" strokeWidth={1.75} aria-hidden="true" />
-                )}
-              </button>
-            </div>
-
-            <div className="space-y-2 border-t border-white/5 pt-3">
-              <label className="flex items-center gap-2 text-xs text-muted">
-                <input
-                  type="checkbox"
-                  checked={pushSchedule}
-                  onChange={(e) => setPushSchedule(e.target.checked)}
-                  className="h-4 w-4 rounded border-white/20 bg-surface accent-accent"
-                />
-                Planifier sur le calendrier Garmin
-              </label>
-              <button
-                onClick={pushGarmin}
-                disabled={pushing || selectedId == null}
-                className="btn-primary w-full"
-              >
-                {pushing ? (
-                  `Envoi en cours… (${pushState.index + (pushState.currentWorkout ? 0 : 1)}/${pushState.total || "?"})`
-                ) : (
-                  <span className="inline-flex items-center justify-center gap-2">
-                    <Cloud className="h-4 w-4" strokeWidth={1.75} aria-hidden="true" />
-                    Pousser sur Garmin Connect
-                  </span>
-                )}
-              </button>
+              {!viewing && (
+                <button
+                  onClick={remove}
+                  disabled={deleting || selectedId == null}
+                  className="rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-2 text-sm text-red-400 hover:bg-red-500/20 disabled:opacity-50"
+                >
+                  {deleting ? (
+                    "…"
+                  ) : (
+                    <Trash2 className="h-4 w-4" strokeWidth={1.75} aria-hidden="true" />
+                  )}
+                </button>
+              )}
             </div>
           </>
         )}
       </div>
-
-      {(pushing ||
-        pushState.results.length > 0 ||
-        pushState.summary ||
-        pushState.error) && (
-        <div className="card space-y-2">
-          <div className="flex items-center justify-between">
-            <h3 className="flex items-center gap-2 text-sm font-medium text-gray-200">
-              <Cloud className="h-4 w-4 text-accent" strokeWidth={1.75} aria-hidden="true" />
-              Push Garmin Connect
-            </h3>
-            {pushState.summary && (
-              <span
-                className={`pill ${pushState.summary.errors > 0 ? "bg-orange-500/15 text-orange-300" : "bg-green-500/15 text-green-400"}`}
-              >
-                {pushState.summary.uploaded} envoyées
-                {pushState.summary.errors > 0
-                  ? ` · ${pushState.summary.errors} erreur(s)`
-                  : ""}
-              </span>
-            )}
-          </div>
-
-          {pushState.total > 0 && (
-            <div className="space-y-1">
-              <div className="h-2 w-full overflow-hidden rounded-full bg-surface/60">
-                <div
-                  className="h-full bg-accent transition-all"
-                  style={{
-                    width: `${Math.min(100, ((pushState.index + (pushState.currentWorkout ? 0 : 1)) / pushState.total) * 100)}%`,
-                  }}
-                />
-              </div>
-              <div className="text-xs text-muted">
-                {pushState.currentWorkout
-                  ? `Envoi : ${pushState.currentWorkout.date} — ${pushState.currentWorkout.name}`
-                  : pushState.summary
-                    ? "Terminé."
-                    : `${pushState.results.length} / ${pushState.total} traitées`}
-              </div>
-            </div>
-          )}
-
-          {pushState.error && (
-            <div className="rounded-lg border border-red-500/30 bg-red-500/10 p-2 text-xs text-red-300">
-              {pushState.error}
-              {pushState.error.toLowerCase().includes("token") && (
-                <div className="mt-1 text-muted">
-                  Lance{" "}
-                  <code className="rounded bg-surface/60 px-1">
-                    python -m domestique_ai.export.garmin_connect
-                  </code>{" "}
-                  sur le serveur pour reseeder le token.
-                </div>
-              )}
-            </div>
-          )}
-
-          {pushState.results.length > 0 && (
-            <ul className="max-h-48 space-y-1 overflow-y-auto text-xs">
-              {pushState.results.slice(-10).reverse().map((r, i) => (
-                <li
-                  key={`${r.date}-${i}`}
-                  className="flex items-center justify-between rounded bg-surface/40 px-2 py-1"
-                >
-                  <span className="truncate text-gray-200">
-                    {r.date} — {r.name}
-                  </span>
-                  {r.error ? (
-                    <TriangleAlert
-                      className="ml-2 h-4 w-4 shrink-0 text-red-400"
-                      strokeWidth={1.75}
-                      aria-hidden="true"
-                    />
-                  ) : r.url ? (
-                    <a
-                      href={r.url}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="ml-2 flex shrink-0 items-center gap-1 text-accent hover:underline"
-                    >
-                      <Check className="h-4 w-4" strokeWidth={1.75} aria-hidden="true" />
-                      {r.scheduled ? "planifié" : "uploadé"}
-                    </a>
-                  ) : (
-                    <span className="ml-2 shrink-0 text-muted">—</span>
-                  )}
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
-      )}
 
       {loadingDetail && (
         <div className="card text-sm text-muted">Chargement du plan…</div>
       )}
 
       {!loadingDetail && detail && <PlanCalendar workouts={detail.workouts} />}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Séances prescrites par le coach (visible athlète + consultation coach)
+// ---------------------------------------------------------------------------
+
+function PrescriptionsSection() {
+  const [items, setItems] = useState<PrescriptionOut[] | null>(null);
+
+  useEffect(() => {
+    api.prescriptions
+      .list()
+      .then(setItems)
+      .catch(() => setItems([]));
+  }, []);
+
+  // On n'affiche les séances prescrites qu'à partir d'aujourd'hui.
+  const today = new Date().toISOString().slice(0, 10);
+  const upcoming = (items ?? []).filter((p) => p.date >= today);
+  if (upcoming.length === 0) return null;
+
+  return (
+    <div className="card space-y-3">
+      <h2 className="flex items-center gap-2 font-display text-lg font-bold tracking-tight">
+        <Dumbbell className="h-4 w-4 text-accent" strokeWidth={1.75} aria-hidden="true" />
+        Séances prescrites
+      </h2>
+      <ul className="space-y-2">
+        {upcoming.map((p) => (
+          <li
+            key={p.id}
+            className="rounded-xl border border-accent/30 bg-accent/[0.06] px-3 py-2.5"
+          >
+            <div className="flex items-center justify-between gap-2">
+              <span className="truncate text-sm text-gray-100">{p.workout.name}</span>
+              <span className="pill bg-accent/15 text-accent shrink-0">
+                par ton coach
+              </span>
+            </div>
+            <p className="text-[11px] text-muted">
+              {p.date} · {p.workout.duration_min}′ · {p.workout.target_zone.toUpperCase()} ·{" "}
+              {Math.round(p.workout.estimated_tss)} TSS
+            </p>
+            {p.workout.notes && (
+              <p className="text-[11px] italic text-muted">{p.workout.notes}</p>
+            )}
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }

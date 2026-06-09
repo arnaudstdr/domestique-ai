@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status
 
+from domestique_ai.api.deps import get_athlete_context
 from domestique_ai.api.schemas import Objective as ObjectiveSchema
+from domestique_ai.athlete_context import AthleteContext
 from domestique_ai.llm.objectives import (
     Objective as ObjectiveModel,
 )
@@ -18,9 +20,11 @@ router = APIRouter(prefix="/api/objective", tags=["objective"])
 
 
 @router.get("", response_model=ObjectiveSchema | None)
-def get_objective() -> ObjectiveSchema | None:
+def get_objective(
+    ctx: AthleteContext = Depends(get_athlete_context),  # noqa: B008
+) -> ObjectiveSchema | None:
     """Renvoie l'objectif persisté ou `null` si absent."""
-    obj = load_objective()
+    obj = load_objective(ctx.objective_path)
     if obj is None:
         return None
     return ObjectiveSchema(
@@ -35,8 +39,11 @@ def get_objective() -> ObjectiveSchema | None:
 
 
 @router.put("", response_model=ObjectiveSchema)
-def put_objective(payload: ObjectiveSchema) -> ObjectiveSchema:
-    """Remplace l'objectif courant (réécrit `data/objective.yaml`)."""
+def put_objective(
+    payload: ObjectiveSchema,
+    ctx: AthleteContext = Depends(get_athlete_context),  # noqa: B008
+) -> ObjectiveSchema:
+    """Remplace l'objectif courant (réécrit le `objective.yaml` de l'athlète)."""
     try:
         save_objective(
             ObjectiveModel(
@@ -47,7 +54,8 @@ def put_objective(payload: ObjectiveSchema) -> ObjectiveSchema:
                 target_ftp=payload.target_ftp,
                 target_avg_hr_zone=payload.target_avg_hr_zone,
                 notes=payload.notes or "",
-            )
+            ),
+            ctx.objective_path,
         )
     except ObjectiveError as exc:
         raise HTTPException(

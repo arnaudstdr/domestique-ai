@@ -20,6 +20,7 @@ from urllib.parse import urlencode
 
 import requests
 
+from domestique_ai.athlete_context import AthleteContext
 from domestique_ai.config import (
     get_db_path,
     get_hr_max,
@@ -61,9 +62,10 @@ class StravaClient:
 
     @classmethod
     def from_tokens_file(cls, client_id: str, client_secret: str,
-                         tokens_path: Path | None = None) -> StravaClient:
+                         tokens_path: Path | None = None, *,
+                         ctx: AthleteContext | None = None) -> StravaClient:
         """Recharge un client depuis le fichier local de tokens, refresh si expiré."""
-        path = tokens_path or get_tokens_path()
+        path = tokens_path or (ctx.tokens_path if ctx else get_tokens_path())
         if not path.exists():
             raise StravaAuthError(
                 f"Fichier de tokens introuvable: {path}. "
@@ -82,9 +84,10 @@ class StravaClient:
             client.save_tokens(path)
         return client
 
-    def save_tokens(self, path: Path | None = None) -> None:
+    def save_tokens(self, path: Path | None = None, *,
+                    ctx: AthleteContext | None = None) -> None:
         """Persiste les tokens courants sur disque."""
-        path = path or get_tokens_path()
+        path = path or (ctx.tokens_path if ctx else get_tokens_path())
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps({
             "access_token": self.access_token,
@@ -308,9 +311,10 @@ def _ensure_column(conn: sqlite3.Connection, table: str, column: str,
         conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {ddl}")
 
 
-def init_db(db_path: Path | None = None) -> None:
+def init_db(db_path: Path | None = None, *,
+            ctx: AthleteContext | None = None) -> None:
     """Crée la table `activities` et applique les migrations idempotentes."""
-    path = Path(db_path) if db_path else get_db_path()
+    path = Path(db_path) if db_path else (ctx.db_path if ctx else get_db_path())
     path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(path)
     try:
@@ -399,6 +403,19 @@ def init_db(db_path: Path | None = None) -> None:
             "ON training_plans(created_at DESC)"
         )
         conn.execute("""
+            CREATE TABLE IF NOT EXISTS prescriptions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                date TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                created_by TEXT,
+                payload TEXT NOT NULL
+            )
+        """)
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_prescriptions_date "
+            "ON prescriptions(date)"
+        )
+        conn.execute("""
             CREATE TABLE IF NOT EXISTS today_suggestions (
                 date TEXT NOT NULL,
                 objective_hash TEXT NOT NULL,
@@ -439,7 +456,8 @@ def summarize_temp_stream(
 def save_activity(activity: dict[str, Any], db_path: Path | None = None,
                   ftp: float | None = None,
                   hr_zones: dict[str, float] | None = None,
-                  temp_summary: tuple[float, float, float] | None = None) -> bool:
+                  temp_summary: tuple[float, float, float] | None = None,
+                  *, ctx: AthleteContext | None = None) -> bool:
     """
     Sauvegarde une activité. Calcule la charge d'entraînement si absente
     (hr-TSS si HR configurée, sinon TSS puissance, sinon 0).
@@ -456,7 +474,7 @@ def save_activity(activity: dict[str, Any], db_path: Path | None = None,
     strava_id = activity.get("id")
     if strava_id is None:
         return False
-    path = Path(db_path) if db_path else get_db_path()
+    path = Path(db_path) if db_path else (ctx.db_path if ctx else get_db_path())
 
     tss = activity.get("training_load")
     if tss is None:
@@ -476,7 +494,11 @@ def save_activity(activity: dict[str, Any], db_path: Path | None = None,
             duration_sec=duration,
             avg_hr=avg_hr or None,
             avg_power=avg_power or None,
-            ftp=ftp,
+            ftp=ftp if ftp is not None else (ctx.ftp if ctx else None),
+            hr_rest=ctx.hr_rest if ctx else None,
+            hr_max=ctx.hr_max if ctx else None,
+            sex=ctx.sex if ctx else None,
+            lthr_pct=ctx.lthr_pct if ctx else None,
         )
 
     zone_values = (
@@ -520,7 +542,8 @@ def save_activity(activity: dict[str, Any], db_path: Path | None = None,
 
 def snapshot_athlete_weight(client: StravaClient,
                             db_path: Path | None = None,
-                            today: str | None = None) -> bool:
+                            today: str | None = None,
+                            *, ctx: AthleteContext | None = None) -> bool:
     """
     Enregistre le poids actuel de l'athlète Strava avec la date du jour.
 
@@ -530,8 +553,8 @@ def snapshot_athlete_weight(client: StravaClient,
     Retourne True si une ligne a été insérée/mise à jour, False si Strava ne
     fournit pas de poids (champ vide ou nul côté profil).
     """
-    init_db(db_path)
-    path = Path(db_path) if db_path else get_db_path()
+    init_db(db_path, ctx=ctx)
+    path = Path(db_path) if db_path else (ctx.db_path if ctx else get_db_path())
     athlete = client.fetch_athlete()
     weight = athlete.get("weight")
     if not weight or weight <= 0:
@@ -550,14 +573,15 @@ def snapshot_athlete_weight(client: StravaClient,
         conn.close()
 
 
-def _last_activity_timestamp(db_path: Path | None = None) -> int | None:
+def _last_activity_timestamp(db_path: Path | None = None, *,
+                             ctx: AthleteContext | None = None) -> int | None:
     """Timestamp epoch (UTC) de la dernière activité connue, ``None`` si vide.
 
     Soustrait 1 heure de marge pour rattraper d'éventuels uploads tardifs ou
     décalages d'horloge — la contrainte ``UNIQUE(strava_id)`` garantit
     l'idempotence si Strava nous renvoie quelques activités déjà connues.
     """
-    path = Path(db_path) if db_path else get_db_path()
+    path = Path(db_path) if db_path else (ctx.db_path if ctx else get_db_path())
     conn = sqlite3.connect(path)
     try:
         row = conn.execute("SELECT MAX(date) FROM activities").fetchone()
@@ -577,7 +601,8 @@ def _last_activity_timestamp(db_path: Path | None = None) -> int | None:
     return int((when - dt.timedelta(hours=1)).timestamp())
 
 
-def sync_activities(client: StravaClient, after: int | None = None) -> int:
+def sync_activities(client: StravaClient, after: int | None = None, *,
+                    ctx: AthleteContext | None = None) -> int:
     """Récupère et sauvegarde les nouvelles activités. Retourne le nombre d'insertions.
 
     Sync incrémentale par défaut : si ``after`` n'est pas fourni, on dérive
@@ -596,12 +621,12 @@ def sync_activities(client: StravaClient, after: int | None = None) -> int:
     Snapshot également le poids courant de l'athlète (`weight_history`) —
     silencieux si Strava ne renvoie pas de poids.
     """
-    init_db()
+    init_db(ctx=ctx)
     if after is None:
-        after = _last_activity_timestamp()
+        after = _last_activity_timestamp(ctx=ctx)
     activities = client.fetch_activities(after=after)
-    hr_rest = get_hr_rest()
-    hr_max = get_hr_max()
+    hr_rest = ctx.hr_rest if ctx else get_hr_rest()
+    hr_max = ctx.hr_max if ctx else get_hr_max()
     zone_params: tuple[float, float] | None = (
         (float(hr_rest), float(hr_max))
         if hr_rest and hr_max and hr_max > hr_rest
@@ -623,15 +648,16 @@ def sync_activities(client: StravaClient, after: int | None = None) -> int:
                 if hr_stream and time_stream:
                     zones = calculate_hr_zones(hr_stream, time_stream, *zone_params)
                 temp_summary = summarize_temp_stream(streams.get("temp"))
-        if save_activity(data, hr_zones=zones, temp_summary=temp_summary):
+        if save_activity(data, hr_zones=zones, temp_summary=temp_summary, ctx=ctx):
             inserted += 1
 
-    snapshot_athlete_weight(client)
+    snapshot_athlete_weight(client, ctx=ctx)
     return inserted
 
 
 def backfill_hr_zones(client: StravaClient,
-                      db_path: Path | None = None) -> int:
+                      db_path: Path | None = None, *,
+                      ctx: AthleteContext | None = None) -> int:
     """
     Calcule rétroactivement les zones HR pour les activités déjà en base
     qui ont une avg_heart_rate mais pas encore de hr_z1_time.
@@ -642,10 +668,10 @@ def backfill_hr_zones(client: StravaClient,
 
     Retourne le nombre de lignes effectivement mises à jour.
     """
-    init_db(db_path)
-    path = Path(db_path) if db_path else get_db_path()
-    hr_rest = get_hr_rest()
-    hr_max = get_hr_max()
+    init_db(db_path, ctx=ctx)
+    path = Path(db_path) if db_path else (ctx.db_path if ctx else get_db_path())
+    hr_rest = ctx.hr_rest if ctx else get_hr_rest()
+    hr_max = ctx.hr_max if ctx else get_hr_max()
     if not (hr_rest and hr_max and hr_max > hr_rest):
         raise RuntimeError(
             "STRAVA_HR_REST et STRAVA_HR_MAX doivent être configurés "
@@ -689,7 +715,8 @@ def backfill_hr_zones(client: StravaClient,
 
 
 def backfill_temperature(client: StravaClient,
-                         db_path: Path | None = None) -> int:
+                         db_path: Path | None = None, *,
+                         ctx: AthleteContext | None = None) -> int:
     """
     Récupère rétroactivement la température (min/avg/max) pour les activités
     déjà en base dont les colonnes ``*_temp`` sont NULL.
@@ -702,8 +729,8 @@ def backfill_temperature(client: StravaClient,
 
     Retourne le nombre de lignes effectivement mises à jour.
     """
-    init_db(db_path)
-    path = Path(db_path) if db_path else get_db_path()
+    init_db(db_path, ctx=ctx)
+    path = Path(db_path) if db_path else (ctx.db_path if ctx else get_db_path())
 
     conn = sqlite3.connect(path)
     try:
@@ -738,7 +765,8 @@ def backfill_temperature(client: StravaClient,
 
 
 def backfill_sport_types(client: StravaClient,
-                         db_path: Path | None = None) -> int:
+                         db_path: Path | None = None, *,
+                         ctx: AthleteContext | None = None) -> int:
     """
     Complète la colonne `sport_type` sur les activités existantes en base
     qui ne l'ont pas (lignes ajoutées avant l'introduction du champ).
@@ -747,8 +775,8 @@ def backfill_sport_types(client: StravaClient,
     sans sport_type. Met à jour uniquement les lignes WHERE sport_type IS NULL.
     Retourne le nombre de lignes mises à jour.
     """
-    init_db(db_path)
-    path = Path(db_path) if db_path else get_db_path()
+    init_db(db_path, ctx=ctx)
+    path = Path(db_path) if db_path else (ctx.db_path if ctx else get_db_path())
     conn = sqlite3.connect(path)
     try:
         missing = {
@@ -787,7 +815,8 @@ def backfill_sport_types(client: StravaClient,
 
 
 def backfill_polylines(client: StravaClient,
-                       db_path: Path | None = None) -> int:
+                       db_path: Path | None = None, *,
+                       ctx: AthleteContext | None = None) -> int:
     """
     Complète la colonne ``map_polyline`` pour les activités déjà en base
     qui ne l'ont pas encore.
@@ -803,8 +832,8 @@ def backfill_polylines(client: StravaClient,
 
     Retourne le nombre de lignes effectivement mises à jour.
     """
-    init_db(db_path)
-    path = Path(db_path) if db_path else get_db_path()
+    init_db(db_path, ctx=ctx)
+    path = Path(db_path) if db_path else (ctx.db_path if ctx else get_db_path())
     conn = sqlite3.connect(path)
     try:
         missing = {
@@ -843,7 +872,8 @@ def backfill_polylines(client: StravaClient,
 
 
 def backfill_activity_fields(client: StravaClient,
-                             db_path: Path | None = None) -> int:
+                             db_path: Path | None = None, *,
+                             ctx: AthleteContext | None = None) -> int:
     """
     Re-fetch tout l'historique Strava et complète les colonnes manquantes
     (max_heart_rate notamment) sur les activités déjà en base.
@@ -851,8 +881,8 @@ def backfill_activity_fields(client: StravaClient,
     Idempotent : ne touche aux lignes que si la valeur change.
     Retourne le nombre de lignes mises à jour.
     """
-    init_db(db_path)
-    path = Path(db_path) if db_path else get_db_path()
+    init_db(db_path, ctx=ctx)
+    path = Path(db_path) if db_path else (ctx.db_path if ctx else get_db_path())
     activities = client.fetch_activities()
     conn = sqlite3.connect(path)
     try:

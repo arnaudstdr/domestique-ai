@@ -32,6 +32,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field, ValidationError, field_validator
 
+from domestique_ai.athlete_context import AthleteContext
 from domestique_ai.llm.availability import Availability
 from domestique_ai.llm.ollama_client import chat_structured
 from domestique_ai.processing.plan_builder import (
@@ -408,12 +409,15 @@ def build_context_from_app_state(
     sessions_per_week: int,
     focus: str | None,
     today: _dt.date | None = None,
+    *,
+    ctx: AthleteContext | None = None,
 ) -> GenerationContext:
     """Construit le contexte à partir de l'état persistant de l'app.
 
     Charge l'objectif, la disponibilité et calcule le CTL courant — même
     logique que ``build_and_save_plan`` du module ``plan_storage``.
     """
+    from domestique_ai.athlete_context import context_from_env
     from domestique_ai.llm.availability import load_availability
     from domestique_ai.llm.objectives import load_objective
     from domestique_ai.processing.analyzer import (
@@ -421,12 +425,13 @@ def build_context_from_app_state(
         fetch_activities_from_db,
     )
 
+    ctx = ctx or context_from_env()
     today = today or _dt.date.today()
-    activities = fetch_activities_from_db()
+    activities = fetch_activities_from_db(ctx=ctx)
     curves = calculate_ctl_atl_tsb(activities, end_date=today)
     ctl_current = float(curves[-1]["CTL"]) if curves else 0.0
 
-    objective = load_objective()
+    objective = load_objective(ctx.objective_path)
     target_date: _dt.date | None = None
     target_event_type = "cyclosportive"
     if objective is not None:
@@ -437,7 +442,7 @@ def build_context_from_app_state(
             except ValueError:
                 target_date = None
 
-    availability = load_availability()
+    availability = load_availability(ctx.availability_path)
 
     return GenerationContext(
         sessions_per_week=sessions_per_week,

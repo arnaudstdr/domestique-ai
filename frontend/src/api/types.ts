@@ -389,3 +389,69 @@ export interface TodayWorkoutResponse {
   tsb: number | null;
   tsb_zone: string | null;
 }
+
+// ---- Auth / comptes (multi-tenant) ------------------------------------------
+
+export interface MeResponse {
+  public_id: string;
+  role: string;
+  display_name: string | null;
+}
+
+export interface AcceptInviteResponse {
+  session_token: string;
+  public_id: string;
+  role: string;
+}
+
+export interface StravaConnection {
+  connected: boolean;
+}
+
+export interface StravaAuthorize {
+  authorize_url: string;
+}
+
+// ---- Roster coach (liste d'athlètes + invitations) --------------------------
+
+export interface AthleteSummary {
+  public_id: string;
+  display_name: string | null;
+  strava_connected: boolean;
+  last_activity_date: string | null;
+  n_activities: number;
+}
+
+export interface InvitationCreated {
+  role: string;
+  invite_token: string;
+  invite_url: string;
+  expires_at: string | null;
+}
+
+export interface InvitationOut {
+  id: number;
+  role: string;
+  status: string;
+  created_at: string;
+  accepted_at: string | null;
+}
+
+// ---- Prescription de séances (coach) ----------------------------------------
+
+export type PrescriptionKind = "recovery" | "endurance" | "tempo" | "intervals";
+
+export interface PrescriptionCreate {
+  date: string;
+  kind: PrescriptionKind;
+  duration_min: number;
+  notes?: string;
+}
+
+export interface PrescriptionOut {
+  id: number;
+  date: string;
+  created_at: string;
+  created_by: string | null;
+  workout: Workout;
+}

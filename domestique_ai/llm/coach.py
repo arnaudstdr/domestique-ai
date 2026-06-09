@@ -16,6 +16,7 @@ from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from typing import Any
 
+from domestique_ai.athlete_context import AthleteContext, context_from_env
 from domestique_ai.llm.ollama_client import stream_chat
 from domestique_ai.llm.tools import TOOL_SCHEMAS, dispatch
 
@@ -69,7 +70,8 @@ class ToolTrace:
 
 
 def build_initial_messages(history: list[dict[str, Any]] | None,
-                           user_message: str) -> list[dict[str, Any]]:
+                           user_message: str, *,
+                           ctx: AthleteContext | None = None) -> list[dict[str, Any]]:
     """Construit la liste de messages à envoyer au LLM (system + history + user).
 
     L'historique est sanitisé : on ne réinjecte au modèle que les paires
@@ -90,7 +92,7 @@ def build_initial_messages(history: list[dict[str, Any]] | None,
         # KO, etc.), on continue sans bloquer le coach.
         try:
             from domestique_ai.llm.daily_brief import build_coach_context
-            context = build_coach_context()
+            context = build_coach_context(ctx=ctx)
         except Exception:  # noqa: BLE001
             context = ""
         if context:
@@ -108,6 +110,8 @@ def build_initial_messages(history: list[dict[str, Any]] | None,
 async def run_turn_stream(
     user_message: str,
     history: list[dict[str, Any]] | None = None,
+    *,
+    ctx: AthleteContext | None = None,
 ) -> AsyncIterator[dict[str, Any]]:
     """Yield les events d'un tour de coach au fur et à mesure.
 
@@ -121,7 +125,8 @@ async def run_turn_stream(
     Le dernier event est TOUJOURS `final` (consommé par le router pour
     persister en DB l'assistant turn complet — il ne traverse jamais le wire).
     """
-    messages = build_initial_messages(history, user_message)
+    ctx = ctx or context_from_env()
+    messages = build_initial_messages(history, user_message, ctx=ctx)
     trace: list[ToolTrace] = []
     accumulated_content = ""
     accumulated_thinking = ""
@@ -168,7 +173,7 @@ async def run_turn_stream(
             name = call["function"]["name"]
             args = call["function"]["arguments"] or {}
             yield {"type": "tool_call", "name": name, "args": args}
-            result = dispatch(name, args)
+            result = dispatch(name, args, ctx)
             trace.append(ToolTrace(name=name, arguments=args, result=result))
             yield {"type": "tool_result", "name": name, "result": result}
             messages.append({

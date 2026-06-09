@@ -16,6 +16,7 @@ import datetime as dt
 from collections.abc import Callable
 from typing import Any
 
+from domestique_ai.athlete_context import AthleteContext, context_from_env
 from domestique_ai.processing.analyzer import (
     HR_ZONE_KEYS,
     calculate_ctl_atl_tsb,
@@ -70,9 +71,9 @@ def _filter_recent(
     return out
 
 
-def get_training_load_state() -> dict[str, Any]:
+def get_training_load_state(*, ctx: AthleteContext | None = None) -> dict[str, Any]:
     """État courant CTL/ATL/TSB + zone interprétative (Frais/Optimal/Fatigué/Surentraîné)."""
-    activities = fetch_activities_from_db()
+    activities = fetch_activities_from_db(ctx=ctx)
     curves = calculate_ctl_atl_tsb(activities, end_date=dt.date.today())
     if not curves:
         return {"available": False, "reason": "Aucune activité en base."}
@@ -92,9 +93,10 @@ def get_training_load_state() -> dict[str, Any]:
     }
 
 
-def get_recent_activities(days: int = 7) -> dict[str, Any]:
+def get_recent_activities(days: int = 7, *,
+                          ctx: AthleteContext | None = None) -> dict[str, Any]:
     """Liste des activités sur les N derniers jours (fenêtre ancrée sur today)."""
-    activities = fetch_activities_from_db()
+    activities = fetch_activities_from_db(ctx=ctx)
     as_of = _today()
     recent = _filter_recent(activities, days, end=as_of)
     out = []
@@ -121,9 +123,10 @@ def get_recent_activities(days: int = 7) -> dict[str, Any]:
     }
 
 
-def get_zone_distribution(days: int = 14) -> dict[str, Any]:
+def get_zone_distribution(days: int = 14, *,
+                          ctx: AthleteContext | None = None) -> dict[str, Any]:
     """Répartition cumulée du temps par zone HR sur les N derniers jours."""
-    activities = fetch_activities_from_db()
+    activities = fetch_activities_from_db(ctx=ctx)
     as_of = _today()
     recent = _filter_recent(activities, days, end=as_of)
     totals: dict[str, float] = dict.fromkeys(HR_ZONE_KEYS, 0.0)
@@ -154,10 +157,11 @@ def get_zone_distribution(days: int = 14) -> dict[str, Any]:
     }
 
 
-def get_objective() -> dict[str, Any]:
+def get_objective(*, ctx: AthleteContext | None = None) -> dict[str, Any]:
     """Objectif d'entraînement courant (ou indication s'il est absent)."""
     from domestique_ai.llm.objectives import load_objective
-    obj = load_objective()
+    ctx = ctx or context_from_env()
+    obj = load_objective(ctx.objective_path)
     if obj is None:
         return {
             "available": False,
@@ -167,7 +171,8 @@ def get_objective() -> dict[str, Any]:
     return {"available": True, "objective": obj.to_dict()}
 
 
-def get_activity_details(strava_id: int) -> dict[str, Any]:
+def get_activity_details(strava_id: int, *,
+                         ctx: AthleteContext | None = None) -> dict[str, Any]:
     """Détail complet d'une activité identifiée par strava_id.
 
     Inclut la température (``avg_temp`` / ``min_temp`` / ``max_temp`` en °C)
@@ -176,10 +181,10 @@ def get_activity_details(strava_id: int) -> dict[str, Any]:
     """
     import sqlite3
 
-    from domestique_ai.config import get_db_path
     from domestique_ai.ingestion.strava import init_db
-    init_db()
-    conn = sqlite3.connect(get_db_path())
+    ctx = ctx or context_from_env()
+    init_db(ctx.db_path)
+    conn = sqlite3.connect(ctx.db_path)
     try:
         cursor = conn.execute(
             "SELECT strava_id, date, duration, avg_heart_rate, max_heart_rate, "
@@ -214,7 +219,8 @@ def get_activity_details(strava_id: int) -> dict[str, Any]:
     }
 
 
-def get_morning_trends(days: int = 30) -> dict[str, Any]:
+def get_morning_trends(days: int = 30, *,
+                       ctx: AthleteContext | None = None) -> dict[str, Any]:
     """
     Tendances des métriques matinales (HRV, FC repos, sommeil, stress) avec
     baselines mobiles sur 14 jours et alertes si dérive vs baseline.
@@ -225,7 +231,8 @@ def get_morning_trends(days: int = 30) -> dict[str, Any]:
         detect_morning_alerts,
         fetch_morning_history,
     )
-    history = fetch_morning_history(days=days)
+    ctx = ctx or context_from_env()
+    history = fetch_morning_history(days=days, db_path=ctx.db_path)
     if not history:
         return {
             "available": False,
@@ -234,7 +241,7 @@ def get_morning_trends(days: int = 30) -> dict[str, Any]:
         }
     baselines = {}
     for metric in METRIC_COLUMNS:
-        b = compute_baselines(metric)
+        b = compute_baselines(metric, db_path=ctx.db_path)
         if b.get("available"):
             baselines[metric] = {
                 "baseline_14d": round(b["baseline"], 2),
@@ -248,17 +255,17 @@ def get_morning_trends(days: int = 30) -> dict[str, Any]:
         "days": days,
         "entries_count": len(history),
         "baselines": baselines,
-        "alerts": detect_morning_alerts(),
+        "alerts": detect_morning_alerts(db_path=ctx.db_path),
     }
 
 
-def get_overtraining_signals() -> dict[str, Any]:
+def get_overtraining_signals(*, ctx: AthleteContext | None = None) -> dict[str, Any]:
     """
     Indicateurs auto de surentraînement : TSB chronique, monotony de Foster,
     strain de Foster, saut de volume hebdo. Alertes agrégées.
     """
     from domestique_ai.processing.overtraining import detect_overtraining_signals
-    return detect_overtraining_signals()
+    return detect_overtraining_signals(ctx=ctx)
 
 
 _WORKOUT_TEMPLATES = {
@@ -330,7 +337,8 @@ def _kind_for_target(target_zone: str) -> str:
 
 
 def generate_training_plan(sessions_per_week: int = 4,
-                           focus: str | None = None) -> dict[str, Any]:
+                           focus: str | None = None, *,
+                           ctx: AthleteContext | None = None) -> dict[str, Any]:
     """
     Génère un plan d'entraînement multi-semaines jusqu'à la date inscrite dans
     ``data/objective.yaml`` (fallback : 4 semaines à partir d'aujourd'hui).
@@ -339,17 +347,18 @@ def generate_training_plan(sessions_per_week: int = 4,
     peut commenter. Les fichiers `.FIT` sont produits à la demande côté UI
     (téléchargement) — pas dans ce tool, qui reste rapide pour le LLM.
     """
-    from domestique_ai.config import get_hr_max, get_hr_rest
     from domestique_ai.llm.availability import AvailabilityError
     from domestique_ai.llm.plan_storage import (
         PlanGenerationError,
         build_and_save_plan,
     )
 
+    ctx = ctx or context_from_env()
     try:
-        plan_id, plan, ctx = build_and_save_plan(
+        plan_id, plan, plan_ctx = build_and_save_plan(
             sessions_per_week=sessions_per_week,
             focus=focus,
+            ctx=ctx,
         )
     except PlanGenerationError as exc:
         return {"available": False, "reason": str(exc)}
@@ -378,28 +387,29 @@ def generate_training_plan(sessions_per_week: int = 4,
         for key, bucket in sorted(weekly.items())
     ]
     peak_week = max(weekly_summary, key=lambda w: w["tss"]) if weekly_summary else None
-    custom_hr = bool(get_hr_rest() and get_hr_max())
+    custom_hr = bool(ctx.hr_rest and ctx.hr_max)
 
     return {
         "available": True,
         "plan_id": plan_id,
         "sessions_count": len(plan),
         "total_weeks": len(weekly_summary),
-        "target_date": ctx["target_date"],
-        "target_event_type": ctx["target_event_type"],
-        "ctl_current": ctx["ctl_current"],
+        "target_date": plan_ctx["target_date"],
+        "target_event_type": plan_ctx["target_event_type"],
+        "ctl_current": plan_ctx["ctl_current"],
         "weekly": weekly_summary,
         "peak_week": peak_week,
         "first_session": plan[0].to_dict(),
         "last_session": plan[-1].to_dict(),
         "fit_export_mode": "bpm_custom" if custom_hr else "garmin_zones",
-        "availability_loaded": ctx["availability_loaded"],
-        "days_used": ctx["days_used"],
+        "availability_loaded": plan_ctx["availability_loaded"],
+        "days_used": plan_ctx["days_used"],
         "note": "Téléchargement .ZIP des fichiers .FIT depuis l'onglet « 📋 Plan ».",
     }
 
 
-def get_planned_workout(date: str) -> dict[str, Any]:
+def get_planned_workout(date: str, *,
+                        ctx: AthleteContext | None = None) -> dict[str, Any]:
     """
     Séance prévue à une date donnée (ISO YYYY-MM-DD) dans le plan en cours.
 
@@ -409,7 +419,9 @@ def get_planned_workout(date: str) -> dict[str, Any]:
     (régénération de plan = ancien plan obsolète).
     """
     from domestique_ai.llm.plan_storage import list_plans, load_plan
+    from domestique_ai.llm.prescription_storage import get_prescription_for_date
 
+    ctx = ctx or context_from_env()
     try:
         target = dt.date.fromisoformat(date)
     except (TypeError, ValueError):
@@ -418,12 +430,24 @@ def get_planned_workout(date: str) -> dict[str, Any]:
             "reason": f"date invalide: {date!r}. Format attendu: YYYY-MM-DD.",
         }
 
+    # Une séance prescrite par le coach prime sur le plan généré ce jour-là.
+    prescribed = get_prescription_for_date(target.isoformat(), db_path=ctx.db_path)
+    if prescribed is not None:
+        return {
+            "available": True,
+            "source": "prescription",
+            "prescribed_by": "coach",
+            "planned_workout": prescribed.to_dict(),
+        }
+
     # Tri par id DESC : la précision seconde de `created_at` peut produire des
     # égalités quand on enchaîne plusieurs sauvegardes (cf. load_latest_plan).
-    plans = sorted(list_plans(limit=50), key=lambda m: m["id"], reverse=True)
+    plans = sorted(
+        list_plans(limit=50, db_path=ctx.db_path), key=lambda m: m["id"], reverse=True
+    )
     total_considered = len(plans)
     for meta in plans:
-        workouts = load_plan(meta["id"])
+        workouts = load_plan(meta["id"], db_path=ctx.db_path)
         if not workouts:
             continue
         first = dt.date.fromisoformat(workouts[0].date)
@@ -433,6 +457,7 @@ def get_planned_workout(date: str) -> dict[str, Any]:
         match = next((w for w in workouts if w.date == target.isoformat()), None)
         base = {
             "available": True,
+            "source": "plan",
             "plan_id": meta["id"],
             "plan_target_date": meta.get("target_date"),
             "plan_target_event_type": meta.get("target_event_type"),
@@ -455,6 +480,8 @@ def get_planned_workout(date: str) -> dict[str, Any]:
 def propose_workout_today(
     available_min: int | None = None,
     refresh: bool = False,
+    *,
+    ctx: AthleteContext | None = None,
 ) -> dict[str, Any]:
     """Séance optimale pour aujourd'hui (TSB + objectif + plan + contexte).
 
@@ -466,11 +493,12 @@ def propose_workout_today(
     from domestique_ai.processing.today import (
         propose_workout_today as _propose_today,
     )
-    return _propose_today(available_min=available_min, refresh=refresh)
+    return _propose_today(available_min=available_min, refresh=refresh, ctx=ctx)
 
 
 def propose_workout(target_zone: str, duration_min: int,
-                    kind: str | None = None) -> dict[str, Any]:
+                    kind: str | None = None, *,
+                    ctx: AthleteContext | None = None) -> dict[str, Any]:
     """
     Squelette de séance basé sur la zone cible et la durée.
 
@@ -478,6 +506,8 @@ def propose_workout(target_zone: str, duration_min: int,
     duration_min : durée totale en minutes.
     kind : recovery | endurance | tempo | threshold | vo2max (optionnel,
            déduit de target_zone si absent).
+    ``ctx`` est accepté pour l'appel uniforme via ``dispatch`` mais ignoré
+    (séance template, sans données athlète).
     """
     target_zone = (target_zone or "").lower()
     if target_zone not in HR_ZONE_KEYS:
@@ -775,7 +805,8 @@ TOOLS: dict[str, Callable[..., dict[str, Any]]] = {
 }
 
 
-def find_similar_activities(strava_id: int, limit: int = 10) -> dict[str, Any]:
+def find_similar_activities(strava_id: int, limit: int = 10, *,
+                            ctx: AthleteContext | None = None) -> dict[str, Any]:
     """Recherche les activités au profil similaire (même boucle).
 
     Délègue à ``processing.similar.find_similar_activities``. Wrapper local
@@ -785,19 +816,27 @@ def find_similar_activities(strava_id: int, limit: int = 10) -> dict[str, Any]:
     from domestique_ai.processing.similar import (
         find_similar_activities as _impl,
     )
-    return _impl(strava_id, limit=limit)
+    ctx = ctx or context_from_env()
+    return _impl(strava_id, limit=limit, db_path=ctx.db_path)
 
 
 TOOLS["find_similar_activities"] = find_similar_activities
 
 
-def dispatch(name: str, arguments: dict[str, Any]) -> dict[str, Any]:
-    """Exécute un tool par son nom et retourne son résultat (ou une erreur)."""
+def dispatch(name: str, arguments: dict[str, Any],
+             ctx: AthleteContext | None = None) -> dict[str, Any]:
+    """Exécute un tool par son nom, scopé sur l'athlète ``ctx``.
+
+    Le ``ctx`` est injecté à chaque tool (en plus des arguments fournis par le
+    LLM, qui n'incluent jamais ``ctx``). Tous les tools acceptent donc ``ctx``.
+    Fallback ``context_from_env()`` pour les appels hors requête (CLI, tests).
+    """
     fn = TOOLS.get(name)
     if fn is None:
         return {"error": f"Tool inconnu: {name}"}
+    ctx = ctx or context_from_env()
     try:
-        return fn(**(arguments or {}))
+        return fn(**(arguments or {}), ctx=ctx)
     except TypeError as exc:
         return {"error": f"Arguments invalides pour {name}: {exc}"}
     except Exception as exc:  # noqa: BLE001

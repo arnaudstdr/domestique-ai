@@ -57,15 +57,43 @@ def _first_run_delay_minutes() -> int:
     )
 
 
+def _sync_targets() -> list[tuple[dict, object]]:
+    """Athlètes à synchroniser : le propriétaire + ceux ayant des tokens Strava.
+
+    Le propriétaire (bootstrap) est toujours inclus (ses tokens legacy) ; les
+    autres athlètes ne sont retenus qu'une fois leur Strava connecté (fichier
+    tokens présent — après l'onboarding web 1c).
+    """
+    from domestique_ai.athlete_context import context_for_athlete
+    from domestique_ai.platform_db import get_or_create_bootstrap_coach, list_users
+
+    users = list_users()
+    if not any(u.get("is_bootstrap") for u in users):
+        get_or_create_bootstrap_coach()
+        users = list_users()
+
+    targets: list[tuple[dict, object]] = []
+    for user in users:
+        ctx = context_for_athlete(user)
+        if ctx.tokens_path.exists():
+            targets.append((user, ctx))
+    return targets
+
+
 def _auto_sync_job() -> None:
-    """Job appelé à chaque tick — skip silencieux si occupé."""
+    """Job appelé à chaque tick — sync chaque athlète ayant des tokens."""
     try:
-        triggered = trigger_sync_blocking()
+        targets = _sync_targets()
     except Exception:  # noqa: BLE001 — un job APScheduler ne doit jamais lever
-        log.exception("Auto-sync Strava : exception non gérée.")
+        log.exception("Auto-sync Strava : énumération des athlètes échouée.")
         return
-    if not triggered:
-        log.info("Auto-sync Strava : skip (sync déjà en cours).")
+    for user, ctx in targets:
+        key = user["public_id"]
+        try:
+            if not trigger_sync_blocking(ctx, key, user=user):
+                log.info("Auto-sync [%s] : skip (déjà en cours).", key[:8])
+        except Exception:  # noqa: BLE001 — un athlète KO n'arrête pas les autres
+            log.exception("Auto-sync [%s] : exception non gérée.", key[:8])
 
 
 def _healthcheck_interval_minutes() -> int:
