@@ -22,6 +22,8 @@ import type {
   PlanCreateRequest,
   PlanDetail,
   PlanSummary,
+  PrescriptionCreate,
+  PrescriptionOut,
   Profile,
   RideVolumeResponse,
   SimilarActivitiesResponse,
@@ -127,7 +129,11 @@ export function clearViewingAthlete(): void {
  */
 function withAthlete(path: string): string {
   const viewing = getViewingAthlete();
-  if (!viewing || path.startsWith("/api/auth/")) return path;
+  // /api/auth/* vise le compte courant ; /api/roster/* porte déjà le public_id
+  // cible dans son path — ni l'un ni l'autre ne prend le param ?athlete=.
+  if (!viewing || path.startsWith("/api/auth/") || path.startsWith("/api/roster/")) {
+    return path;
+  }
   const sep = path.includes("?") ? "&" : "?";
   return `${path}${sep}athlete=${encodeURIComponent(viewing)}`;
 }
@@ -357,6 +363,29 @@ export const api = {
         }),
       }),
     listInvitations: () => http<InvitationOut[]>(`/api/auth/invitations`),
+  },
+  // Prescriptions vues par l'athlète courant (ou le coach en consultation).
+  prescriptions: {
+    list: () => http<PrescriptionOut[]>(`/api/prescriptions`),
+  },
+  // Écritures coach → espace athlète (public_id dans le path, pas de withAthlete).
+  roster: {
+    listPrescriptions: (publicId: string) =>
+      http<PrescriptionOut[]>(`/api/roster/athletes/${publicId}/prescriptions`),
+    prescribe: (publicId: string, body: PrescriptionCreate) =>
+      http<PrescriptionOut>(`/api/roster/athletes/${publicId}/prescriptions`, {
+        method: "POST",
+        body: JSON.stringify(body),
+      }),
+    deletePrescription: (publicId: string, pid: number) =>
+      http<void>(`/api/roster/athletes/${publicId}/prescriptions/${pid}`, {
+        method: "DELETE",
+      }),
+    assignPlan: (publicId: string, body: PlanCreateRequest) =>
+      http<PlanDetail>(`/api/roster/athletes/${publicId}/plan`, {
+        method: "POST",
+        body: JSON.stringify(body),
+      }),
   },
 };
 

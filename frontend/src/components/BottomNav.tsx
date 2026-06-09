@@ -3,6 +3,7 @@ import {
   Bike,
   Bot,
   ClipboardList,
+  Dumbbell,
   LayoutDashboard,
   LineChart,
   Sunrise,
@@ -24,6 +25,7 @@ const ITEMS: NavItem[] = [
 const VIEWING_ITEMS: NavItem[] = [
   { to: "/", label: "Dashboard", Icon: LayoutDashboard },
   { to: "/activites", label: "Activités", Icon: Bike },
+  { to: "/prescrire", label: "Prescrire", Icon: Dumbbell },
   { to: "/tendances", label: "Tendances", Icon: LineChart },
   { to: "/plan", label: "Plan", Icon: ClipboardList },
 ];

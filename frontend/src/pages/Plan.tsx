@@ -4,6 +4,7 @@ import {
   Calendar,
   ClipboardList,
   Download,
+  Dumbbell,
   Library,
   Sparkles,
   Target,
@@ -15,7 +16,13 @@ import {
   streamLlmPlan,
   type LlmPlanEvent,
 } from "../api/client";
-import type { Objective, PlanDetail, PlanSummary, Workout } from "../api/types";
+import type {
+  Objective,
+  PlanDetail,
+  PlanSummary,
+  PrescriptionOut,
+  Workout,
+} from "../api/types";
 import PlanCalendar from "../components/PlanCalendar";
 import { useToast } from "../hooks/useToast";
 import { useViewing } from "../hooks/useViewing";
@@ -367,6 +374,8 @@ export default function Plan() {
         )}
       </div>
 
+      <PrescriptionsSection />
+
       {!viewing && (
       <div className="card space-y-3">
         <h2 className="flex items-center gap-2 font-display text-lg font-bold tracking-tight">
@@ -611,6 +620,57 @@ export default function Plan() {
       )}
 
       {!loadingDetail && detail && <PlanCalendar workouts={detail.workouts} />}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Séances prescrites par le coach (visible athlète + consultation coach)
+// ---------------------------------------------------------------------------
+
+function PrescriptionsSection() {
+  const [items, setItems] = useState<PrescriptionOut[] | null>(null);
+
+  useEffect(() => {
+    api.prescriptions
+      .list()
+      .then(setItems)
+      .catch(() => setItems([]));
+  }, []);
+
+  // On n'affiche les séances prescrites qu'à partir d'aujourd'hui.
+  const today = new Date().toISOString().slice(0, 10);
+  const upcoming = (items ?? []).filter((p) => p.date >= today);
+  if (upcoming.length === 0) return null;
+
+  return (
+    <div className="card space-y-3">
+      <h2 className="flex items-center gap-2 font-display text-lg font-bold tracking-tight">
+        <Dumbbell className="h-4 w-4 text-accent" strokeWidth={1.75} aria-hidden="true" />
+        Séances prescrites
+      </h2>
+      <ul className="space-y-2">
+        {upcoming.map((p) => (
+          <li
+            key={p.id}
+            className="rounded-xl border border-accent/30 bg-accent/[0.06] px-3 py-2.5"
+          >
+            <div className="flex items-center justify-between gap-2">
+              <span className="truncate text-sm text-gray-100">{p.workout.name}</span>
+              <span className="pill bg-accent/15 text-accent shrink-0">
+                par ton coach
+              </span>
+            </div>
+            <p className="text-[11px] text-muted">
+              {p.date} · {p.workout.duration_min}′ · {p.workout.target_zone.toUpperCase()} ·{" "}
+              {Math.round(p.workout.estimated_tss)} TSS
+            </p>
+            {p.workout.notes && (
+              <p className="text-[11px] italic text-muted">{p.workout.notes}</p>
+            )}
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }

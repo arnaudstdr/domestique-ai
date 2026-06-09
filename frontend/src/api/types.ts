@@ -435,3 +435,22 @@ export interface InvitationOut {
   created_at: string;
   accepted_at: string | null;
 }
+
+// ---- Prescription de séances (coach) ----------------------------------------
+
+export type PrescriptionKind = "recovery" | "endurance" | "tempo" | "intervals";
+
+export interface PrescriptionCreate {
+  date: string;
+  kind: PrescriptionKind;
+  duration_min: number;
+  notes?: string;
+}
+
+export interface PrescriptionOut {
+  id: number;
+  date: string;
+  created_at: string;
+  created_by: string | null;
+  workout: Workout;
+}

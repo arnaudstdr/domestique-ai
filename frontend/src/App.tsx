@@ -12,6 +12,7 @@ import Tendances from "./pages/Tendances";
 import Login from "./pages/Login";
 import AcceptInvite from "./pages/AcceptInvite";
 import Roster from "./pages/Roster";
+import Prescribe from "./pages/Prescribe";
 import { clearViewingAthlete } from "./api/client";
 import { useMe } from "./hooks/useMe";
 import { useViewing } from "./hooks/useViewing";
@@ -110,6 +111,7 @@ function AuthenticatedLayout() {
           <Route path="/tendances" element={<Tendances />} />
           <Route path="/profil" element={<Profil />} />
           <Route path="/roster" element={<Roster />} />
+          <Route path="/prescrire" element={<Prescribe />} />
         </Routes>
       </main>
       <BottomNav viewing={!!viewing} />
