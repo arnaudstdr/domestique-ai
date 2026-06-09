@@ -22,6 +22,7 @@ from domestique_ai.platform_db import (
     create_invitation,
     list_athletes_for_coach,
     list_invitations,
+    revoke_invitation,
     revoke_session,
 )
 
@@ -70,6 +71,7 @@ class InvitationCreated(BaseModel):
 
 
 class InvitationOut(BaseModel):
+    id: int
     role: str
     status: str
     created_at: str
@@ -152,6 +154,7 @@ def create_invite(
 def list_invites(coach: dict = Depends(require_coach)) -> list[InvitationOut]:  # noqa: B008
     return [
         InvitationOut(
+            id=i["id"],
             role=i["role"],
             status=i["status"],
             created_at=i["created_at"],
@@ -159,6 +162,19 @@ def list_invites(coach: dict = Depends(require_coach)) -> list[InvitationOut]:  
         )
         for i in list_invitations(created_by=coach["id"])
     ]
+
+
+@router.delete("/invitations/{invitation_id}", status_code=status.HTTP_204_NO_CONTENT)
+def revoke_invite(
+    invitation_id: int,
+    coach: dict = Depends(require_coach),  # noqa: B008
+) -> None:
+    """Révoque une invitation `pending` créée par le coach courant."""
+    if not revoke_invitation(invitation_id, created_by=coach["id"]):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Invitation introuvable ou déjà utilisée.",
+        )
 
 
 @router.get("/athletes", response_model=list[AthleteSummary])

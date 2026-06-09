@@ -417,6 +417,34 @@ def list_invitations(created_by: int | None = None,
         conn.close()
 
 
+def revoke_invitation(invitation_id: int, created_by: int | None = None,
+                      path: Path | None = None) -> bool:
+    """Révoque une invitation ``pending``. Retourne True si une ligne a changé.
+
+    Si ``created_by`` est fourni, seule une invitation créée par ce coach peut
+    être révoquée (isolation). On ne révoque que les invitations encore
+    ``pending`` (une invitation déjà acceptée/révoquée n'est pas touchée).
+    """
+    conn = _connect(path)
+    try:
+        if created_by is None:
+            cur = conn.execute(
+                "UPDATE invitations SET status = 'revoked' "
+                "WHERE id = ? AND status = 'pending'",
+                (invitation_id,),
+            )
+        else:
+            cur = conn.execute(
+                "UPDATE invitations SET status = 'revoked' "
+                "WHERE id = ? AND status = 'pending' AND created_by = ?",
+                (invitation_id, created_by),
+            )
+        conn.commit()
+        return cur.rowcount > 0
+    finally:
+        conn.close()
+
+
 def accept_invitation(plaintext: str, display_name: str | None = None,
                       path: Path | None = None) -> tuple[dict[str, Any], str]:
     """Consomme une invitation : crée l'utilisateur + une session (+ lien coach si applicable).

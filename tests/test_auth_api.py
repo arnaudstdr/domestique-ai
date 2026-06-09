@@ -122,6 +122,48 @@ def test_accept_unknown_invite_fails(client: TestClient) -> None:
     assert r.status_code == 400
 
 
+# ---- Révocation d'invitation ------------------------------------------------
+
+
+def test_revoke_pending_invitation(client: TestClient) -> None:
+    r = client.post(
+        "/api/auth/invitations", headers=_bearer(_LEGACY), json={"role": "athlete"}
+    )
+    invite_token = r.json()["invite_token"]
+    listed = client.get("/api/auth/invitations", headers=_bearer(_LEGACY)).json()
+    inv_id = listed[0]["id"]
+
+    # Révocation par le coach créateur.
+    d = client.delete(f"/api/auth/invitations/{inv_id}", headers=_bearer(_LEGACY))
+    assert d.status_code == 204
+    # Le statut passe à revoked.
+    after = client.get("/api/auth/invitations", headers=_bearer(_LEGACY)).json()
+    assert after[0]["status"] == "revoked"
+    # Le lien révoqué n'est plus acceptable.
+    acc = client.post("/api/auth/accept-invite", json={"invite_token": invite_token})
+    assert acc.status_code == 400
+
+
+def test_revoke_unknown_invitation_404(client: TestClient) -> None:
+    assert client.delete("/api/auth/invitations/9999", headers=_bearer(_LEGACY)).status_code == 404
+
+
+def test_revoke_already_accepted_invitation_404(client: TestClient) -> None:
+    r = client.post(
+        "/api/auth/invitations", headers=_bearer(_LEGACY), json={"role": "athlete"}
+    )
+    invite_token = r.json()["invite_token"]
+    client.post("/api/auth/accept-invite", json={"invite_token": invite_token})
+    inv_id = client.get("/api/auth/invitations", headers=_bearer(_LEGACY)).json()[0]["id"]
+    # Une invitation déjà acceptée n'est pas révocable (statut != pending).
+    assert client.delete(f"/api/auth/invitations/{inv_id}", headers=_bearer(_LEGACY)).status_code == 404
+
+
+def test_athlete_cannot_revoke_invitation(client: TestClient) -> None:
+    session_token = _invite_and_accept(client, role="athlete")
+    assert client.delete("/api/auth/invitations/1", headers=_bearer(session_token)).status_code == 403
+
+
 # ---- Logout révoque la session ----------------------------------------------
 
 
