@@ -430,6 +430,7 @@ export interface InvitationCreated {
 }
 
 export interface InvitationOut {
+  id: number;
   role: string;
   status: string;
   created_at: string;

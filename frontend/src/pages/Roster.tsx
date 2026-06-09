@@ -7,6 +7,7 @@ import {
   Eye,
   Link2,
   Plus,
+  Trash2,
   Users,
 } from "lucide-react";
 import { api, ApiError, setViewingAthlete } from "../api/client";
@@ -187,6 +188,17 @@ function InvitationsSection() {
     push(ok ? "Lien copié." : "Copie impossible — sélectionne le lien.", ok ? "success" : "error");
   }
 
+  async function revoke(id: number) {
+    try {
+      await api.auth.revokeInvitation(id);
+      push("Invitation révoquée.", "success");
+      refresh();
+    } catch (err) {
+      const msg = err instanceof ApiError ? err.message : String(err);
+      push(`Révocation : ${msg}`, "error");
+    }
+  }
+
   return (
     <section className="card space-y-3">
       <h3 className="flex items-center gap-2 text-sm font-medium text-gray-200">
@@ -226,23 +238,36 @@ function InvitationsSection() {
 
       {invitations && invitations.length > 0 && (
         <ul className="space-y-1.5 pt-1">
-          {invitations.map((inv, i) => (
+          {invitations.map((inv) => (
             <li
-              key={`${inv.created_at}-${i}`}
+              key={inv.id}
               className="flex items-center justify-between gap-2 text-[11px] text-muted"
             >
               <span>
                 {inv.role} · {inv.created_at.slice(0, 10)}
               </span>
-              <span
-                className={`pill ${
-                  inv.status === "accepted" ? "text-accent" : "text-muted"
-                }`}
-              >
-                {inv.status === "accepted" ? (
-                  <Check className="h-3 w-3" strokeWidth={1.75} aria-hidden="true" />
-                ) : null}
-                {inv.status}
+              <span className="flex items-center gap-2">
+                <span
+                  className={`pill ${
+                    inv.status === "accepted" ? "text-accent" : "text-muted"
+                  }`}
+                >
+                  {inv.status === "accepted" ? (
+                    <Check className="h-3 w-3" strokeWidth={1.75} aria-hidden="true" />
+                  ) : null}
+                  {inv.status}
+                </span>
+                {inv.status === "pending" && (
+                  <button
+                    type="button"
+                    onClick={() => revoke(inv.id)}
+                    aria-label="Révoquer l'invitation"
+                    title="Révoquer"
+                    className="rounded-md border border-red-500/30 bg-red-500/10 p-1 text-red-400 hover:bg-red-500/20"
+                  >
+                    <Trash2 className="h-3.5 w-3.5" strokeWidth={1.75} aria-hidden="true" />
+                  </button>
+                )}
               </span>
             </li>
           ))}

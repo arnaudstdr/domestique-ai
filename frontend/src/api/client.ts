@@ -363,6 +363,8 @@ export const api = {
         }),
       }),
     listInvitations: () => http<InvitationOut[]>(`/api/auth/invitations`),
+    revokeInvitation: (id: number) =>
+      http<void>(`/api/auth/invitations/${id}`, { method: "DELETE" }),
   },
   // Prescriptions vues par l'athlète courant (ou le coach en consultation).
   prescriptions: {
