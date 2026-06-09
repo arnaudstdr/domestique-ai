@@ -11,6 +11,7 @@ import Profil from "./pages/Profil";
 import Tendances from "./pages/Tendances";
 import Login from "./pages/Login";
 import AcceptInvite from "./pages/AcceptInvite";
+import Reconnect from "./pages/Reconnect";
 import Roster from "./pages/Roster";
 import Prescribe from "./pages/Prescribe";
 import { clearViewingAthlete } from "./api/client";
@@ -124,6 +125,7 @@ export default function App() {
     <Routes>
       <Route path="/login" element={<Login />} />
       <Route path="/accept-invite" element={<AcceptInvite />} />
+      <Route path="/reconnect" element={<Reconnect />} />
       <Route path="/*" element={<AuthenticatedLayout />} />
     </Routes>
   );

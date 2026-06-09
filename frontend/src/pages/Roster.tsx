@@ -5,6 +5,7 @@ import {
   Check,
   Copy,
   Eye,
+  KeyRound,
   Link2,
   Plus,
   Trash2,
@@ -45,6 +46,7 @@ function formatDate(iso: string | null): string {
 
 function AthletesSection() {
   const [athletes, setAthletes] = useState<AthleteSummary[] | null>(null);
+  const [linking, setLinking] = useState<string | null>(null);
   const navigate = useNavigate();
   const { push } = useToast();
 
@@ -62,6 +64,25 @@ function AthletesSection() {
   function consult(a: AthleteSummary) {
     setViewingAthlete(a.public_id, a.display_name);
     navigate("/");
+  }
+
+  async function reconnectLink(a: AthleteSummary) {
+    setLinking(a.public_id);
+    try {
+      const { reconnect_url } = await api.roster.reconnectLink(a.public_id);
+      const ok = await copyToClipboard(reconnect_url);
+      push(
+        ok
+          ? "Lien de reconnexion copié — transmets-le à l'athlète (valable 24 h)."
+          : `Lien de reconnexion : ${reconnect_url}`,
+        ok ? "success" : "info",
+      );
+    } catch (err) {
+      const msg = err instanceof ApiError ? err.message : String(err);
+      push(`Reconnexion : ${msg}`, "error");
+    } finally {
+      setLinking(null);
+    }
   }
 
   return (
@@ -105,14 +126,27 @@ function AthletesSection() {
                 </p>
                 <p className="text-[11px] text-muted">{formatDate(a.last_activity_date)}</p>
               </div>
-              <button
-                type="button"
-                onClick={() => consult(a)}
-                className="btn-ghost flex shrink-0 items-center gap-1.5 px-3 py-2 text-xs"
-              >
-                <Eye className="h-4 w-4" strokeWidth={1.75} aria-hidden="true" />
-                Consulter
-              </button>
+              <div className="flex shrink-0 items-center gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => reconnectLink(a)}
+                  disabled={linking === a.public_id}
+                  aria-label="Générer un lien de reconnexion"
+                  title="Lien de reconnexion (si l'athlète s'est déconnecté)"
+                  className="btn-ghost flex items-center gap-1.5 px-3 py-2 text-xs"
+                >
+                  <KeyRound className="h-4 w-4" strokeWidth={1.75} aria-hidden="true" />
+                  {linking === a.public_id ? "…" : "Reconnexion"}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => consult(a)}
+                  className="btn-ghost flex items-center gap-1.5 px-3 py-2 text-xs"
+                >
+                  <Eye className="h-4 w-4" strokeWidth={1.75} aria-hidden="true" />
+                  Consulter
+                </button>
+              </div>
             </li>
           ))}
         </ul>

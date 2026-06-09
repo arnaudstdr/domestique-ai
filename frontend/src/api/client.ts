@@ -25,6 +25,7 @@ import type {
   PrescriptionCreate,
   PrescriptionOut,
   Profile,
+  ReconnectLink,
   RideVolumeResponse,
   SimilarActivitiesResponse,
   StravaAuthorize,
@@ -350,6 +351,11 @@ export const api = {
         }),
       }),
     logout: () => http<{ status: string }>(`/api/auth/logout`, { method: "POST" }),
+    reconnect: (token: string) =>
+      http<AcceptInviteResponse>(`/api/auth/reconnect`, {
+        method: "POST",
+        body: JSON.stringify({ token }),
+      }),
     athletes: () => http<AthleteSummary[]>(`/api/auth/athletes`),
     createInvitation: (
       role: "coach" | "athlete" = "athlete",
@@ -387,6 +393,10 @@ export const api = {
       http<PlanDetail>(`/api/roster/athletes/${publicId}/plan`, {
         method: "POST",
         body: JSON.stringify(body),
+      }),
+    reconnectLink: (publicId: string) =>
+      http<ReconnectLink>(`/api/roster/athletes/${publicId}/reconnect-link`, {
+        method: "POST",
       }),
   },
 };

@@ -455,3 +455,8 @@ export interface PrescriptionOut {
   created_by: string | null;
   workout: Workout;
 }
+
+export interface ReconnectLink {
+  reconnect_url: string;
+  expires_at: string | null;
+}
