@@ -7,6 +7,7 @@ clair n'est renvoyé qu'une seule fois (création d'invitation, acceptation).
 from __future__ import annotations
 
 import datetime as dt
+import sqlite3
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
@@ -14,10 +15,12 @@ from pydantic import BaseModel, Field
 
 from domestique_ai.api.deps import get_current_user, require_coach
 from domestique_ai.api.logging import get_logger
+from domestique_ai.athlete_context import context_for_athlete
 from domestique_ai.platform_db import (
     InvitationError,
     accept_invitation,
     create_invitation,
+    list_athletes_for_coach,
     list_invitations,
     revoke_session,
 )
@@ -84,6 +87,36 @@ class SessionTokenOut(BaseModel):
     role: str
 
 
+class AthleteSummary(BaseModel):
+    public_id: str
+    display_name: str | None = None
+    strava_connected: bool
+    last_activity_date: str | None = None
+    n_activities: int = 0
+
+
+def _athlete_activity_stats(db_path) -> tuple[int, str | None]:
+    """(nombre d'activités, date ISO de la dernière) pour la DB d'un athlète.
+
+    Best-effort : ``(0, None)`` si la DB n'existe pas encore (athlète jamais
+    synchronisé) ou si la table ``activities`` est absente. On teste l'existence
+    du fichier AVANT ``sqlite3.connect`` pour ne pas créer de DB vide.
+    """
+    if not db_path.exists():
+        return 0, None
+    try:
+        conn = sqlite3.connect(db_path)
+        try:
+            row = conn.execute(
+                "SELECT COUNT(*), MAX(date) FROM activities"
+            ).fetchone()
+        finally:
+            conn.close()
+    except sqlite3.OperationalError:
+        return 0, None
+    return (row[0] or 0), row[1]
+
+
 @router.get("/me", response_model=MeResponse)
 def me(user: dict = Depends(get_current_user)) -> MeResponse:  # noqa: B008
     return MeResponse(
@@ -126,6 +159,24 @@ def list_invites(coach: dict = Depends(require_coach)) -> list[InvitationOut]:  
         )
         for i in list_invitations(created_by=coach["id"])
     ]
+
+
+@router.get("/athletes", response_model=list[AthleteSummary])
+def list_athletes(coach: dict = Depends(require_coach)) -> list[AthleteSummary]:  # noqa: B008
+    out: list[AthleteSummary] = []
+    for athlete in list_athletes_for_coach(coach["id"]):
+        ctx = context_for_athlete(athlete)
+        n_activities, last_date = _athlete_activity_stats(ctx.db_path)
+        out.append(
+            AthleteSummary(
+                public_id=athlete["public_id"],
+                display_name=athlete.get("display_name"),
+                strava_connected=ctx.tokens_path.exists(),
+                last_activity_date=last_date,
+                n_activities=n_activities,
+            )
+        )
+    return out
 
 
 @router.post("/accept-invite", response_model=SessionTokenOut)
