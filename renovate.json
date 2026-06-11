@@ -1,0 +1,45 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": [
+    "config:recommended",
+    ":dependencyDashboard",
+    ":semanticCommits"
+  ],
+  "timezone": "Europe/Paris",
+  "schedule": ["before 9am on monday"],
+  "prConcurrentLimit": 5,
+  "prHourlyLimit": 0,
+  "labels": ["dependencies"],
+  "commitMessagePrefix": "chore(deps):",
+  "lockFileMaintenance": {
+    "enabled": false
+  },
+  "vulnerabilityAlerts": {
+    "labels": ["security"],
+    "schedule": ["at any time"]
+  },
+  "packageRules": [
+    {
+      "description": "Regroupe toutes les MAJ non-majeures en un seul lot hebdomadaire",
+      "matchUpdateTypes": ["minor", "patch", "pin", "digest"],
+      "groupName": "dépendances non-majeures"
+    },
+    {
+      "description": "Automerge des GitHub Actions (minor/patch/digest) une fois la CI verte",
+      "matchManagers": ["github-actions"],
+      "matchUpdateTypes": ["minor", "patch", "digest", "pin"],
+      "automerge": true
+    },
+    {
+      "description": "Automerge des dépendances de dev (patch/minor) une fois la CI verte",
+      "matchFileNames": ["requirements-dev.txt"],
+      "matchUpdateTypes": ["minor", "patch"],
+      "automerge": true
+    },
+    {
+      "description": "MAJ majeures : PR séparées, jamais d'automerge",
+      "matchUpdateTypes": ["major"],
+      "automerge": false
+    }
+  ]
+}
