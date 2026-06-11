@@ -46,3 +46,7 @@ node_modules/
 dist/
 
 .code-review.json
+
+# graphify
+graphify-out/
+.claude/
