@@ -48,7 +48,7 @@ def save_plan(
             "(created_at, target_date, target_event_type, sessions_per_week, weeks, payload) "
             "VALUES (?, ?, ?, ?, ?, ?)",
             (
-                _dt.datetime.now(_dt.timezone.utc).isoformat(timespec="seconds"),
+                _dt.datetime.now(_dt.UTC).isoformat(timespec="seconds"),
                 target_date.isoformat() if target_date else None,
                 target_event_type,
                 sessions_per_week,

@@ -57,7 +57,7 @@ def build_gpx(
     watts = streams.get("watts") or []
 
     if start_time.tzinfo is None:
-        start_time = start_time.replace(tzinfo=dt.timezone.utc)
+        start_time = start_time.replace(tzinfo=dt.UTC)
 
     ET.register_namespace("", GPX_NS)
     ET.register_namespace("gpxtpx", GPXTPX_NS)
@@ -118,5 +118,5 @@ def build_gpx(
 def _iso(t: dt.datetime) -> str:
     """ISO 8601 UTC avec suffixe Z (format attendu par les imports GPX)."""
     if t.tzinfo is not None:
-        t = t.astimezone(dt.timezone.utc)
+        t = t.astimezone(dt.UTC)
     return t.strftime("%Y-%m-%dT%H:%M:%SZ")

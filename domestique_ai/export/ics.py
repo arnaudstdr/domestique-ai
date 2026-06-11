@@ -84,7 +84,7 @@ def _format_dt_floating(date_iso: str, hour: int, minute: int = 0) -> str:
 
 def _format_dt_utc(moment: _dt.datetime) -> str:
     """Format ``DTSTAMP`` : ``20260521T143000Z`` (toujours en UTC)."""
-    return moment.astimezone(_dt.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    return moment.astimezone(_dt.UTC).strftime("%Y%m%dT%H%M%SZ")
 
 
 def _format_duration(duration_min: int) -> str:
@@ -166,7 +166,7 @@ def plan_to_ics(
         Le fichier ``.ics`` complet en bytes, prêt à être renvoyé par
         ``fastapi.Response`` avec ``media_type="text/calendar"``.
     """
-    dtstamp = _format_dt_utc(now or _dt.datetime.now(_dt.timezone.utc))
+    dtstamp = _format_dt_utc(now or _dt.datetime.now(_dt.UTC))
     lines: list[str] = [
         "BEGIN:VCALENDAR",
         "VERSION:2.0",

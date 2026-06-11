@@ -146,7 +146,7 @@ def create_reconnect_link(
     """
     target, _ctx = _athlete_ctx(public_id, coach)
     expires_at = (
-        dt.datetime.now(dt.timezone.utc) + dt.timedelta(minutes=_RECONNECT_TTL_MIN)
+        dt.datetime.now(dt.UTC) + dt.timedelta(minutes=_RECONNECT_TTL_MIN)
     ).isoformat()
     _row, token = create_reconnect_token(target["id"], expires_at=expires_at)
     base = get_app_base_url()

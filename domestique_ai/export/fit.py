@@ -108,7 +108,7 @@ def workout_to_fit(workout: Workout, hr_rest: float | None = None,
     file_id.type = FileType.WORKOUT
     file_id.manufacturer = Manufacturer.DEVELOPMENT.value
     file_id.product = 0
-    file_id.time_created = round(_dt.datetime.now(_dt.timezone.utc).timestamp() * 1000)
+    file_id.time_created = round(_dt.datetime.now(_dt.UTC).timestamp() * 1000)
     file_id.serial_number = 0x12345678
 
     workout_msg = WorkoutMessage()

@@ -151,7 +151,7 @@ def start_scheduler() -> None:
             id="strava_auto_sync",
             coalesce=True,
             max_instances=1,
-            next_run_time=dt.datetime.now(dt.timezone.utc)
+            next_run_time=dt.datetime.now(dt.UTC)
             + dt.timedelta(minutes=delay),
         )
         log.info(
@@ -174,7 +174,7 @@ def start_scheduler() -> None:
             id="healthcheck_ping",
             coalesce=True,
             max_instances=1,
-            next_run_time=dt.datetime.now(dt.timezone.utc),
+            next_run_time=dt.datetime.now(dt.UTC),
         )
         log.info(
             "Scheduler : ping Healthchecks.io toutes les %d min.", hc_interval

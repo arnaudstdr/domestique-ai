@@ -89,7 +89,7 @@ def save(
                 tsb_rounded,
                 json.dumps(payload, ensure_ascii=False),
                 source,
-                _dt.datetime.now(_dt.timezone.utc).isoformat(timespec="seconds"),
+                _dt.datetime.now(_dt.UTC).isoformat(timespec="seconds"),
             ),
         )
         conn.commit()

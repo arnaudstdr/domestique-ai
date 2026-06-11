@@ -111,11 +111,7 @@ async def chat_structured(
             ),
             timeout=timeout_s,
         )
-    except (
-        ConnectionError,
-        ollama.ResponseError,
-        asyncio.TimeoutError,
-    ):
+    except (TimeoutError, ConnectionError, ollama.ResponseError):
         return None
     except Exception:  # noqa: BLE001 — best-effort, on retombe sur le fallback
         return None

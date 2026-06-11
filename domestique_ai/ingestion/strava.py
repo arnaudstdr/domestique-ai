@@ -597,7 +597,7 @@ def _last_activity_timestamp(db_path: Path | None = None, *,
     except ValueError:
         return None
     if when.tzinfo is None:
-        when = when.replace(tzinfo=dt.timezone.utc)
+        when = when.replace(tzinfo=dt.UTC)
     return int((when - dt.timedelta(hours=1)).timestamp())
 
 

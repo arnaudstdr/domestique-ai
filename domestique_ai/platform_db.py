@@ -36,7 +36,7 @@ class InvitationError(RuntimeError):
 # ---------------------------------------------------------------------------
 
 def _now() -> str:
-    return dt.datetime.now(dt.timezone.utc).isoformat()
+    return dt.datetime.now(dt.UTC).isoformat()
 
 
 def _is_expired(expires_at: str | None) -> bool:
@@ -47,8 +47,8 @@ def _is_expired(expires_at: str | None) -> bool:
     except ValueError:
         return False
     if when.tzinfo is None:
-        when = when.replace(tzinfo=dt.timezone.utc)
-    return dt.datetime.now(dt.timezone.utc) >= when
+        when = when.replace(tzinfo=dt.UTC)
+    return dt.datetime.now(dt.UTC) >= when
 
 
 def _connect(path: Path | None = None) -> sqlite3.Connection:

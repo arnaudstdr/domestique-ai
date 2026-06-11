@@ -71,7 +71,7 @@ def _parse_iso_utc(value: str) -> dt.datetime:
     """Parse un ISO date (``YYYY-MM-DD`` ou datetime complet) en UTC."""
     when = dt.datetime.fromisoformat(value.replace("Z", "+00:00"))
     if when.tzinfo is None:
-        when = when.replace(tzinfo=dt.timezone.utc)
+        when = when.replace(tzinfo=dt.UTC)
     return when
 
 
@@ -112,7 +112,7 @@ def list_activities(
     """
     activities = fetch_activities_from_db(ctx=ctx)
     if days is not None:
-        cutoff = dt.datetime.now(dt.timezone.utc) - dt.timedelta(days=days)
+        cutoff = dt.datetime.now(dt.UTC) - dt.timedelta(days=days)
         activities = [
             a for a in activities
             if (when := _activity_date(a)) is not None and when >= cutoff

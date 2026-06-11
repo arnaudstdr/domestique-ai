@@ -19,7 +19,7 @@ def _ns_tpx(tag: str) -> str:
 
 
 def test_build_gpx_full_streams():
-    start = dt.datetime(2026, 5, 1, 8, 0, 0, tzinfo=dt.timezone.utc)
+    start = dt.datetime(2026, 5, 1, 8, 0, 0, tzinfo=dt.UTC)
     streams = {
         "latlng": [[45.7640, 4.8357], [45.7641, 4.8358], [45.7642, 4.8359]],
         "time": [0, 5, 10],
@@ -60,7 +60,7 @@ def test_build_gpx_full_streams():
 
 
 def test_build_gpx_minimal_streams():
-    start = dt.datetime(2026, 5, 1, 8, 0, 0, tzinfo=dt.timezone.utc)
+    start = dt.datetime(2026, 5, 1, 8, 0, 0, tzinfo=dt.UTC)
     streams = {
         "latlng": [[45.0, 4.0], [45.1, 4.1]],
         "time": [0, 60],
@@ -74,7 +74,7 @@ def test_build_gpx_minimal_streams():
 
 
 def test_build_gpx_skips_invalid_points():
-    start = dt.datetime(2026, 5, 1, 8, 0, 0, tzinfo=dt.timezone.utc)
+    start = dt.datetime(2026, 5, 1, 8, 0, 0, tzinfo=dt.UTC)
     streams = {
         "latlng": [[45.0, 4.0], [], [45.1, 4.1]],
         "time": [0, 5, 10],
@@ -94,7 +94,7 @@ def test_build_gpx_naive_datetime_assumed_utc():
 
 
 def test_build_gpx_raises_without_latlng():
-    start = dt.datetime(2026, 5, 1, 8, 0, 0, tzinfo=dt.timezone.utc)
+    start = dt.datetime(2026, 5, 1, 8, 0, 0, tzinfo=dt.UTC)
     with pytest.raises(ValueError, match="latlng"):
         build_gpx("X", start, {"time": [0, 1, 2]})
 

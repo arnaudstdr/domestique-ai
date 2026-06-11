@@ -15,7 +15,7 @@ from domestique_ai.export.ics import (
 )
 from domestique_ai.processing.plan_builder import Workout, WorkoutStep
 
-FIXED_NOW = dt.datetime(2026, 5, 21, 14, 30, 0, tzinfo=dt.timezone.utc)
+FIXED_NOW = dt.datetime(2026, 5, 21, 14, 30, 0, tzinfo=dt.UTC)
 
 
 def _make_workout(

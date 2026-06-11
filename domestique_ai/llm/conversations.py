@@ -46,7 +46,7 @@ def append_message(session_id: str, role: str, payload: dict[str, Any],
             "VALUES (?, ?, ?, ?)",
             (
                 session_id,
-                dt.datetime.now(dt.timezone.utc).isoformat(),
+                dt.datetime.now(dt.UTC).isoformat(),
                 role,
                 json.dumps(payload, ensure_ascii=False),
             ),
@@ -118,7 +118,7 @@ def set_session_title(session_id: str, title: str,
             (
                 session_id,
                 title.strip(),
-                dt.datetime.now(dt.timezone.utc).isoformat(),
+                dt.datetime.now(dt.UTC).isoformat(),
             ),
         )
         conn.commit()

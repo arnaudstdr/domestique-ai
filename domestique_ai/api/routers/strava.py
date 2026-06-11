@@ -84,7 +84,7 @@ def _claim_sync(key: str) -> bool:
             "status": "syncing",
             "inserted": None,
             "error": None,
-            "started_at": dt.datetime.now(dt.timezone.utc).isoformat(),
+            "started_at": dt.datetime.now(dt.UTC).isoformat(),
             "finished_at": None,
         }
     return True
@@ -116,7 +116,7 @@ def _run_sync(ctx: AthleteContext, key: str, *, user: dict | None = None) -> Non
             key,
             status="error",
             error="STRAVA_CLIENT_ID / STRAVA_CLIENT_SECRET absents.",
-            finished_at=dt.datetime.now(dt.timezone.utc).isoformat(),
+            finished_at=dt.datetime.now(dt.UTC).isoformat(),
         )
         return
     try:
@@ -126,14 +126,14 @@ def _run_sync(ctx: AthleteContext, key: str, *, user: dict | None = None) -> Non
         log.error("Sync Strava [%s] : erreur d'authentification : %s", key[:8], exc)
         _set_state(
             key, status="error", error=str(exc),
-            finished_at=dt.datetime.now(dt.timezone.utc).isoformat(),
+            finished_at=dt.datetime.now(dt.UTC).isoformat(),
         )
         return
     except Exception as exc:  # noqa: BLE001 — on remonte tout au front
         log.exception("Sync Strava [%s] : exception non gérée", key[:8])
         _set_state(
             key, status="error", error=f"{type(exc).__name__}: {exc}",
-            finished_at=dt.datetime.now(dt.timezone.utc).isoformat(),
+            finished_at=dt.datetime.now(dt.UTC).isoformat(),
         )
         return
 
@@ -142,7 +142,7 @@ def _run_sync(ctx: AthleteContext, key: str, *, user: dict | None = None) -> Non
              key[:8], duration, inserted)
     _set_state(
         key, status="done", inserted=inserted, error=None,
-        finished_at=dt.datetime.now(dt.timezone.utc).isoformat(),
+        finished_at=dt.datetime.now(dt.UTC).isoformat(),
     )
 
     # Notif push best-effort — n'altère ni le sync ni l'état exposé à l'API.
@@ -201,7 +201,7 @@ def get_authorize(
             detail="STRAVA_CLIENT_ID absent de l'environnement.",
         )
     expires_at = (
-        dt.datetime.now(dt.timezone.utc)
+        dt.datetime.now(dt.UTC)
         + dt.timedelta(minutes=_OAUTH_STATE_TTL_MIN)
     ).isoformat()
     _state_row, state = create_oauth_state(user["id"], expires_at=expires_at)

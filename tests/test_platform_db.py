@@ -10,11 +10,11 @@ from domestique_ai import platform_db as pdb
 
 
 def _past() -> str:
-    return (dt.datetime.now(dt.timezone.utc) - dt.timedelta(days=1)).isoformat()
+    return (dt.datetime.now(dt.UTC) - dt.timedelta(days=1)).isoformat()
 
 
 def _future() -> str:
-    return (dt.datetime.now(dt.timezone.utc) + dt.timedelta(days=1)).isoformat()
+    return (dt.datetime.now(dt.UTC) + dt.timedelta(days=1)).isoformat()
 
 
 @pytest.fixture(autouse=True)

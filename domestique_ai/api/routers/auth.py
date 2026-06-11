@@ -142,7 +142,7 @@ def create_invite(
     expires_at: str | None = None
     if body.expires_in_days:
         expires_at = (
-            dt.datetime.now(dt.timezone.utc)
+            dt.datetime.now(dt.UTC)
             + dt.timedelta(days=body.expires_in_days)
         ).isoformat()
     inv, token = create_invitation(

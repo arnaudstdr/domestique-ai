@@ -754,7 +754,7 @@ def test_last_activity_timestamp_uses_max_date_minus_1h(
     # 2025-04-05T18:30:00Z - 1h = 2025-04-05T17:30:00Z
     import datetime as dt
     expected = int(
-        dt.datetime(2025, 4, 5, 17, 30, tzinfo=dt.timezone.utc).timestamp()
+        dt.datetime(2025, 4, 5, 17, 30, tzinfo=dt.UTC).timestamp()
     )
     assert _last_activity_timestamp(db_path=db_path) == expected
 
@@ -810,7 +810,7 @@ def test_sync_activities_uses_last_timestamp_when_after_omitted(
     # 2025-04-01T08:00:00Z - 1h = 2025-04-01T07:00:00Z = epoch 1743490800
     import datetime as dt
     expected = int(
-        dt.datetime(2025, 4, 1, 7, 0, tzinfo=dt.timezone.utc).timestamp()
+        dt.datetime(2025, 4, 1, 7, 0, tzinfo=dt.UTC).timestamp()
     )
     assert client.received_after == expected
 

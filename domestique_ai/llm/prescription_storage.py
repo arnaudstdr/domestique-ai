@@ -97,7 +97,7 @@ def save_prescription(
 ) -> dict[str, Any]:
     """Construit et persiste une prescription. Retourne la ligne créée."""
     workout = workout_from_choice(date, kind, duration_min, notes)
-    created_at = _dt.datetime.now(_dt.timezone.utc).isoformat(timespec="seconds")
+    created_at = _dt.datetime.now(_dt.UTC).isoformat(timespec="seconds")
     payload = json.dumps(workout.to_dict(), ensure_ascii=False)
     conn = _connect(db_path)
     try:
