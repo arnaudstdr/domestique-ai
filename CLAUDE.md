@@ -5,7 +5,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Commandes courantes
 
 ```bash
-# Setup (Python ≥ 3.10, testé en 3.10 et 3.12 dans la CI)
+# Setup (Python ≥ 3.12, testé en 3.12 dans la CI)
 python -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev]"
 
