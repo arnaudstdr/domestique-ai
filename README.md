@@ -1,287 +1,370 @@
+<div align="center">
+
+<img src="frontend/public/icon-192.png" alt="DomestiqueAI" width="110" height="110" />
+
 # DomestiqueAI
 
-<p align="center">
-  <img src="frontend/public/icon-192.png" alt="Logo DomestiqueAI" width="120" height="120" />
-</p>
+### A self-hosted, privacy-first training companion for cyclists — powered by a local LLM coach that *never makes up a number.*
 
-![Python](https://img.shields.io/badge/python-3.12-slim.svg)
-![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)
+It ingests your rides, computes the same training-load metrics the pros use
+(CTL / ATL / TSB, hr-TSS, HR zones), flags overtraining before you feel it,
+and lets you *talk* to a coach that grounds every claim in your real data.
+
+<br/>
+
+![Python](https://img.shields.io/badge/Python-3.12-3776AB?logo=python&logoColor=white)
+![FastAPI](https://img.shields.io/badge/FastAPI-009688?logo=fastapi&logoColor=white)
+![React](https://img.shields.io/badge/React_18-20232A?logo=react&logoColor=61DAFB)
+![TypeScript](https://img.shields.io/badge/TypeScript-3178C6?logo=typescript&logoColor=white)
+![Ollama](https://img.shields.io/badge/Ollama-local_LLM-blueviolet?logo=ollama&logoColor=white)
+![Docker](https://img.shields.io/badge/Docker-ready-2496ED?logo=docker&logoColor=white)
+<br/>
 ![CI](https://github.com/arnaudstdr/domestique-ai/actions/workflows/ci.yml/badge.svg)
 [![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
-![FastAPI](https://img.shields.io/badge/FastAPI-009688?logo=fastapi&logoColor=white)
-![React](https://img.shields.io/badge/React-20232A?logo=react&logoColor=61DAFB)
-![Ollama](https://img.shields.io/badge/Ollama-LLM-blueviolet?logo=ollama&logoColor=white)
-![Docker](https://img.shields.io/badge/docker-ready-blue?logo=docker&logoColor=white)
+![Tests](https://img.shields.io/badge/tests-500%2B-success)
+![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)
 
-The smart assistant for cyclists. Automatic training load analysis,
-fitness state, detailed view of each ride (GPS map, HR / elevation /
-power charts, GPX export), **overtraining signal detection** (chronic
-TSB, Monotony/Strain, HRV, resting HR) and a **conversational LLM
-coach** that analyzes your rides on demand without making up a single
-number.
+<br/>
 
-## Architecture
+<table>
+  <tr>
+    <td><img src="docs/screenshots/dashboard.jpg" alt="Dashboard — CTL/ATL/TSB and training-load curve" /></td>
+    <td><img src="docs/screenshots/coach.jpg" alt="LLM coach — grounded conversation citing real numbers" /></td>
+    <td><img src="docs/screenshots/activity.jpg" alt="Activity detail — GPS map and rich metrics" /></td>
+  </tr>
+  <tr>
+    <td align="center"><sub><b>Dashboard</b> — fitness state &amp; alerts</sub></td>
+    <td align="center"><sub><b>Coach</b> — grounded, no hallucinated numbers</sub></td>
+    <td align="center"><sub><b>Activity</b> — map, HR / power / elevation</sub></td>
+  </tr>
+</table>
+
+</div>
+
+---
+
+## The problem it solves
+
+Tools like TrainingPeaks are powerful but **expensive, closed, and they own your data**.
+Generic AI chatbots will happily *invent* a TSB value or a heart-rate zone — useless,
+sometimes dangerous, for training decisions.
+
+**DomestiqueAI** is the opposite bet:
+
+- 🔒 **You own everything.** SQLite on your own hardware. No cloud, no subscription, no data broker.
+- 🧠 **A coach that can't lie about numbers.** The LLM is *forced* to call a Python tool
+  before stating any metric. The math lives in tested code; the model only explains it.
+- 🏠 **Runs on a Raspberry Pi.** The whole stack — API, PWA, local LLM — self-hosts on a Pi 5,
+  reachable from anywhere over Tailscale.
+
+> **In one line:** an end-to-end product — data pipeline, sports-science engine, agentic LLM,
+> PWA and self-hosted deployment — built and shipped solo.
+
+<p align="center">
+  <img src="docs/screenshots/daily-brief.jpg" alt="Daily brief — an LLM-written summary plus physiology-based alerts" width="340" />
+  <br/>
+  <sub>The proactive daily brief: an LLM-written summary on top of physiology-based overtraining alerts.</sub>
+</p>
+
+---
+
+## Highlights
+
+<table>
+<tr>
+<td width="50%" valign="top">
+
+### 🧮 A real sports-science engine
+Not a wrapper around an API. `hr-TSS` is a **Banister exponential TRIMP**,
+normalized so 1 h at threshold = exactly **100 points** — making it
+interchangeable with power-based TSS. CTL / ATL / TSB are EMAs computed over
+*every* calendar day, rest days included.
+
+</td>
+<td width="50%" valign="top">
+
+### 🤖 An agentic coach with guardrails
+The LLM runs a **tool-calling loop** over 8 typed tools. A golden rule in the
+system prompt forbids any unsourced figure. `thinking` mode is toggled per turn
+to balance reliability and latency. Responses **stream over SSE**, token by token.
+
+</td>
+</tr>
+<tr>
+<td width="50%" valign="top">
+
+### 🩺 Overtraining detection
+Four automatic indicators grounded in the physiology literature
+(**Foster 2001, Banister**): chronic TSB, Monotony, Strain, weekly volume jump —
+plus an optional morning-metrics module (HRV, resting HR, sleep) with a
+14-day rolling baseline and drift alerts.
+
+</td>
+<td width="50%" valign="top">
+
+### 🛡️ LLM output you can trust
+Plan generation is **two-stage**: the LLM only picks high-level choices, then
+*deterministic validators* enforce availability, weekly rest, 80/20 polarization
+and a CTL-based TSS ceiling. If the model fails, a deterministic builder takes
+over — week by week.
+
+</td>
+</tr>
+<tr>
+<td width="50%" valign="top">
+
+### 📲 Installable PWA
+React 18 + Vite + Tailwind, offline-aware service worker (NetworkFirst on `/api/`).
+Interactive GPS maps (react-leaflet), live charts (recharts), `.GPX` / `.FIT` export,
+and a one-click **push to Garmin Connect** (also streamed over SSE).
+
+</td>
+<td width="50%" valign="top">
+
+### 🔁 An idempotent, resilient pipeline
+Incremental Strava sync derived from `MAX(date)`, soft schema migrations,
+a background scheduler with anti-overlap claims, **Pushover** notifications and a
+**Healthchecks.io dead-man's-switch** so a crash on the Pi notifies *you*.
+
+</td>
+</tr>
+</table>
+
+---
+
+## Tech stack
+
+| Layer | Choice | Why |
+|---|---|---|
+| **Backend** | FastAPI · Pydantic v2 · APScheduler · `sse-starlette` | Async, typed, one router per domain (12 of them) |
+| **Frontend** | React 18 · Vite · TypeScript · Tailwind · recharts · react-leaflet | Installable PWA, manual service worker |
+| **LLM** | Ollama (local) · agentic tool-calling loop | Privacy, zero API cost, no hallucinated metrics |
+| **Data** | SQLite (single source of truth) | Idempotent on `strava_id`, soft migrations |
+| **Integrations** | Strava OAuth2 · Garmin Connect · Pushover · Healthchecks.io | Real third-party APIs, real failure handling |
+| **Quality** | pytest (500+ tests) · Ruff · GitHub Actions CI | Tested, linted, green on every push |
+| **Deploy** | Docker · Raspberry Pi 5 · Tailscale Funnel | Self-hosted, reachable anywhere |
+
+### Architecture
+
+A 4-layer pipeline, each isolated in its own sub-package:
+
+```text
+config.py  ──►  ingestion/  ──►  processing/  ──►  api/ + frontend/  (PWA)
+   │                │                │                    │
+   │                │                │                    └─ FastAPI + React
+   └─ .env / paths  └─ Strava + DB   └─ TSS, CTL/ATL/TSB   ▲
+                              │                            │
+                              └──────────►  llm/  (agentic coach, SSE)
+```
 
 ```text
 domestique_ai/
-├── config.py                # data paths, FTP, HR profile, secrets via .env
-├── ingestion/
-│   ├── strava.py            # OAuth2 client + SQLite persistence (refresh, streams)
-│   └── strava_oauth_flow.py # initial interactive auth flow
-├── processing/
-│   ├── analyzer.py          # TSS / hr-TSS, CTL/ATL/TSB, HR zones (Karvonen)
-│   ├── gpx.py               # GPX 1.1 export from Strava streams
-│   ├── overtraining.py      # 4 auto indicators (chronic TSB, Monotony/Strain, weekly jump)
-│   └── morning_metrics.py   # CRUD HRV/resting HR/sleep/stress + baselines + alerts
-├── llm/
-│   ├── ollama_client.py     # Ollama SDK wrapper (async streaming + tool calling)
-│   ├── tools.py             # tools exposed to the LLM (load, activities, overtraining, plan, …)
-│   ├── coach.py             # coach agentic loop (system prompt + tool loop)
-│   ├── objectives.py        # YAML objective handling (data/objective.yaml)
-│   └── conversations.py     # chat session persistence (SQLite)
-├── api/                     # FastAPI app, one router per domain
-└── export/                  # FIT files + Garmin Connect push
+├── config.py          # data paths, FTP, HR profile, secrets — single source via .env
+├── ingestion/         # Strava OAuth2 client + SQLite persistence (refresh, streams)
+├── processing/        # TSS / hr-TSS, CTL/ATL/TSB, HR zones, overtraining, trends, plans
+├── llm/               # Ollama wrapper, tools, agentic coach loop, plan generator
+├── api/               # FastAPI app — one router per domain (+ SSE streaming)
+└── export/            # GPX / FIT files + Garmin Connect push
+frontend/              # React 18 + Vite + TypeScript + Tailwind PWA
 ```
 
-Frontend lives in `frontend/` (React 18 + Vite + TypeScript + Tailwind + recharts).
+---
 
-Source of truth: local SQLite (`data/strava_activities.db`). A single
-`activities` table with `strava_id` UNIQUE — idempotent ingestion.
+## Engineering decisions
 
-## Training load computation
+The choices below are where most of the design effort went — they're the part
+that's worth a conversation.
 
-Two modes, automatically selected based on available data:
+<details>
+<summary><b>Why a local LLM instead of the OpenAI / Anthropic API?</b></summary>
 
-- **Power TSS** — via `STRAVA_FTP` and the activity's average power.
-- **hr-TSS (normalized TRIMP)** — via average HR, `STRAVA_HR_REST` and
-  `STRAVA_HR_MAX`. Banister exponential TRIMP, normalized so that 1 h
-  spent at `STRAVA_LTHR_PCT` (88 % of HRR by default) is worth 100
-  points: same scale as power TSS.
+<br/>
 
-**Priority**: if HR + HRrest + HRmax are configured, hr-TSS takes
-precedence over power — handy without a reliable FTP. Use the
-« 🔁 Recalculate load » button in the dashboard to replay the score
-across the whole history after a profile change.
+Three reasons, in priority order: **privacy** (training data never leaves the user's
+hardware), **cost** (zero per-token billing on a tool that runs daily), and **control**
+(I can toggle `thinking` mode per turn and shape the tool loop without rate limits).
+The trade-off is model capability — mitigated by the guardrail architecture below:
+the model never *computes*, it only *explains* numbers produced by tested Python.
 
-### HR zones (%HRR Karvonen)
+</details>
 
-Each activity with an HR stream is split into 5 zones:
-Z1 (<60 %) · Z2 (60-70 %) · Z3 (70-80 %) · Z4 (80-90 %) · Z5 (≥90 %).
-Use the « 📥 Backfill HR zones » button in the sidebar to backfill
-history (1 Strava API call per activity, idempotent).
+<details>
+<summary><b>Why force the LLM through tools instead of giving it the data in the prompt?</b></summary>
 
-## Activity detail view
+<br/>
 
-Clicking a row in the activities table opens a Strava-like detailed
-view:
+A model handed a table of metrics will still paraphrase, round, or invent values under
+pressure. By exposing **8 typed tools** and a system prompt that forbids any quantitative
+claim without a tool call, the source of truth stays in code. The tools return
+JSON-serializable dicts computed by the same functions that power the dashboard — so the
+chat and the charts can never disagree.
 
-- **GPS map** of the track (pydeck PathLayer, fallback to `st.map`).
-- **Charts** for HR, elevation, power over time.
-- **GPX export** (1.1 + Garmin TrackPoint extensions for HR/cadence/power)
-  importable into Garmin Connect, Komoot, Zwift, RideWithGPS, etc.
-- **🤖 Analyze this ride**: button that queries the LLM coach. The
-  model calls `get_activity_details`, `get_training_load_state` and
-  `get_objective` to assess whether the session was *productive* or
-  *counter-productive* given current TSB and the objective, then
-  recommends what's next.
+<p align="center">
+  <img src="docs/screenshots/coach-tools.jpg" alt="Raw tool-call output the coach reads from — get_training_load_state returns the real CTL/ATL/TSB" width="320" />
+  <br/>
+  <sub>The coach reads CTL/ATL/TSB straight from a tool call — it never types a number itself.</sub>
+</p>
 
-Streams are fetched on demand (cached client-side, no DB bloat).
+</details>
 
-## Overtraining detection
+<details>
+<summary><b>Why normalize hr-TSS to 100 points at threshold?</b></summary>
 
-Two analysis levels, exposed in an **alert banner** at the top of the
-PWA dashboard and to the LLM coach via dedicated tools.
+<br/>
 
-### Automatic indicators (from activities)
+Without a reliable FTP, power-based TSS isn't available. A raw TRIMP score isn't
+comparable to TSS, which breaks CTL/ATL/TSB interpretation. Anchoring the Banister TRIMP
+so that **1 h at 88 % HRR = 100 points** makes the HR-derived score *interchangeable* with
+a power score on the same scale — the rest of the engine doesn't need to know which mode
+produced the load.
 
-Computed without external data — thresholds drawn from the physio
-literature (Foster 2001, Banister):
+</details>
 
-- **Chronic TSB** — 7-day TSB average. Alert if < -20.
-- **Foster Monotony** — `mean / stdev` of daily load over 7 d. Alert
-  if > 2.0 (not enough variability).
-- **Foster Strain** — `total_load × monotony`. Alert if > 6000.
-- **Weekly volume jump** — W vs W-1 comparison. Alert if > +30 %
-  (injury risk).
+<details>
+<summary><b>Why wrap LLM plan generation in deterministic validators?</b></summary>
 
-### Morning metrics (manual entry, Morning tab)
+<br/>
 
-For wristbands without a public API (typically Amazfit / Zepp): a
-daily form for HRV (ms), resting HR, sleep duration, sleep score
-(0-100), stress score (0-100). Stored in the `morning_metrics` table
-(key = date, idempotent).
+Free-form LLM output can produce dangerous training (e.g. 20 min of Z5 back-to-back).
+Instead, the LLM only picks high-level choices (`kind`, `duration`, `notes`); the code
+rebuilds the structure and then runs **four ordered guardrails**: availability, weekly
+rest cap, 80/20 polarization, and a CTL-based TSS ceiling. Each correction is surfaced in
+the UI as an "adjusted" badge. If validation fails twice, that week falls back to a fully
+deterministic builder — the others can stay LLM-generated.
 
-The module computes a **14-day rolling baseline** and alerts as soon
-as the latest value drifts more than 10 % in the unfavorable
-direction:
+</details>
 
-- HRV ↓, sleep ↓ → fatigue / poor recovery.
-- Resting HR ↑, stress ↑ → load not absorbed.
+<details>
+<summary><b>Why SQLite and not Postgres?</b></summary>
 
-Display: KPI baseline vs latest value (colored delta), 90-day charts
-across 4 panels.
+<br/>
 
-## LLM coach (Coach tab)
+The workload is single-user, read-heavy, and self-hosted on a Pi. SQLite means **zero
+ops, one file to back up, and trivial idempotency** via a `UNIQUE` constraint on
+`strava_id`. Schema evolution is handled with soft migrations (`_ensure_column`) so
+existing databases upgrade in place. Postgres would add operational weight for no benefit
+at this scale.
 
-Conversational coach powered by **Ollama** (default model
-`gemma4:31b-cloud`, override via `OLLAMA_MODEL`). Tool calling with 8
-tools:
+</details>
 
-| Tool | Usage |
-|---|---|
-| `get_training_load_state` | Today's CTL/ATL/TSB + interpretive zone |
-| `get_recent_activities` | Activities over the last N days |
-| `get_zone_distribution` | Cumulative breakdown by HR zone |
-| `get_objective` | Current training objective (YAML) |
-| `get_activity_details` | Activity detail by `strava_id` |
-| `get_morning_trends` | HRV/resting HR/sleep/stress baselines + alerts |
-| `get_overtraining_signals` | Chronic TSB, Monotony/Strain, weekly jump |
-| `propose_workout` | Workout skeleton (recovery, endurance, tempo, threshold, VO2max) |
+---
 
-**Golden rule**: the LLM never makes up a number. The system prompt
-requires a tool call before any quantitative claim.
+## Quality &amp; rigor
 
-Sessions persisted to SQLite (`conversations` table) — resume via the
-dashboard selectbox. `thinking` mode enabled: reasoning is exposed in
-an expander for debugging.
+- **500+ tests** across **38 modules** — load math, HR zones, Strava ingestion (mocked,
+  no network), GPX/ICS export, conversations, coach tools, morning metrics, overtraining,
+  trends, plan generation and its validators.
+- **Ruff** (`E, F, I, UP, B, SIM`) and **GitHub Actions CI** green on every push.
+- Tests isolate state with `tmp_path` fixtures — **no shared DB, no flakiness**.
 
-### Training objective
-
-Optional: `data/objective.yaml` (gitignored, template
-`data/objective.yaml.example`).
-
-```yaml
-type: cyclosportive          # cyclosportive / race / leisure / maintenance
-date: 2026-09-15
-distance_km: 150
-elevation_m: 2800
-target_ftp: 270              # optional
-notes: "Étape du Tour, start in Megève"
+```bash
+pytest          # run the suite
+ruff check .    # lint
 ```
 
-## Installation
+---
+
+## Run it yourself
+
+<details>
+<summary><b>Setup, OAuth &amp; usage (click to expand)</b></summary>
+
+<br/>
+
+### Install
 
 ```bash
 git clone https://github.com/arnaudstdr/domestique-ai.git
 cd domestique-ai
 python -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev]"
-cp .env.example .env  # fill in the values
+cp .env.example .env   # fill in the values
 ```
 
-## Strava OAuth setup
+### Strava OAuth (once)
 
-1. Create an app at <https://www.strava.com/settings/api> (note the
-   `client_id` and `client_secret`).
-2. Fill in `STRAVA_CLIENT_ID`, `STRAVA_CLIENT_SECRET` and at least one
-   of:
+1. Create an app at <https://www.strava.com/settings/api> (note `client_id` / `client_secret`).
+2. Set `STRAVA_CLIENT_ID`, `STRAVA_CLIENT_SECRET`, and at least one of:
    - `STRAVA_FTP` (power-based TSS), and/or
-   - `STRAVA_HR_REST` + `STRAVA_HR_MAX` (hr-TSS, takes precedence if
-     set).
-3. Run the authorization flow (once):
-
+   - `STRAVA_HR_REST` + `STRAVA_HR_MAX` (hr-TSS, takes precedence if set).
+3. Run the interactive flow:
    ```bash
    python -m domestique_ai.ingestion.strava_oauth_flow
    ```
+4. Tokens persist in `data/.strava_tokens.json` (never committed), with automatic refresh.
 
-4. Open the printed URL, authorize, copy the `code` from the
-   redirect URL, paste it.
-5. Tokens are persisted in `data/.strava_tokens.json` (never
-   committed), with automatic refresh.
-
-## Ollama setup (LLM coach)
-
-The coach uses [Ollama](https://ollama.com). Run the server locally
-or point to a remote endpoint via `OLLAMA_HOST`. Default model:
-`gemma4:31b-cloud` (override via `OLLAMA_MODEL`).
+### Ollama (LLM coach)
 
 ```bash
-# Local
-ollama pull gemma4:31b-cloud
-ollama serve
+ollama pull gemma4:31b-cloud   # default model; override via OLLAMA_MODEL
+ollama serve                   # or point OLLAMA_HOST at a remote endpoint
 ```
 
-## Garmin Connect setup (push de plan)
-
-Le bouton « ☁️ Pousser sur Garmin Connect » de la page Plan upload chaque
-séance dans Garmin Connect (et la planifie sur le calendrier si demandé). Le
-serveur n'expose **pas** d'écran de connexion : on seede le cache token une
-seule fois depuis le shell, puis l'API réutilise ce cache silencieusement.
-
-1. Renseigner `GARMIN_EMAIL` et `GARMIN_PASSWORD` dans `.env`.
-2. Lancer le login interactif (prompt MFA si nécessaire) :
-
-   ```bash
-   python -m domestique_ai.export.garmin_connect
-   ```
-
-3. Le token est persisté dans `data/.garmin_tokens/` (gitignoré). À refaire
-   uniquement si Garmin invalide la session (changement de mot de passe,
-   token expiré).
-
-Si l'API reçoit un push alors que le cache est absent ou invalide, le stream
-SSE émet un event `error` avec le message *« Token invalide, relance le setup
-CLI »* — la PWA affiche alors un lien vers cette commande.
-
-## Usage
+### Garmin Connect (optional — plan push)
 
 ```bash
-# Backend API (port 8501) — sert aussi le build React si présent
+# Set GARMIN_EMAIL / GARMIN_PASSWORD in .env, then seed the token cache once:
+python -m domestique_ai.export.garmin_connect
+```
+
+### Run
+
+```bash
+# Backend API (port 8501) — also serves the React build if present
 uvicorn domestique_ai.api.main:app --reload --port 8501
 
-# Frontend dev (autre terminal) — http://localhost:5173
+# Frontend dev (separate terminal) — http://localhost:5173
 cd frontend && npm install && npm run dev
 
-# Production : build le front, FastAPI le sert ensuite via StaticFiles
+# Production: build the front, FastAPI serves it via StaticFiles
 cd frontend && npm run build
 uvicorn domestique_ai.api.main:app --port 8501   # → http://localhost:8501
 ```
 
-La PWA expose cinq onglets (BottomNav) :
+The PWA exposes five tabs: **Dashboard** (fitness state, alerts, HR zones, clickable
+activity table), **Activities** (paginated history), **Morning** (HRV / resting HR /
+sleep entry, baselines, 90-day charts), **Plan** (multi-week generation, `.FIT` export,
+Garmin push), and **Coach** (the conversational LLM).
 
-- **📊 Dashboard** : bandeau d'alerte surentraînement, CTL / ATL / TSB,
-  charts d'évolution, ventilation par zones HR, tableau d'activités cliquable
-  (détail avec carte + streams sur clic).
-- **🚴 Activités** : historique paginé.
-- **🌅 Matin** : saisie HRV / FC repos / sommeil / stress, KPI vs baseline
-  14 j, charts 90 j.
-- **📋 Plan** : génération multi-semaines (lit l'objectif courant), calendrier
-  hebdo, téléchargement ZIP des `.FIT` et push Garmin Connect streamé.
-- **🤖 Coach** : chat conversationnel avec le LLM, sessions multiples, tool
-  calls + raisonnement visibles dans des expanders.
-
-Utilitaires Strava (page Dashboard) : 🔄 Sync, 🔁 Recalculer la charge,
-📥 Backfill HR max / zones HR.
-
-## Deployment
-
-Docker image ready for Raspberry Pi (`network=host` mode to reach an
-Ollama on the same network). See [DEPLOY.md](DEPLOY.md).
+### Deploy (Docker / Raspberry Pi)
 
 ```bash
 docker compose up -d
 ```
 
-## Tests
+See [DEPLOY.md](DEPLOY.md) for the Pi 5 + Tailscale setup.
 
-```bash
-pytest
-ruff check .
-```
+</details>
 
-100 tests cover: load computation, HR zones, Strava ingestion (mocks),
-GPX generation, conversations, objectives, coach tools, morning
-metrics and overtraining indicators.
+---
 
 ## Roadmap
 
-- [x] Automatic overtraining signal detection (HRV, resting HR).
-- [ ] Personalized training plan generation by the coach.
-- [ ] Direct Garmin import (local FIT files, no Strava round-trip).
-- [ ] Comparison between similar activities (same route).
-- [ ] Store `hr_rest` (and `hr_max`) per activity rather than as a
-  global environment variable, to freeze the CTL/ATL/TSB history and
-  keep it comparable over time even as the HR profile evolves.
+- [x] Automatic overtraining detection (HRV, resting HR, Foster Monotony/Strain)
+- [x] LLM-generated training plans with deterministic guardrails
+- [x] Similar-activity comparison ("how many times have I climbed this?")
+- [x] iCalendar export of the training plan
+- [x] Multi-athlete roster view for coaches
+- [ ] Direct Garmin import (local FIT files, no Strava round-trip)
+- [ ] Per-activity HR profile to freeze historical CTL/ATL/TSB
+
+---
+
+## About
+
+I'm **Arnaud Stadler** — a Python / full-stack developer who likes turning fuzzy,
+data-heavy problems into reliable products. DomestiqueAI is the kind of work I do
+end to end: a real data pipeline, a domain engine I can defend on the science,
+a pragmatic LLM integration that *doesn't* hallucinate, and a deployment that
+actually runs in production.
+
+This project is the kind of work I enjoy most: owning a feature end to end, from
+data ingestion to a polished UI. **Always happy to talk shop** about training data,
+local LLMs, or self-hosted products.
+
+📫 Find me on my **[GitHub profile](https://github.com/arnaudstdr)**.
+
+---
 
 ## License
 
