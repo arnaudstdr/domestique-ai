@@ -75,6 +75,7 @@ class BearerAuthMiddleware:
         "/api/auth/accept-invite",
         "/api/auth/reconnect",
         "/api/strava/callback",
+        "/api/google-health/callback",
     }
 
     def __init__(
