@@ -3,25 +3,40 @@ name: CI
 on:
   push:
     branches: [main]
+    tags: ["*"]
+    paths-ignore:
+      - "**/*.md"
+      - ".env.example"
+      - ".claude/**"
+      - ".gitignore"
+      - "LICENSE"
   pull_request:
     branches: [main]
+    paths-ignore:
+      - "**/*.md"
+      - ".env.example"
+      - ".claude/**"
+      - ".gitignore"
+      - "LICENSE"
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
-  test:
+  quality:
+    name: Lint + Format + Tests
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        python-version: ["3.12"]
 
     steps:
       - uses: actions/checkout@v5
 
-      - name: Set up Python ${{ matrix.python-version }}
+      - name: Set up Python 3.12
         uses: actions/setup-python@v6
         with:
-          python-version: ${{ matrix.python-version }}
+          python-version: "3.12"
           cache: pip
+          cache-dependency-path: pyproject.toml
 
       - name: Install dependencies
         run: |
@@ -32,9 +47,10 @@ jobs:
         run: ruff check .
 
       - name: Tests (pytest)
-        run: pytest
+        run: pytest -q
 
-  semgrep:
+  security:
+    name: Security scan
     runs-on: ubuntu-latest
     container:
       image: semgrep/semgrep:1.176.0
@@ -43,4 +59,4 @@ jobs:
       - uses: actions/checkout@v5
 
       - name: Security (semgrep)
-        run: semgrep scan --config .semgrep.yml
+        run: semgrep scan --config .semgrep.yml --error --strict
