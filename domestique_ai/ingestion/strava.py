@@ -40,6 +40,29 @@ STRAVA_OAUTH_AUTHORIZE_URL = "https://www.strava.com/oauth/authorize"
 _AUTH_ERROR_MSG = "Token expiré ou invalide (HTTP 401)."
 
 
+def _raise_for_status_with_detail(response: requests.Response) -> None:
+    """raise_for_status enrichi : pour un 403, remonte la raison exacte de Strava.
+
+    Strava répond 403 quand le token est valide mais que le scope requis
+    manque (typiquement ``activity:read_all`` non accordé lors de
+    l'autorisation). Le corps contient alors
+    ``{"errors": [{"field": "activity:read_all", "code": "missing"}]}``.
+    """
+    if response.status_code != 403:
+        response.raise_for_status()
+        return
+    try:
+        body = response.json()
+    except ValueError:
+        body = response.text
+    raise StravaAuthError(
+        "Accès refusé par Strava (HTTP 403). Le scope `activity:read_all` est "
+        "probablement manquant sur le token — relancez le flow OAuth en cochant "
+        "« View data about your activities ». Détail : "
+        f"{json.dumps(body) if not isinstance(body, str) else body}"
+    )
+
+
 class StravaAuthError(RuntimeError):
     """Erreur d'authentification ou de rafraîchissement de token Strava."""
 
@@ -145,7 +168,7 @@ class StravaClient:
                 retry_after = int(response.headers.get("Retry-After", "60"))
                 time.sleep(retry_after)
                 continue
-            response.raise_for_status()
+            _raise_for_status_with_detail(response)
             return response.json()
 
     def fetch_activity_streams(
@@ -173,7 +196,7 @@ class StravaClient:
                 retry_after = int(response.headers.get("Retry-After", "60"))
                 time.sleep(retry_after)
                 continue
-            response.raise_for_status()
+            _raise_for_status_with_detail(response)
             data = response.json()
             hr = data.get("heartrate", {}).get("data")
             ts = data.get("time", {}).get("data")
@@ -207,7 +230,7 @@ class StravaClient:
                 retry_after = int(response.headers.get("Retry-After", "60"))
                 time.sleep(retry_after)
                 continue
-            response.raise_for_status()
+            _raise_for_status_with_detail(response)
             data = response.json()
             result: dict[str, list] = {}
             for key in keys:
@@ -233,7 +256,7 @@ class StravaClient:
                 retry_after = int(response.headers.get("Retry-After", "60"))
                 time.sleep(retry_after)
                 continue
-            response.raise_for_status()
+            _raise_for_status_with_detail(response)
             return response.json()
 
     def fetch_activities(
@@ -258,7 +281,7 @@ class StravaClient:
                 retry_after = int(response.headers.get("Retry-After", "60"))
                 time.sleep(retry_after)
                 continue
-            response.raise_for_status()
+            _raise_for_status_with_detail(response)
             batch = response.json()
             if not batch:
                 break
