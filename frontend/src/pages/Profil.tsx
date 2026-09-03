@@ -126,19 +126,32 @@ function StravaSection() {
       </p>
       {connected === null ? (
         <p className="text-xs text-muted">Vérification…</p>
-      ) : connected ? (
-        <p className="text-sm text-accent">
-          Compte Strava connecté — la synchro tourne automatiquement.
-        </p>
       ) : (
-        <button
-          type="button"
-          onClick={connect}
-          disabled={connecting}
-          className="btn-primary w-full"
-        >
-          {connecting ? "Redirection…" : "Connecter Strava"}
-        </button>
+        <div className="space-y-2">
+          {connected && (
+            <p className="text-sm text-accent">
+              Compte Strava connecté — la synchro tourne automatiquement.
+            </p>
+          )}
+          <button
+            type="button"
+            onClick={connect}
+            disabled={connecting}
+            className={connected ? "btn-ghost w-full" : "btn-primary w-full"}
+          >
+            {connecting
+              ? "Redirection…"
+              : connected
+                ? "Reconnecter (ré-autoriser Strava)"
+                : "Connecter Strava"}
+          </button>
+          {connected && (
+            <p className="text-xs text-muted">
+              Utile après une révocation d'accès ou un scope manquant : ré-autorise
+              et la synchro repart.
+            </p>
+          )}
+        </div>
       )}
     </section>
   );
