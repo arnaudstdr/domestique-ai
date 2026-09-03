@@ -296,6 +296,10 @@ class GoogleHealthSyncResponse(BaseModel):
     message: str
 
 
+class GoogleHealthAuthResponse(BaseModel):
+    auth_url: str
+
+
 # ---- Objective ---------------------------------------------------------------
 
 

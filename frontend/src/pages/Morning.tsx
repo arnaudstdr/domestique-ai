@@ -192,7 +192,15 @@ export default function Morning() {
         <div className="flex flex-wrap gap-2">
           {!ghStatus?.authenticated ? (
             <button
-              onClick={() => api.googleHealth.auth()}
+              onClick={async () => {
+                try {
+                  const { auth_url } = await api.googleHealth.auth();
+                  window.location.assign(auth_url);
+                } catch (err) {
+                  const msg = err instanceof ApiError ? err.message : String(err);
+                  push(`Erreur : ${msg}`, "error");
+                }
+              }}
               className="btn-primary inline-flex items-center gap-2"
             >
               <Activity className="h-4 w-4" strokeWidth={1.75} />

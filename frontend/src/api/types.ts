@@ -257,6 +257,10 @@ export interface GoogleHealthSyncResponse {
   message: string;
 }
 
+export interface GoogleHealthAuthResponse {
+  auth_url: string;
+}
+
 export interface Objective {
   type: "cyclosportive" | "course" | "cyclo" | "maintenance";
   date: string | null;

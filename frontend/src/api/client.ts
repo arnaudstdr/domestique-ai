@@ -11,6 +11,7 @@ import type {
   CoachSession,
   DailyBriefResponse,
   FtpProjectionResponse,
+  GoogleHealthAuthResponse,
   GoogleHealthStatusResponse,
   GoogleHealthSyncResponse,
   InvitationCreated,
@@ -247,7 +248,7 @@ export const api = {
   },
   googleHealth: {
     status: () => http<GoogleHealthStatusResponse>(`/api/google-health/status`),
-    auth: () => (window.location.href = `/api/google-health/auth`),
+    auth: () => http<GoogleHealthAuthResponse>(`/api/google-health/auth`),
     sync: (days = 7) =>
       http<GoogleHealthSyncResponse>(`/api/google-health/sync?days=${days}`, {
         method: "POST",

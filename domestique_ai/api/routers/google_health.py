@@ -69,15 +69,14 @@ def _has_credentials() -> bool:
 def get_google_health_auth(
     request: Request,
     ctx: AthleteContext = Depends(get_athlete_context),  # noqa: B008
-) -> RedirectResponse:
-    """Redirige l'utilisateur vers le consentement Google OAuth2."""
+) -> dict[str, str]:
+    """Retourne l'URL de consentement Google OAuth2 pour redirection front."""
     client = _build_client(ctx)
     # Stocke un state minimal dans le token file (pas de session côté serveur).
     state = _generate_state(request, ctx)
     client.tokens["oauth_state"] = state
     client.save_tokens()
-    auth_url = client.get_auth_url(state=state)
-    return RedirectResponse(auth_url)
+    return {"auth_url": client.get_auth_url(state=state)}
 
 
 @router.get("/callback")
