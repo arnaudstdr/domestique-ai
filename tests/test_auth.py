@@ -77,23 +77,17 @@ def test_auth_blocks_api_without_header(client_with_token: TestClient) -> None:
 
 
 def test_auth_blocks_api_with_wrong_token(client_with_token: TestClient) -> None:
-    r = client_with_token.get(
-        "/api/secret", headers={"Authorization": "Bearer wrong-token"}
-    )
+    r = client_with_token.get("/api/secret", headers={"Authorization": "Bearer wrong-token"})
     assert r.status_code == 401
 
 
 def test_auth_blocks_api_with_wrong_scheme(client_with_token: TestClient) -> None:
-    r = client_with_token.get(
-        "/api/secret", headers={"Authorization": "Basic secret-token-1234"}
-    )
+    r = client_with_token.get("/api/secret", headers={"Authorization": "Basic secret-token-1234"})
     assert r.status_code == 401
 
 
 def test_auth_accepts_valid_token(client_with_token: TestClient) -> None:
-    r = client_with_token.get(
-        "/api/secret", headers={"Authorization": "Bearer secret-token-1234"}
-    )
+    r = client_with_token.get("/api/secret", headers={"Authorization": "Bearer secret-token-1234"})
     assert r.status_code == 200
     assert r.json() == {"ok": True}
 
@@ -129,9 +123,7 @@ def test_auth_token_is_stripped() -> None:
     """Token configuré avec espaces accidentels = token sans espaces."""
     app = _make_app("  padded-token  ")
     with TestClient(app) as c:
-        r = c.get(
-            "/api/secret", headers={"Authorization": "Bearer padded-token"}
-        )
+        r = c.get("/api/secret", headers={"Authorization": "Bearer padded-token"})
         assert r.status_code == 200
 
 

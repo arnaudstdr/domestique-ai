@@ -24,8 +24,7 @@ def test_build_initial_messages_strips_tool_calls_from_history(monkeypatch):
             # Format ToolTrace persisté en DB — ne doit PAS atterrir dans le
             # prompt envoyé au modèle (il viole le schéma Pydantic d'Ollama).
             "tool_calls": [
-                {"name": "get_training_load_state", "arguments": {},
-                 "result": {"available": True}},
+                {"name": "get_training_load_state", "arguments": {}, "result": {"available": True}},
             ],
         },
     ]
@@ -97,6 +96,7 @@ def test_build_initial_messages_does_not_inject_context_when_history_present(mon
 
 def test_build_initial_messages_tolerates_context_builder_failure(monkeypatch):
     """Si le builder de contexte explose (DB vide, Ollama KO), on ignore."""
+
     def boom(*args, **kwargs):
         raise RuntimeError("boom")
 

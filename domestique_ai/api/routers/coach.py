@@ -128,9 +128,7 @@ async def _coach_event_stream(
     )
 
     if session_id is not None:
-        yield _sse_event(
-            "session_id", {"type": "session_id", "value": session_id}
-        )
+        yield _sse_event("session_id", {"type": "session_id", "value": session_id})
 
     final_payload: dict[str, Any] | None = None
     try:
@@ -141,16 +139,12 @@ async def _coach_event_stream(
             yield _sse_event(ev["type"], ev)
     except OllamaError as exc:
         log.error("%s | Ollama error: %s", label, exc)
-        yield _sse_event(
-            "error", {"type": "error", "value": f"Ollama indisponible: {exc}"}
-        )
+        yield _sse_event("error", {"type": "error", "value": f"Ollama indisponible: {exc}"})
         yield _sse_event("done", {"type": "done"})
         return
     except Exception as exc:  # noqa: BLE001 — on remonte tout au front
         log.exception("%s | run_turn_stream unhandled exception", label)
-        yield _sse_event(
-            "error", {"type": "error", "value": f"Coach erreur: {exc}"}
-        )
+        yield _sse_event("error", {"type": "error", "value": f"Coach erreur: {exc}"})
         yield _sse_event("done", {"type": "done"})
         return
 
@@ -222,7 +216,9 @@ async def post_chat(
         if m.get("role") in ("user", "assistant") and (m.get("content") or "").strip()
     ]
     append_message(
-        session_id, "user", {"role": "user", "content": user_message},
+        session_id,
+        "user",
+        {"role": "user", "content": user_message},
         db_path=ctx.db_path,
     )
     label = f"chat[{session_id[:8]}{' new' if is_new_session else ''}]"
@@ -272,12 +268,12 @@ def get_today_workout(
     from domestique_ai.processing.today import propose_workout_today
 
     result = propose_workout_today(
-        available_min=available_min, refresh=refresh, ctx=ctx,
+        available_min=available_min,
+        refresh=refresh,
+        ctx=ctx,
     )
     if result["rest_day"]:
-        return TodayWorkoutResponse(
-            rest_day=True, reason=result.get("reason")
-        )
+        return TodayWorkoutResponse(rest_day=True, reason=result.get("reason"))
     return TodayWorkoutResponse(
         rest_day=False,
         workout=WorkoutSchema(**result["workout"]),

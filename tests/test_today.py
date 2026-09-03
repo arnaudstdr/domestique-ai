@@ -164,9 +164,7 @@ def test_duration_capped_by_availability(tmp_path, monkeypatch):
     assert result["workout"]["duration_min"] == 45
 
 
-def test_available_min_override_forces_duration_and_overrides_off_day(
-    tmp_path, monkeypatch
-):
+def test_available_min_override_forces_duration_and_overrides_off_day(tmp_path, monkeypatch):
     _patch_paths(tmp_path, monkeypatch)
     _set_availability(
         tmp_path,
@@ -280,20 +278,24 @@ def test_tempo_when_weekly_zones_too_monotonous(tmp_path, monkeypatch):
     activities = []
     for offset in (2, 3, 5):
         d = dt.date(2026, 1, 5) - dt.timedelta(days=offset)
-        activities.append({
-            "date": d.isoformat(),
-            "avg_heart_rate": 135,
-            "hr_z1_time": 200,
-            "hr_z2_time": 3600,  # massivement Z2
-            "hr_z3_time": 0,
-            "hr_z4_time": 0,
-            "hr_z5_time": 0,
-        })
+        activities.append(
+            {
+                "date": d.isoformat(),
+                "avg_heart_rate": 135,
+                "hr_z1_time": 200,
+                "hr_z2_time": 3600,  # massivement Z2
+                "hr_z3_time": 0,
+                "hr_z4_time": 0,
+                "hr_z5_time": 0,
+            }
+        )
     _patch_activities(monkeypatch, activities, tsb=0.0)
     monday = dt.date(2026, 1, 5)
     result = propose_workout_today(today=monday)
     assert result["workout"]["kind"] == "tempo"
-    assert "monotonie" in result["rationale"].lower() or "polarisation" in result["rationale"].lower()
+    assert (
+        "monotonie" in result["rationale"].lower() or "polarisation" in result["rationale"].lower()
+    )
 
 
 def test_llm_decision_is_used_when_available(tmp_path, monkeypatch):

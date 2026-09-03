@@ -34,12 +34,7 @@ def _escape_text(value: str) -> str:
     Ordre important : on échappe ``\\`` *avant* tout le reste pour ne pas
     re-traiter les antislashes qu'on vient d'introduire.
     """
-    return (
-        value.replace("\\", "\\\\")
-        .replace(";", "\\;")
-        .replace(",", "\\,")
-        .replace("\n", "\\n")
-    )
+    return value.replace("\\", "\\\\").replace(";", "\\;").replace(",", "\\,").replace("\n", "\\n")
 
 
 def _fold_line(line: str) -> str:

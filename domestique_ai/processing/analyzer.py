@@ -34,14 +34,16 @@ HR_ZONE_KEYS = ("z1", "z2", "z3", "z4", "z5")
 _HR_ZONE_PAUSE_GAP_SEC = 5.0
 
 
-def fetch_activities_from_db(db_path: Path | None = None, *,
-                             ctx: AthleteContext | None = None) -> list[dict[str, Any]]:
+def fetch_activities_from_db(
+    db_path: Path | None = None, *, ctx: AthleteContext | None = None
+) -> list[dict[str, Any]]:
     """Charge toutes les activités depuis SQLite, triées par date croissante."""
     path = Path(db_path) if db_path else (ctx.db_path if ctx else get_db_path())
     if not path.exists():
         return []
     # Import local pour éviter les cycles avec ingestion.strava.
     from domestique_ai.ingestion.strava import init_db
+
     init_db(path)
     conn = sqlite3.connect(path)
     try:
@@ -81,8 +83,9 @@ def fetch_activities_from_db(db_path: Path | None = None, *,
     ]
 
 
-def fetch_weight_history(db_path: Path | None = None, *,
-                         ctx: AthleteContext | None = None) -> list[dict[str, Any]]:
+def fetch_weight_history(
+    db_path: Path | None = None, *, ctx: AthleteContext | None = None
+) -> list[dict[str, Any]]:
     """Charge l'historique du poids depuis SQLite, trié par date croissante.
 
     Retourne une liste de `{"date": "YYYY-MM-DD", "weight": kg}`.
@@ -91,12 +94,11 @@ def fetch_weight_history(db_path: Path | None = None, *,
     if not path.exists():
         return []
     from domestique_ai.ingestion.strava import init_db
+
     init_db(path)
     conn = sqlite3.connect(path)
     try:
-        cursor = conn.execute(
-            "SELECT date, weight FROM weight_history ORDER BY date ASC"
-        )
+        cursor = conn.execute("SELECT date, weight FROM weight_history ORDER BY date ASC")
         rows = cursor.fetchall()
     finally:
         conn.close()
@@ -125,8 +127,9 @@ def _trimp_coefficients(sex: str) -> tuple[float, float]:
     return 0.64, 1.92
 
 
-def calculate_trimp(duration_sec: int, avg_hr: float, hr_rest: float,
-                    hr_max: float, sex: str = "M") -> float:
+def calculate_trimp(
+    duration_sec: int, avg_hr: float, hr_rest: float, hr_max: float, sex: str = "M"
+) -> float:
     """
     TRIMP exponentiel de Banister — charge d'entraînement basée sur la HR.
 
@@ -145,9 +148,14 @@ def calculate_trimp(duration_sec: int, avg_hr: float, hr_rest: float,
     return duration_min * hrr * k1 * math.exp(k2 * hrr)
 
 
-def calculate_hr_tss(duration_sec: int, avg_hr: float, hr_rest: float,
-                     hr_max: float, sex: str = "M",
-                     lthr_pct: float = 0.88) -> float:
+def calculate_hr_tss(
+    duration_sec: int,
+    avg_hr: float,
+    hr_rest: float,
+    hr_max: float,
+    sex: str = "M",
+    lthr_pct: float = 0.88,
+) -> float:
     """
     TRIMP normalisé en TSS-équivalent : 1h à HRR = lthr_pct ⇒ 100 points.
 
@@ -170,10 +178,9 @@ def _zone_index(hrr: float) -> int:
     return 4
 
 
-def calculate_hr_zones(hr_stream: list[float] | None,
-                       time_stream: list[float] | None,
-                       hr_rest: float,
-                       hr_max: float) -> dict[str, float]:
+def calculate_hr_zones(
+    hr_stream: list[float] | None, time_stream: list[float] | None, hr_rest: float, hr_max: float
+) -> dict[str, float]:
     """
     Ventile une activité dans 5 zones %HRR (Karvonen) à partir des streams HR.
 
@@ -208,14 +215,16 @@ def calculate_hr_zones(hr_stream: list[float] | None,
     return {key: round(value, 1) for key, value in zones.items()}
 
 
-def compute_training_load(duration_sec: int,
-                          avg_hr: float | None = None,
-                          avg_power: float | None = None,
-                          ftp: float | None = None,
-                          hr_rest: float | None = None,
-                          hr_max: float | None = None,
-                          sex: str | None = None,
-                          lthr_pct: float | None = None) -> float:
+def compute_training_load(
+    duration_sec: int,
+    avg_hr: float | None = None,
+    avg_power: float | None = None,
+    ftp: float | None = None,
+    hr_rest: float | None = None,
+    hr_max: float | None = None,
+    sex: str | None = None,
+    lthr_pct: float | None = None,
+) -> float:
     """
     Score de charge d'une activité, en TSS-équivalent.
 
@@ -234,8 +243,9 @@ def compute_training_load(duration_sec: int,
     lthr_pct = lthr_pct if lthr_pct is not None else get_lthr_pct()
 
     if avg_hr and hr_rest and hr_max and hr_max > hr_rest:
-        return calculate_hr_tss(duration_sec, float(avg_hr), float(hr_rest),
-                                float(hr_max), sex, lthr_pct)
+        return calculate_hr_tss(
+            duration_sec, float(avg_hr), float(hr_rest), float(hr_max), sex, lthr_pct
+        )
 
     ftp = ftp if ftp is not None else get_ftp()
     if avg_power and ftp:
@@ -244,8 +254,9 @@ def compute_training_load(duration_sec: int,
     return 0.0
 
 
-def recalculate_training_loads(db_path: Path | None = None, *,
-                               ctx: AthleteContext | None = None) -> int:
+def recalculate_training_loads(
+    db_path: Path | None = None, *, ctx: AthleteContext | None = None
+) -> int:
     """
     Recalcule training_load pour toutes les activités selon la config courante.
 
@@ -261,8 +272,7 @@ def recalculate_training_loads(db_path: Path | None = None, *,
     conn = sqlite3.connect(path)
     try:
         rows = conn.execute(
-            "SELECT id, duration, avg_heart_rate, avg_power, training_load "
-            "FROM activities"
+            "SELECT id, duration, avg_heart_rate, avg_power, training_load FROM activities"
         ).fetchall()
         updated = 0
         for row_id, duration, avg_hr, avg_power, current_load in rows:
@@ -288,10 +298,12 @@ def recalculate_training_loads(db_path: Path | None = None, *,
         conn.close()
 
 
-def calculate_ctl_atl_tsb(activities: list[dict[str, Any]],
-                          ctl_constant: float = 42,
-                          atl_constant: float = 7,
-                          end_date: datetime.date | None = None) -> list[dict[str, Any]]:
+def calculate_ctl_atl_tsb(
+    activities: list[dict[str, Any]],
+    ctl_constant: float = 42,
+    atl_constant: float = 7,
+    end_date: datetime.date | None = None,
+) -> list[dict[str, Any]]:
     """
     Calcule CTL/ATL/TSB jour par jour à partir des activités.
 
@@ -331,10 +343,12 @@ def calculate_ctl_atl_tsb(activities: list[dict[str, Any]],
         tss = tss_by_date.get(d, 0)
         ctl = ctl + (tss - ctl) * (1 / ctl_constant)
         atl = atl + (tss - atl) * (1 / atl_constant)
-        result.append({
-            "date": d,
-            "CTL": round(ctl, 2),
-            "ATL": round(atl, 2),
-            "TSB": round(ctl - atl, 2),
-        })
+        result.append(
+            {
+                "date": d,
+                "CTL": round(ctl, 2),
+                "ATL": round(atl, 2),
+                "TSB": round(ctl - atl, 2),
+            }
+        )
     return result

@@ -114,8 +114,7 @@ def list_activities(
     if days is not None:
         cutoff = dt.datetime.now(dt.UTC) - dt.timedelta(days=days)
         activities = [
-            a for a in activities
-            if (when := _activity_date(a)) is not None and when >= cutoff
+            a for a in activities if (when := _activity_date(a)) is not None and when >= cutoff
         ]
 
     if date_from:
@@ -127,8 +126,7 @@ def list_activities(
                 detail=f"date_from invalide : {date_from!r}",
             ) from exc
         activities = [
-            a for a in activities
-            if (when := _activity_date(a)) is not None and when >= from_dt
+            a for a in activities if (when := _activity_date(a)) is not None and when >= from_dt
         ]
 
     if date_to:
@@ -140,8 +138,7 @@ def list_activities(
                 detail=f"date_to invalide : {date_to!r}",
             ) from exc
         activities = [
-            a for a in activities
-            if (when := _activity_date(a)) is not None and when < to_dt
+            a for a in activities if (when := _activity_date(a)) is not None and when < to_dt
         ]
 
     if sport_types:
@@ -149,8 +146,7 @@ def list_activities(
         if sport_set:
             activities = [a for a in activities if a.get("sport_type") in sport_set]
 
-    def _within(field: str, lo: float | None, hi: float | None,
-                multiplier: float = 1.0) -> None:
+    def _within(field: str, lo: float | None, hi: float | None, multiplier: float = 1.0) -> None:
         nonlocal activities
         if lo is None and hi is None:
             return
@@ -191,10 +187,7 @@ def list_sport_types(
     activité (pas la peine de proposer ``Swim`` si l'athlète ne nage pas).
     """
     activities = fetch_activities_from_db(ctx=ctx)
-    return sorted({
-        a["sport_type"] for a in activities
-        if a.get("sport_type")
-    })
+    return sorted({a["sport_type"] for a in activities if a.get("sport_type")})
 
 
 @router.get("/{strava_id}", response_model=ActivityDetail)

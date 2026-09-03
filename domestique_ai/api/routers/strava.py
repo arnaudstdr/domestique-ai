@@ -90,8 +90,7 @@ def _claim_sync(key: str) -> bool:
     return True
 
 
-def trigger_sync_blocking(ctx: AthleteContext, key: str, *,
-                          user: dict | None = None) -> bool:
+def trigger_sync_blocking(ctx: AthleteContext, key: str, *, user: dict | None = None) -> bool:
     """Réserve + exécute un sync synchrone pour l'athlète ``key``/``ctx``.
 
     Utilisé par l'auto-sync (scheduler). Retourne ``True`` si l'exécution a eu
@@ -106,6 +105,7 @@ def trigger_sync_blocking(ctx: AthleteContext, key: str, *,
 def _run_sync(ctx: AthleteContext, key: str, *, user: dict | None = None) -> None:
     """Exécution du sync en background pour un athlète. Capture les exceptions."""
     import time as _t  # local — évite collision avec time.time global
+
     start = _t.perf_counter()
     log.info("Sync Strava [%s] : démarrage…", key[:8])
 
@@ -125,23 +125,34 @@ def _run_sync(ctx: AthleteContext, key: str, *, user: dict | None = None) -> Non
     except StravaAuthError as exc:
         log.error("Sync Strava [%s] : erreur d'authentification : %s", key[:8], exc)
         _set_state(
-            key, status="error", error=str(exc),
+            key,
+            status="error",
+            error=str(exc),
             finished_at=dt.datetime.now(dt.UTC).isoformat(),
         )
         return
     except Exception as exc:  # noqa: BLE001 — on remonte tout au front
         log.exception("Sync Strava [%s] : exception non gérée", key[:8])
         _set_state(
-            key, status="error", error=f"{type(exc).__name__}: {exc}",
+            key,
+            status="error",
+            error=f"{type(exc).__name__}: {exc}",
             finished_at=dt.datetime.now(dt.UTC).isoformat(),
         )
         return
 
     duration = _t.perf_counter() - start
-    log.info("Sync Strava [%s] : terminé en %.1fs — %d nouvelle(s) activité(s).",
-             key[:8], duration, inserted)
+    log.info(
+        "Sync Strava [%s] : terminé en %.1fs — %d nouvelle(s) activité(s).",
+        key[:8],
+        duration,
+        inserted,
+    )
     _set_state(
-        key, status="done", inserted=inserted, error=None,
+        key,
+        status="done",
+        inserted=inserted,
+        error=None,
         finished_at=dt.datetime.now(dt.UTC).isoformat(),
     )
 
@@ -181,6 +192,7 @@ def get_sync_status(
 # Onboarding OAuth Strava par athlète (palier 1c)
 # ---------------------------------------------------------------------------
 
+
 @router.get("/connection")
 def get_connection(
     ctx: AthleteContext = Depends(get_athlete_context),  # noqa: B008
@@ -200,10 +212,7 @@ def get_authorize(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="STRAVA_CLIENT_ID absent de l'environnement.",
         )
-    expires_at = (
-        dt.datetime.now(dt.UTC)
-        + dt.timedelta(minutes=_OAUTH_STATE_TTL_MIN)
-    ).isoformat()
+    expires_at = (dt.datetime.now(dt.UTC) + dt.timedelta(minutes=_OAUTH_STATE_TTL_MIN)).isoformat()
     _state_row, state = create_oauth_state(user["id"], expires_at=expires_at)
     base_url = StravaClient.get_authorization_url(client_id, redirect_uri)
     sep = "&" if "?" in base_url else "?"
@@ -242,9 +251,7 @@ def get_callback(
         return fail
 
     try:
-        tokens = StravaClient.exchange_code_for_token(
-            client_id, client_secret, code, redirect_uri
-        )
+        tokens = StravaClient.exchange_code_for_token(client_id, client_secret, code, redirect_uri)
         client = StravaClient(
             access_token=tokens["access_token"],
             refresh_token=tokens.get("refresh_token"),
@@ -255,8 +262,7 @@ def get_callback(
         ctx = context_for_athlete(user)
         client.save_tokens(ctx=ctx)
     except Exception:  # noqa: BLE001 — échec d'échange → retour propre au front
-        log.exception("Callback Strava : échange du code échoué (user=%s).",
-                      user["public_id"][:8])
+        log.exception("Callback Strava : échange du code échoué (user=%s).", user["public_id"][:8])
         return fail
 
     # 1re sync en arrière-plan (best-effort).

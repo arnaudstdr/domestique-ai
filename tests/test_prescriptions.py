@@ -34,6 +34,7 @@ _LEGACY = "legacy-presc-token"
 
 # --- Storage (sans réseau) ----------------------------------------------------
 
+
 def test_workout_from_choice_builds_consistent_workout():
     w = workout_from_choice("2026-06-12", "intervals", 60, "bloc seuil")
     assert w.kind == "intervals"
@@ -81,6 +82,7 @@ def test_latest_prescription_wins_for_date(tmp_path: Path):
 
 # --- Priorité prescription dans la lecture ------------------------------------
 
+
 def test_prescription_overrides_plan_in_get_planned_workout(tmp_path: Path, monkeypatch):
     monkeypatch.delenv("STRAVA_HR_REST", raising=False)
     from domestique_ai.athlete_context import context_from_env
@@ -114,6 +116,7 @@ def test_prescription_overrides_plan_in_get_planned_workout(tmp_path: Path, monk
 
 # --- API coach / athlète ------------------------------------------------------
 
+
 def _make_app() -> FastAPI:
     app = FastAPI()
     app.add_middleware(BearerAuthMiddleware, token=_LEGACY)
@@ -137,24 +140,16 @@ def env(tmp_path: Path, monkeypatch) -> Iterator[dict]:
 
 
 def _new_athlete(client: TestClient) -> tuple[str, str]:
-    inv = client.post(
-        "/api/auth/invitations", headers=_bearer(_LEGACY), json={"role": "athlete"}
-    )
-    acc = client.post(
-        "/api/auth/accept-invite", json={"invite_token": inv.json()["invite_token"]}
-    )
+    inv = client.post("/api/auth/invitations", headers=_bearer(_LEGACY), json={"role": "athlete"})
+    acc = client.post("/api/auth/accept-invite", json={"invite_token": inv.json()["invite_token"]})
     session = acc.json()["session_token"]
     me = client.get("/api/auth/me", headers=_bearer(session))
     return session, me.json()["public_id"]
 
 
 def _new_coach(client: TestClient) -> str:
-    inv = client.post(
-        "/api/auth/invitations", headers=_bearer(_LEGACY), json={"role": "coach"}
-    )
-    acc = client.post(
-        "/api/auth/accept-invite", json={"invite_token": inv.json()["invite_token"]}
-    )
+    inv = client.post("/api/auth/invitations", headers=_bearer(_LEGACY), json={"role": "coach"})
+    acc = client.post("/api/auth/accept-invite", json={"invite_token": inv.json()["invite_token"]})
     return acc.json()["session_token"]
 
 
@@ -162,9 +157,7 @@ def test_coach_prescribes_for_own_athlete(env):
     c = env["client"]
     a_sess, a_pid = _new_athlete(c)
     body = {"date": "2026-06-12", "kind": "intervals", "duration_min": 60, "notes": "seuil"}
-    r = c.post(
-        f"/api/roster/athletes/{a_pid}/prescriptions", headers=_bearer(_LEGACY), json=body
-    )
+    r = c.post(f"/api/roster/athletes/{a_pid}/prescriptions", headers=_bearer(_LEGACY), json=body)
     assert r.status_code == 201, r.text
     assert r.json()["workout"]["kind"] == "intervals"
     assert r.json()["created_by"]  # le public_id du coach bootstrap
@@ -189,7 +182,9 @@ def test_coach_lists_and_deletes_prescription(env):
         headers=_bearer(_LEGACY),
     )
     assert d.status_code == 204
-    assert c.get(f"/api/roster/athletes/{a_pid}/prescriptions", headers=_bearer(_LEGACY)).json() == []
+    assert (
+        c.get(f"/api/roster/athletes/{a_pid}/prescriptions", headers=_bearer(_LEGACY)).json() == []
+    )
 
 
 def test_prescription_forbidden_out_of_roster(env):
@@ -249,7 +244,9 @@ def test_impersonation_plan_post_still_read_only(env):
     c = env["client"]
     _, a_pid = _new_athlete(c)
     r = c.post(
-        "/api/plan", headers=_bearer(_LEGACY), params={"athlete": a_pid},
+        "/api/plan",
+        headers=_bearer(_LEGACY),
+        params={"athlete": a_pid},
         json={"sessions_per_week": 4},
     )
     assert r.status_code == 403

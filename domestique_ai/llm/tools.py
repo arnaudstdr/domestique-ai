@@ -93,28 +93,26 @@ def get_training_load_state(*, ctx: AthleteContext | None = None) -> dict[str, A
     }
 
 
-def get_recent_activities(days: int = 7, *,
-                          ctx: AthleteContext | None = None) -> dict[str, Any]:
+def get_recent_activities(days: int = 7, *, ctx: AthleteContext | None = None) -> dict[str, Any]:
     """Liste des activités sur les N derniers jours (fenêtre ancrée sur today)."""
     activities = fetch_activities_from_db(ctx=ctx)
     as_of = _today()
     recent = _filter_recent(activities, days, end=as_of)
     out = []
     for act in recent:
-        out.append({
-            "date": act.get("date"),
-            "duration_sec": act.get("duration"),
-            "distance_km": round((act.get("distance") or 0) / 1000, 2),
-            "elevation_m": act.get("elevation_gain"),
-            "avg_heart_rate": act.get("avg_heart_rate"),
-            "max_heart_rate": act.get("max_heart_rate"),
-            "avg_power": act.get("avg_power"),
-            "training_load": act.get("training_load"),
-            "hr_zones_sec": {
-                key: act.get(f"hr_{key}_time")
-                for key in HR_ZONE_KEYS
-            },
-        })
+        out.append(
+            {
+                "date": act.get("date"),
+                "duration_sec": act.get("duration"),
+                "distance_km": round((act.get("distance") or 0) / 1000, 2),
+                "elevation_m": act.get("elevation_gain"),
+                "avg_heart_rate": act.get("avg_heart_rate"),
+                "max_heart_rate": act.get("max_heart_rate"),
+                "avg_power": act.get("avg_power"),
+                "training_load": act.get("training_load"),
+                "hr_zones_sec": {key: act.get(f"hr_{key}_time") for key in HR_ZONE_KEYS},
+            }
+        )
     return {
         "as_of": as_of.isoformat(),
         "days": days,
@@ -123,8 +121,7 @@ def get_recent_activities(days: int = 7, *,
     }
 
 
-def get_zone_distribution(days: int = 14, *,
-                          ctx: AthleteContext | None = None) -> dict[str, Any]:
+def get_zone_distribution(days: int = 14, *, ctx: AthleteContext | None = None) -> dict[str, Any]:
     """Répartition cumulée du temps par zone HR sur les N derniers jours."""
     activities = fetch_activities_from_db(ctx=ctx)
     as_of = _today()
@@ -160,19 +157,19 @@ def get_zone_distribution(days: int = 14, *,
 def get_objective(*, ctx: AthleteContext | None = None) -> dict[str, Any]:
     """Objectif d'entraînement courant (ou indication s'il est absent)."""
     from domestique_ai.llm.objectives import load_objective
+
     ctx = ctx or context_from_env()
     obj = load_objective(ctx.objective_path)
     if obj is None:
         return {
             "available": False,
             "reason": "Aucun fichier data/objective.yaml. "
-                      "Copier data/objective.yaml.example pour en créer un.",
+            "Copier data/objective.yaml.example pour en créer un.",
         }
     return {"available": True, "objective": obj.to_dict()}
 
 
-def get_activity_details(strava_id: int, *,
-                         ctx: AthleteContext | None = None) -> dict[str, Any]:
+def get_activity_details(strava_id: int, *, ctx: AthleteContext | None = None) -> dict[str, Any]:
     """Détail complet d'une activité identifiée par strava_id.
 
     Inclut la température (``avg_temp`` / ``min_temp`` / ``max_temp`` en °C)
@@ -182,6 +179,7 @@ def get_activity_details(strava_id: int, *,
     import sqlite3
 
     from domestique_ai.ingestion.strava import init_db
+
     ctx = ctx or context_from_env()
     init_db(ctx.db_path)
     conn = sqlite3.connect(ctx.db_path)
@@ -210,17 +208,14 @@ def get_activity_details(strava_id: int, *,
         "elevation_m": row[6],
         "distance_km": round((row[7] or 0) / 1000, 2),
         "training_load": row[8],
-        "hr_zones_sec": {
-            HR_ZONE_KEYS[i]: row[9 + i] for i in range(5)
-        },
+        "hr_zones_sec": {HR_ZONE_KEYS[i]: row[9 + i] for i in range(5)},
         "avg_temp_c": row[14],
         "min_temp_c": row[15],
         "max_temp_c": row[16],
     }
 
 
-def get_morning_trends(days: int = 30, *,
-                       ctx: AthleteContext | None = None) -> dict[str, Any]:
+def get_morning_trends(days: int = 30, *, ctx: AthleteContext | None = None) -> dict[str, Any]:
     """
     Tendances des métriques matinales (HRV, FC repos, sommeil, stress) avec
     baselines mobiles sur 14 jours et alertes si dérive vs baseline.
@@ -231,13 +226,14 @@ def get_morning_trends(days: int = 30, *,
         detect_morning_alerts,
         fetch_morning_history,
     )
+
     ctx = ctx or context_from_env()
     history = fetch_morning_history(days=days, db_path=ctx.db_path)
     if not history:
         return {
             "available": False,
             "reason": "Aucune métrique matinale saisie. "
-                      "Onglet « 🌅 Matin » du dashboard pour les enregistrer.",
+            "Onglet « 🌅 Matin » du dashboard pour les enregistrer.",
         }
     baselines = {}
     for metric in METRIC_COLUMNS:
@@ -265,6 +261,7 @@ def get_overtraining_signals(*, ctx: AthleteContext | None = None) -> dict[str, 
     strain de Foster, saut de volume hebdo. Alertes agrégées.
     """
     from domestique_ai.processing.overtraining import detect_overtraining_signals
+
     return detect_overtraining_signals(ctx=ctx)
 
 
@@ -275,7 +272,7 @@ _WORKOUT_TEMPLATES = {
             {"phase": "ride", "zone": "z1", "fraction": 1.0},
         ],
         "rationale": "Sortie de récupération active : Z1 strict, cadence libre, "
-                     "pas de bosse. Favorise la circulation sans charger.",
+        "pas de bosse. Favorise la circulation sans charger.",
     },
     "endurance": {
         "kind": "endurance",
@@ -285,7 +282,7 @@ _WORKOUT_TEMPLATES = {
             {"phase": "cooldown", "zone": "z1", "fraction": 0.10},
         ],
         "rationale": "Foncier : long en Z2, base aérobie, capillarisation. "
-                     "Tu peux ajouter quelques relances courtes hors compteur.",
+        "Tu peux ajouter quelques relances courtes hors compteur.",
     },
     "tempo": {
         "kind": "tempo",
@@ -295,33 +292,35 @@ _WORKOUT_TEMPLATES = {
             {"phase": "cooldown", "zone": "z1", "fraction": 0.20},
         ],
         "rationale": "Tempo soutenu : Z3 continu pour résistance aérobie. "
-                     "À placer quand TSB > -10.",
+        "À placer quand TSB > -10.",
     },
     "threshold": {
         "kind": "intervals_threshold",
         "structure": [
             {"phase": "warmup", "zone": "z2", "fraction": 0.20},
-            {"phase": "intervals",
-             "block": {"work_min": 8, "work_zone": "z4",
-                       "rest_min": 4, "rest_zone": "z2"},
-             "fraction_total": 0.65},
+            {
+                "phase": "intervals",
+                "block": {"work_min": 8, "work_zone": "z4", "rest_min": 4, "rest_zone": "z2"},
+                "fraction_total": 0.65,
+            },
             {"phase": "cooldown", "zone": "z1", "fraction": 0.15},
         ],
         "rationale": "Seuil : intervalles 8' Z4 / 4' Z2. Ajuster nb de reps "
-                     "selon durée totale (60 min ≈ 3 reps, 90 min ≈ 4-5 reps).",
+        "selon durée totale (60 min ≈ 3 reps, 90 min ≈ 4-5 reps).",
     },
     "vo2max": {
         "kind": "intervals_vo2max",
         "structure": [
             {"phase": "warmup", "zone": "z2", "fraction": 0.25},
-            {"phase": "intervals",
-             "block": {"work_min": 3, "work_zone": "z5",
-                       "rest_min": 3, "rest_zone": "z1"},
-             "fraction_total": 0.55},
+            {
+                "phase": "intervals",
+                "block": {"work_min": 3, "work_zone": "z5", "rest_min": 3, "rest_zone": "z1"},
+                "fraction_total": 0.55,
+            },
             {"phase": "cooldown", "zone": "z1", "fraction": 0.20},
         ],
         "rationale": "VO2max : 3' Z5 / 3' Z1. Très exigeant, à placer "
-                     "quand TSB > 0 et avec récup ≥ 48 h ensuite.",
+        "quand TSB > 0 et avec récup ≥ 48 h ensuite.",
     },
 }
 
@@ -336,9 +335,9 @@ def _kind_for_target(target_zone: str) -> str:
     }.get(target_zone, "endurance")
 
 
-def generate_training_plan(sessions_per_week: int = 4,
-                           focus: str | None = None, *,
-                           ctx: AthleteContext | None = None) -> dict[str, Any]:
+def generate_training_plan(
+    sessions_per_week: int = 4, focus: str | None = None, *, ctx: AthleteContext | None = None
+) -> dict[str, Any]:
     """
     Génère un plan d'entraînement multi-semaines jusqu'à la date inscrite dans
     ``data/objective.yaml`` (fallback : 4 semaines à partir d'aujourd'hui).
@@ -408,8 +407,7 @@ def generate_training_plan(sessions_per_week: int = 4,
     }
 
 
-def get_planned_workout(date: str, *,
-                        ctx: AthleteContext | None = None) -> dict[str, Any]:
+def get_planned_workout(date: str, *, ctx: AthleteContext | None = None) -> dict[str, Any]:
     """
     Séance prévue à une date donnée (ISO YYYY-MM-DD) dans le plan en cours.
 
@@ -442,9 +440,7 @@ def get_planned_workout(date: str, *,
 
     # Tri par id DESC : la précision seconde de `created_at` peut produire des
     # égalités quand on enchaîne plusieurs sauvegardes (cf. load_latest_plan).
-    plans = sorted(
-        list_plans(limit=50, db_path=ctx.db_path), key=lambda m: m["id"], reverse=True
-    )
+    plans = sorted(list_plans(limit=50, db_path=ctx.db_path), key=lambda m: m["id"], reverse=True)
     total_considered = len(plans)
     for meta in plans:
         workouts = load_plan(meta["id"], db_path=ctx.db_path)
@@ -493,12 +489,17 @@ def propose_workout_today(
     from domestique_ai.processing.today import (
         propose_workout_today as _propose_today,
     )
+
     return _propose_today(available_min=available_min, refresh=refresh, ctx=ctx)
 
 
-def propose_workout(target_zone: str, duration_min: int,
-                    kind: str | None = None, *,
-                    ctx: AthleteContext | None = None) -> dict[str, Any]:
+def propose_workout(
+    target_zone: str,
+    duration_min: int,
+    kind: str | None = None,
+    *,
+    ctx: AthleteContext | None = None,
+) -> dict[str, Any]:
     """
     Squelette de séance basé sur la zone cible et la durée.
 
@@ -513,8 +514,7 @@ def propose_workout(target_zone: str, duration_min: int,
     if target_zone not in HR_ZONE_KEYS:
         return {
             "available": False,
-            "reason": f"target_zone invalide: {target_zone!r}. "
-                      f"Attendu: {list(HR_ZONE_KEYS)}",
+            "reason": f"target_zone invalide: {target_zone!r}. Attendu: {list(HR_ZONE_KEYS)}",
         }
     if duration_min <= 0:
         return {"available": False, "reason": "duration_min doit être positif."}
@@ -524,8 +524,7 @@ def propose_workout(target_zone: str, duration_min: int,
     if template is None:
         return {
             "available": False,
-            "reason": f"kind inconnu: {selected_kind!r}. "
-                      f"Attendu: {sorted(_WORKOUT_TEMPLATES)}",
+            "reason": f"kind inconnu: {selected_kind!r}. Attendu: {sorted(_WORKOUT_TEMPLATES)}",
         }
 
     return {
@@ -546,7 +545,7 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
         "function": {
             "name": "get_training_load_state",
             "description": "Renvoie l'état courant CTL/ATL/TSB (forme, fatigue, "
-                           "fraîcheur) + zone interprétative.",
+            "fraîcheur) + zone interprétative.",
             "parameters": {"type": "object", "properties": {}, "required": []},
         },
     },
@@ -555,14 +554,15 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
         "function": {
             "name": "get_recent_activities",
             "description": "Liste les activités sur les N derniers jours avec "
-                           "TSS, durée, distance, dénivelé, HR moyenne et zones.",
+            "TSS, durée, distance, dénivelé, HR moyenne et zones.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "days": {
                         "type": "integer",
                         "description": "Fenêtre glissante en jours (défaut 7).",
-                        "minimum": 1, "maximum": 365,
+                        "minimum": 1,
+                        "maximum": 365,
                     },
                 },
                 "required": [],
@@ -574,14 +574,15 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
         "function": {
             "name": "get_zone_distribution",
             "description": "Répartition cumulée du temps par zone HR (Z1..Z5) "
-                           "sur les N derniers jours, avec part en pourcentage.",
+            "sur les N derniers jours, avec part en pourcentage.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "days": {
                         "type": "integer",
                         "description": "Fenêtre en jours (défaut 14).",
-                        "minimum": 1, "maximum": 365,
+                        "minimum": 1,
+                        "maximum": 365,
                     },
                 },
                 "required": [],
@@ -593,7 +594,7 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
         "function": {
             "name": "get_objective",
             "description": "Lit l'objectif d'entraînement courant (type, date, "
-                           "distance, dénivelé, notes).",
+            "distance, dénivelé, notes).",
             "parameters": {"type": "object", "properties": {}, "required": []},
         },
     },
@@ -619,15 +620,16 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
         "function": {
             "name": "get_morning_trends",
             "description": "Tendances HRV, FC repos, sommeil, stress saisies "
-                           "manuellement chaque matin. Renvoie baselines 14 j "
-                           "et alertes si dérive (HRV ↓, FC repos ↑, etc.).",
+            "manuellement chaque matin. Renvoie baselines 14 j "
+            "et alertes si dérive (HRV ↓, FC repos ↑, etc.).",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "days": {
                         "type": "integer",
                         "description": "Fenêtre d'historique en jours (défaut 30).",
-                        "minimum": 7, "maximum": 365,
+                        "minimum": 7,
+                        "maximum": 365,
                     },
                 },
                 "required": [],
@@ -639,9 +641,9 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
         "function": {
             "name": "get_overtraining_signals",
             "description": "Détecte les signaux de surentraînement à partir "
-                           "des activités : TSB chronique, monotony et strain "
-                           "de Foster, saut de volume hebdo. Renvoie alertes "
-                           "agrégées avec messages explicites.",
+            "des activités : TSB chronique, monotony et strain "
+            "de Foster, saut de volume hebdo. Renvoie alertes "
+            "agrégées avec messages explicites.",
             "parameters": {"type": "object", "properties": {}, "required": []},
         },
     },
@@ -650,23 +652,24 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
         "function": {
             "name": "generate_training_plan",
             "description": "Génère et persiste un plan d'entraînement multi-semaines "
-                           "jusqu'à la date d'objectif (lue depuis objective.yaml ; "
-                           "fallback 4 semaines). Retourne un summary structuré "
-                           "(TSS hebdo, semaine pic, première et dernière séance). "
-                           "L'export `.FIT` se fait depuis l'onglet « 📋 Plan » du "
-                           "dashboard.",
+            "jusqu'à la date d'objectif (lue depuis objective.yaml ; "
+            "fallback 4 semaines). Retourne un summary structuré "
+            "(TSS hebdo, semaine pic, première et dernière séance). "
+            "L'export `.FIT` se fait depuis l'onglet « 📋 Plan » du "
+            "dashboard.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "sessions_per_week": {
                         "type": "integer",
                         "description": "Nombre de séances hebdomadaires (défaut 4).",
-                        "minimum": 2, "maximum": 7,
+                        "minimum": 2,
+                        "maximum": 7,
                     },
                     "focus": {
                         "type": "string",
                         "description": "Focus pédagogique optionnel "
-                                       "(ex: 'endurance', 'puissance').",
+                        "(ex: 'endurance', 'puissance').",
                     },
                 },
                 "required": [],
@@ -678,18 +681,18 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
         "function": {
             "name": "get_planned_workout",
             "description": "Renvoie la séance prévue à une date donnée dans le "
-                           "plan d'entraînement en cours. En cas de plans "
-                           "multiples, sélectionne le plus récent dont la fenêtre "
-                           "couvre la date. Retourne `planned_workout=None` si "
-                           "jour de repos, `available=False` si date hors plan.",
+            "plan d'entraînement en cours. En cas de plans "
+            "multiples, sélectionne le plus récent dont la fenêtre "
+            "couvre la date. Retourne `planned_workout=None` si "
+            "jour de repos, `available=False` si date hors plan.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "date": {
                         "type": "string",
                         "description": "Date ISO YYYY-MM-DD de la séance à "
-                                       "récupérer (typiquement la date d'une "
-                                       "activité analysée).",
+                        "récupérer (typiquement la date d'une "
+                        "activité analysée).",
                     },
                 },
                 "required": ["date"],
@@ -701,27 +704,28 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
         "function": {
             "name": "propose_workout_today",
             "description": "Détermine la séance optimale pour aujourd'hui en "
-                           "croisant TSB, objectif (weeks_to_event), plan "
-                           "persisté, dernière séance, distribution de zones "
-                           "de la semaine et signaux d'alerte. Renvoie soit "
-                           "rest_day=True, soit un workout structuré complet "
-                           "avec un rationale (justification courte) et un "
-                           "dict signals (TSB, last_kind, zone_distribution, "
-                           "alerts) — à reformuler pour l'utilisateur.",
+            "croisant TSB, objectif (weeks_to_event), plan "
+            "persisté, dernière séance, distribution de zones "
+            "de la semaine et signaux d'alerte. Renvoie soit "
+            "rest_day=True, soit un workout structuré complet "
+            "avec un rationale (justification courte) et un "
+            "dict signals (TSB, last_kind, zone_distribution, "
+            "alerts) — à reformuler pour l'utilisateur.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "available_min": {
                         "type": "integer",
                         "description": "Durée explicite en minutes "
-                                       "(override de la dispo du jour, "
-                                       "débraie le check off-day).",
-                        "minimum": 20, "maximum": 240,
+                        "(override de la dispo du jour, "
+                        "débraie le check off-day).",
+                        "minimum": 20,
+                        "maximum": 240,
                     },
                     "refresh": {
                         "type": "boolean",
                         "description": "Force la régénération en ignorant "
-                                       "le cache du jour (défaut false).",
+                        "le cache du jour (défaut false).",
                     },
                 },
                 "required": [],
@@ -733,7 +737,7 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
         "function": {
             "name": "propose_workout",
             "description": "Génère un squelette de séance (échauffement, corps, "
-                           "retour au calme) selon une zone cible et une durée.",
+            "retour au calme) selon une zone cible et une durée.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -745,13 +749,13 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
                     "duration_min": {
                         "type": "integer",
                         "description": "Durée totale de la séance en minutes.",
-                        "minimum": 15, "maximum": 480,
+                        "minimum": 15,
+                        "maximum": 480,
                     },
                     "kind": {
                         "type": "string",
                         "enum": list(_WORKOUT_TEMPLATES.keys()),
-                        "description": "Type de séance (déduit de target_zone "
-                                       "si absent).",
+                        "description": "Type de séance (déduit de target_zone si absent).",
                     },
                 },
                 "required": ["target_zone", "duration_min"],
@@ -763,23 +767,22 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
         "function": {
             "name": "find_similar_activities",
             "description": "Retrouve les activités passées au profil "
-                           "similaire à une activité donnée (même bucket de "
-                           "sport indoor/outdoor + distance à ±5 % + dénivelé "
-                           "à ±10 %). Utile pour comparer la performance sur "
-                           "une boucle hebdomadaire ou un parcours récurrent.",
+            "similaire à une activité donnée (même bucket de "
+            "sport indoor/outdoor + distance à ±5 % + dénivelé "
+            "à ±10 %). Utile pour comparer la performance sur "
+            "une boucle hebdomadaire ou un parcours récurrent.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "strava_id": {
                         "type": "integer",
-                        "description": "Identifiant Strava de l'activité de "
-                                       "référence.",
+                        "description": "Identifiant Strava de l'activité de référence.",
                     },
                     "limit": {
                         "type": "integer",
-                        "description": "Nombre max d'activités similaires "
-                                       "retournées (défaut 10).",
-                        "minimum": 1, "maximum": 100,
+                        "description": "Nombre max d'activités similaires retournées (défaut 10).",
+                        "minimum": 1,
+                        "maximum": 100,
                     },
                 },
                 "required": ["strava_id"],
@@ -805,8 +808,9 @@ TOOLS: dict[str, Callable[..., dict[str, Any]]] = {
 }
 
 
-def find_similar_activities(strava_id: int, limit: int = 10, *,
-                            ctx: AthleteContext | None = None) -> dict[str, Any]:
+def find_similar_activities(
+    strava_id: int, limit: int = 10, *, ctx: AthleteContext | None = None
+) -> dict[str, Any]:
     """Recherche les activités au profil similaire (même boucle).
 
     Délègue à ``processing.similar.find_similar_activities``. Wrapper local
@@ -816,6 +820,7 @@ def find_similar_activities(strava_id: int, limit: int = 10, *,
     from domestique_ai.processing.similar import (
         find_similar_activities as _impl,
     )
+
     ctx = ctx or context_from_env()
     return _impl(strava_id, limit=limit, db_path=ctx.db_path)
 
@@ -823,8 +828,9 @@ def find_similar_activities(strava_id: int, limit: int = 10, *,
 TOOLS["find_similar_activities"] = find_similar_activities
 
 
-def dispatch(name: str, arguments: dict[str, Any],
-             ctx: AthleteContext | None = None) -> dict[str, Any]:
+def dispatch(
+    name: str, arguments: dict[str, Any], ctx: AthleteContext | None = None
+) -> dict[str, Any]:
     """Exécute un tool par son nom, scopé sur l'athlète ``ctx``.
 
     Le ``ctx`` est injecté à chaque tool (en plus des arguments fournis par le

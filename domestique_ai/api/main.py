@@ -85,21 +85,15 @@ async def _backfill_session_titles(limit: int = 30) -> None:
         try:
             title = await generate_session_title(sess["session_id"])
         except Exception:  # noqa: BLE001 — best-effort, jamais fatal
-            log.exception(
-                "Backfill titre échoué (%s)", sess["session_id"][:8]
-            )
+            log.exception("Backfill titre échoué (%s)", sess["session_id"][:8])
             title = None
         if title:
             consecutive_failures = 0
-            log.info(
-                "Backfill titre %s : %r", sess["session_id"][:8], title
-            )
+            log.info("Backfill titre %s : %r", sess["session_id"][:8], title)
         else:
             consecutive_failures += 1
             if consecutive_failures >= 3:
-                log.warning(
-                    "Backfill titres interrompu après 3 échecs consécutifs."
-                )
+                log.warning("Backfill titres interrompu après 3 échecs consécutifs.")
                 return
 
 
@@ -199,9 +193,7 @@ class RequestLoggingMiddleware:
         else:
             duration_ms = (time.perf_counter() - start) * 1000
             if path not in self._SKIP_PATHS:
-                level_log = (
-                    self._LOG.warning if status_code >= 400 else self._LOG.info
-                )
+                level_log = self._LOG.warning if status_code >= 400 else self._LOG.info
                 level_log(
                     "rid=%s %s %s -> %d (%.1f ms)",
                     request_id,

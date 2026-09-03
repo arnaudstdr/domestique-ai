@@ -38,9 +38,15 @@ def _make_app() -> FastAPI:
     app.include_router(auth_router.router)
     # Tous les routeurs data sont désormais scopés par athlète (plus de gate).
     for mod in (
-        metrics_router, activities_router, morning_router,
-        objective_router, profile_router, availability_router,
-        strava_router, coach_router, plan_router,
+        metrics_router,
+        activities_router,
+        morning_router,
+        objective_router,
+        profile_router,
+        availability_router,
+        strava_router,
+        coach_router,
+        plan_router,
     ):
         app.include_router(mod.router)
     return app
@@ -59,28 +65,24 @@ def env(tmp_path: Path, monkeypatch) -> Iterator[dict]:
 
 def _new_athlete(client: TestClient) -> tuple[str, str]:
     """Invite (coach legacy) + accepte un athlète. Retourne (session_token, public_id)."""
-    inv = client.post(
-        "/api/auth/invitations", headers=_bearer(_LEGACY), json={"role": "athlete"}
-    )
+    inv = client.post("/api/auth/invitations", headers=_bearer(_LEGACY), json={"role": "athlete"})
     assert inv.status_code == 200, inv.text
-    acc = client.post(
-        "/api/auth/accept-invite", json={"invite_token": inv.json()["invite_token"]}
-    )
+    acc = client.post("/api/auth/accept-invite", json={"invite_token": inv.json()["invite_token"]})
     assert acc.status_code == 200, acc.text
     session = acc.json()["session_token"]
     me = client.get("/api/auth/me", headers=_bearer(session))
     return session, me.json()["public_id"]
 
 
-def _seed_activity(root: Path, public_id: str, *, strava_id: int,
-                   training_load: float, date_iso: str) -> None:
+def _seed_activity(
+    root: Path, public_id: str, *, strava_id: int, training_load: float, date_iso: str
+) -> None:
     """Insère une activité dans la DB (déjà provisionnée) de l'athlète."""
     db = root / public_id / "strava_activities.db"
     conn = sqlite3.connect(db)
     try:
         conn.execute(
-            "INSERT INTO activities (strava_id, date, duration, training_load) "
-            "VALUES (?, ?, ?, ?)",
+            "INSERT INTO activities (strava_id, date, duration, training_load) VALUES (?, ?, ?, ?)",
             (strava_id, date_iso, 3600, training_load),
         )
         conn.commit()
@@ -144,8 +146,9 @@ def test_no_env_ftp_leak_to_athlete(env, monkeypatch):
 def test_athlete_without_tokens_503_on_detail(env):
     c, root = env["client"], env["root"]
     sess, pid = _new_athlete(c)
-    _seed_activity(root, pid, strava_id=42, training_load=50.0,
-                   date_iso=dt.date.today().isoformat())
+    _seed_activity(
+        root, pid, strava_id=42, training_load=50.0, date_iso=dt.date.today().isoformat()
+    )
     assert c.get("/api/activities", headers=_bearer(sess)).status_code == 200
     # Le détail exige un client Strava : athlète sans tokens (avant 1c) → 503.
     assert c.get("/api/activities/42", headers=_bearer(sess)).status_code == 503
@@ -171,6 +174,7 @@ def test_coach_sessions_isolated_per_athlete(env):
     b_sess, _ = _new_athlete(c)
     # Persiste une session coach dans la DB de A (directement).
     from domestique_ai.llm.conversations import append_message
+
     db_a = root / a_pid / "strava_activities.db"
     append_message("sess-a", "user", {"role": "user", "content": "salut"}, db_path=db_a)
 
@@ -186,6 +190,7 @@ def test_plans_isolated_per_athlete(env):
     b_sess, _ = _new_athlete(c)
     # Insère un plan dans la DB de A (directement).
     from domestique_ai.processing.plan_builder import build_training_plan
+
     plan = build_training_plan(target_date=None, ctl_current=30.0, sessions_per_week=3)
     db_a = root / a_pid / "strava_activities.db"
     plan_id = save_plan(plan, sessions_per_week=3, db_path=db_a)

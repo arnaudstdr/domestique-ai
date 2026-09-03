@@ -16,9 +16,7 @@ from domestique_ai.ingestion.strava import init_db
 def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[TestClient]:
     db = tmp_path / "profile_test.db"
     monkeypatch.setenv("DOMESTIQUE_AI_DB_PATH", str(db))
-    monkeypatch.setenv(
-        "DOMESTIQUE_AI_PROFILE_PATH", str(tmp_path / "profile.yaml")
-    )
+    monkeypatch.setenv("DOMESTIQUE_AI_PROFILE_PATH", str(tmp_path / "profile.yaml"))
     monkeypatch.delenv("STRAVA_FTP", raising=False)
     monkeypatch.delenv("STRAVA_HR_REST", raising=False)
     monkeypatch.delenv("STRAVA_HR_MAX", raising=False)
@@ -50,9 +48,7 @@ def test_put_profile_persists_and_roundtrips(client: TestClient) -> None:
         "sex": "M",
         "lthr_pct": 0.87,
     }
-    with patch(
-        "domestique_ai.api.routers.profile.recalculate_training_loads"
-    ) as mock_recalc:
+    with patch("domestique_ai.api.routers.profile.recalculate_training_loads") as mock_recalc:
         r = client.put("/api/profile", json=payload)
     assert r.status_code == 200
     body = r.json()
@@ -95,9 +91,7 @@ def test_put_profile_no_recalc_when_only_ftp_changes(client: TestClient) -> None
         json={"ftp": 250, "sex": "M", "lthr_pct": 0.88},
     )
     # 2ᵉ écriture : seule la FTP change.
-    with patch(
-        "domestique_ai.api.routers.profile.recalculate_training_loads"
-    ) as mock_recalc:
+    with patch("domestique_ai.api.routers.profile.recalculate_training_loads") as mock_recalc:
         r = client.put(
             "/api/profile",
             json={"ftp": 290, "sex": "M", "lthr_pct": 0.88},
@@ -112,9 +106,7 @@ def test_put_profile_triggers_recalc_when_hr_changes(client: TestClient) -> None
         "/api/profile",
         json={"ftp": 250, "hr_rest": 50, "hr_max": 190},
     )
-    with patch(
-        "domestique_ai.api.routers.profile.recalculate_training_loads"
-    ) as mock_recalc:
+    with patch("domestique_ai.api.routers.profile.recalculate_training_loads") as mock_recalc:
         r = client.put(
             "/api/profile",
             json={"ftp": 250, "hr_rest": 45, "hr_max": 190},

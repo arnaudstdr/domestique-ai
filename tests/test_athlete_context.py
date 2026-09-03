@@ -35,8 +35,14 @@ def test_context_is_frozen():
 
 def test_context_from_env_reproduces_getters_default(monkeypatch):
     # Neutralise toute config locale du dev pour partir d'un état déterministe.
-    for var in ("STRAVA_FTP", "STRAVA_HR_REST", "STRAVA_HR_MAX",
-                "STRAVA_SEX", "STRAVA_LTHR_PCT", "DOMESTIQUE_AI_PROFILE_PATH"):
+    for var in (
+        "STRAVA_FTP",
+        "STRAVA_HR_REST",
+        "STRAVA_HR_MAX",
+        "STRAVA_SEX",
+        "STRAVA_LTHR_PCT",
+        "DOMESTIQUE_AI_PROFILE_PATH",
+    ):
         monkeypatch.delenv(var, raising=False)
     invalidate_profile_cache()
 
@@ -76,10 +82,17 @@ def test_context_from_env_reflects_env_overrides(tmp_path: Path, monkeypatch):
 
 
 def test_context_for_bootstrap_is_context_from_env(monkeypatch):
-    for var in ("STRAVA_FTP", "STRAVA_HR_REST", "STRAVA_HR_MAX",
-                "STRAVA_SEX", "STRAVA_LTHR_PCT", "DOMESTIQUE_AI_PROFILE_PATH"):
+    for var in (
+        "STRAVA_FTP",
+        "STRAVA_HR_REST",
+        "STRAVA_HR_MAX",
+        "STRAVA_SEX",
+        "STRAVA_LTHR_PCT",
+        "DOMESTIQUE_AI_PROFILE_PATH",
+    ):
         monkeypatch.delenv(var, raising=False)
     from domestique_ai.config import invalidate_profile_cache
+
     invalidate_profile_cache()
     owner = {"public_id": "abc", "role": "coach", "is_bootstrap": True}
     assert context_for_athlete(owner) == context_from_env()

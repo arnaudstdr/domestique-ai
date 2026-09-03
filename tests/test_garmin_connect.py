@@ -67,14 +67,9 @@ def test_payload_step_orders_are_sequential(sample_plan):
 
 def test_payload_maps_phases_to_garmin_step_types(sample_plan):
     # Trouver une séance avec un warmup explicite
-    interval_workout = next(
-        w for w in sample_plan if any(s.phase == "warmup" for s in w.structure)
-    )
+    interval_workout = next(w for w in sample_plan if any(s.phase == "warmup" for s in w.structure))
     payload = build_workout_payload(interval_workout)
-    keys = [
-        s["stepType"]["stepTypeKey"]
-        for s in payload["workoutSegments"][0]["workoutSteps"]
-    ]
+    keys = [s["stepType"]["stepTypeKey"] for s in payload["workoutSegments"][0]["workoutSteps"]]
     assert keys[0] == "warmup"
     assert keys[-1] in ("cooldown", "interval")  # selon le type de séance
 
@@ -120,9 +115,7 @@ def test_push_plan_uploads_and_schedules_each_workout(sample_plan):
     assert client.upload_workout.call_count == len(sample_plan)
     assert client.schedule_workout.call_count == len(sample_plan)
     # Schedule doit être appelé avec la date de chaque séance.
-    scheduled_dates = [
-        call.args[1] for call in client.schedule_workout.call_args_list
-    ]
+    scheduled_dates = [call.args[1] for call in client.schedule_workout.call_args_list]
     assert scheduled_dates == [w.date for w in sample_plan]
 
 
@@ -168,9 +161,7 @@ def test_push_plan_progress_callback_invoked(sample_plan):
     def _progress(idx, total, workout):
         calls.append((idx, total, workout.name))
 
-    push_plan(
-        sample_plan[:3], schedule=False, client=client, progress=_progress
-    )
+    push_plan(sample_plan[:3], schedule=False, client=client, progress=_progress)
     assert len(calls) == 3
     assert calls[0][0] == 0 and calls[0][1] == 3
     assert calls[-1][0] == 2
@@ -183,8 +174,6 @@ def test_push_plan_progress_exception_does_not_break_push(sample_plan):
     def _bad_progress(idx, total, workout):
         raise RuntimeError("ui dead")
 
-    results = push_plan(
-        sample_plan[:2], schedule=False, client=client, progress=_bad_progress
-    )
+    results = push_plan(sample_plan[:2], schedule=False, client=client, progress=_bad_progress)
     assert len(results) == 2
     assert all(r["workout_id"] for r in results)

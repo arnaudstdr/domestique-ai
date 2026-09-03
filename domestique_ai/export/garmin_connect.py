@@ -41,9 +41,9 @@ _ZONE_HRR_RANGES: dict[str, tuple[float, float]] = {
 
 # Mapping de nos phases internes vers les ``stepType`` Garmin Connect.
 _STEP_TYPE: dict[str, dict[str, Any]] = {
-    "warmup":   {"stepTypeId": 1, "stepTypeKey": "warmup"},
-    "active":   {"stepTypeId": 3, "stepTypeKey": "interval"},
-    "rest":     {"stepTypeId": 4, "stepTypeKey": "recovery"},
+    "warmup": {"stepTypeId": 1, "stepTypeKey": "warmup"},
+    "active": {"stepTypeId": 3, "stepTypeKey": "interval"},
+    "rest": {"stepTypeId": 4, "stepTypeKey": "recovery"},
     "cooldown": {"stepTypeId": 2, "stepTypeKey": "cooldown"},
 }
 
@@ -79,9 +79,9 @@ def _zone_to_index(zone: str) -> int:
     return 2
 
 
-def _build_step_payload(step: WorkoutStep, order: int,
-                        hr_rest: float | None,
-                        hr_max: float | None) -> dict[str, Any]:
+def _build_step_payload(
+    step: WorkoutStep, order: int, hr_rest: float | None, hr_max: float | None
+) -> dict[str, Any]:
     payload: dict[str, Any] = {
         "type": "ExecutableStepDTO",
         "stepOrder": order,
@@ -99,13 +99,12 @@ def _build_step_payload(step: WorkoutStep, order: int,
     return payload
 
 
-def build_workout_payload(workout: Workout,
-                          hr_rest: float | None = None,
-                          hr_max: float | None = None) -> dict[str, Any]:
+def build_workout_payload(
+    workout: Workout, hr_rest: float | None = None, hr_max: float | None = None
+) -> dict[str, Any]:
     """Construit le payload JSON Garmin Connect pour une séance."""
     steps = [
-        _build_step_payload(s, i + 1, hr_rest, hr_max)
-        for i, s in enumerate(workout.structure)
+        _build_step_payload(s, i + 1, hr_rest, hr_max) for i, s in enumerate(workout.structure)
     ]
     return {
         "workoutName": workout.name[:50],
@@ -140,9 +139,9 @@ def token_cache_present() -> bool:
     return any(token_dir.iterdir())
 
 
-def _new_client(email: str | None, password: str | None,
-                prompt_mfa: Any = None) -> Any:
+def _new_client(email: str | None, password: str | None, prompt_mfa: Any = None) -> Any:
     from garminconnect import Garmin
+
     return Garmin(email=email, password=password, prompt_mfa=prompt_mfa)
 
 
@@ -178,9 +177,9 @@ def get_client(token_dir: Path | None = None) -> Any:
 # ---------------------------------------------------------------------------
 
 
-def push_workout(client: Any, workout: Workout,
-                 hr_rest: float | None = None,
-                 hr_max: float | None = None) -> int:
+def push_workout(
+    client: Any, workout: Workout, hr_rest: float | None = None, hr_max: float | None = None
+) -> int:
     """Upload une séance et retourne son ``workoutId`` Garmin Connect."""
     payload = build_workout_payload(workout, hr_rest=hr_rest, hr_max=hr_max)
     try:
@@ -193,11 +192,15 @@ def push_workout(client: Any, workout: Workout,
     return int(workout_id)
 
 
-def push_plan(plan: list[Workout], *, schedule: bool = True,
-              hr_rest: float | None = None,
-              hr_max: float | None = None,
-              client: Any = None,
-              progress: Any = None) -> list[dict[str, Any]]:
+def push_plan(
+    plan: list[Workout],
+    *,
+    schedule: bool = True,
+    hr_rest: float | None = None,
+    hr_max: float | None = None,
+    client: Any = None,
+    progress: Any = None,
+) -> list[dict[str, Any]]:
     """Upload chaque séance puis (optionnel) la planifie sur le calendrier.
 
     Si ``client`` n'est pas fourni, en construit un via ``get_client()``. Le
@@ -220,13 +223,15 @@ def push_plan(plan: list[Workout], *, schedule: bool = True,
         try:
             workout_id = push_workout(client, workout, hr_rest=hr_rest, hr_max=hr_max)
         except GarminPushError as exc:
-            results.append({
-                "workout": workout.name,
-                "date": workout.date,
-                "workout_id": None,
-                "scheduled": False,
-                "error": str(exc),
-            })
+            results.append(
+                {
+                    "workout": workout.name,
+                    "date": workout.date,
+                    "workout_id": None,
+                    "scheduled": False,
+                    "error": str(exc),
+                }
+            )
             continue
 
         scheduled = False
@@ -292,10 +297,7 @@ def _main() -> None:  # pragma: no cover — entrée CLI manuelle
         print(f"❌ {exc}")
         raise SystemExit(1) from exc
     print(f"✅ Connexion réussie. Token persisté dans : {path}")
-    print(
-        "Tu peux maintenant pousser tes plans depuis l'onglet "
-        "« 📋 Plan » du dashboard."
-    )
+    print("Tu peux maintenant pousser tes plans depuis l'onglet « 📋 Plan » du dashboard.")
 
 
 if __name__ == "__main__":  # pragma: no cover

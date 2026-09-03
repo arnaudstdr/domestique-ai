@@ -65,11 +65,7 @@ def _patch_chat_structured(monkeypatch, scripted: list[Any]):
 
 def test_llm_week_plan_accepts_minimal_valid_payload():
     parsed = pg.LLMWeekPlan.model_validate(
-        {
-            "workouts": [
-                {"date": "2026-05-26", "kind": "endurance", "duration_min": 90}
-            ]
-        }
+        {"workouts": [{"date": "2026-05-26", "kind": "endurance", "duration_min": 90}]}
     )
     assert len(parsed.workouts) == 1
     assert parsed.workouts[0].notes == ""
@@ -85,33 +81,21 @@ def test_llm_week_plan_rejects_invalid_kind():
 def test_llm_week_plan_rejects_duration_above_300():
     with pytest.raises(ValidationError):
         pg.LLMWeekPlan.model_validate(
-            {
-                "workouts": [
-                    {"date": "2026-05-26", "kind": "endurance", "duration_min": 500}
-                ]
-            }
+            {"workouts": [{"date": "2026-05-26", "kind": "endurance", "duration_min": 500}]}
         )
 
 
 def test_llm_week_plan_rejects_duration_below_20():
     with pytest.raises(ValidationError):
         pg.LLMWeekPlan.model_validate(
-            {
-                "workouts": [
-                    {"date": "2026-05-26", "kind": "endurance", "duration_min": 10}
-                ]
-            }
+            {"workouts": [{"date": "2026-05-26", "kind": "endurance", "duration_min": 10}]}
         )
 
 
 def test_llm_week_plan_rejects_invalid_date():
     with pytest.raises(ValidationError):
         pg.LLMWeekPlan.model_validate(
-            {
-                "workouts": [
-                    {"date": "26-05-2026", "kind": "endurance", "duration_min": 60}
-                ]
-            }
+            {"workouts": [{"date": "26-05-2026", "kind": "endurance", "duration_min": 60}]}
         )
 
 
@@ -119,9 +103,7 @@ def test_llm_week_plan_rejects_invalid_date():
 
 
 def test_expand_rebuilds_structure_from_kind_and_duration():
-    draft = pg.LLMWorkoutDraft(
-        date="2026-05-26", kind="intervals", duration_min=60, notes="ok"
-    )
+    draft = pg.LLMWorkoutDraft(date="2026-05-26", kind="intervals", duration_min=60, notes="ok")
     w = pg._expand_to_workout(draft, week_index=0, focus=None)
     assert w.kind == "intervals"
     assert w.target_zone == "z4"
@@ -133,9 +115,7 @@ def test_expand_rebuilds_structure_from_kind_and_duration():
 
 
 def test_expand_uses_focus_as_notes_when_llm_omits():
-    draft = pg.LLMWorkoutDraft(
-        date="2026-05-26", kind="endurance", duration_min=90, notes=""
-    )
+    draft = pg.LLMWorkoutDraft(date="2026-05-26", kind="endurance", duration_min=90, notes="")
     w = pg._expand_to_workout(draft, week_index=0, focus="montagne")
     assert w.notes == "montagne"
 
@@ -194,11 +174,7 @@ def test_generate_falls_back_when_llm_payload_invalid(monkeypatch):
         target_date=dt.date(2026, 6, 1),
     )
     # 2 essais avec un kind invalide → ValidationError → fallback.
-    invalid = {
-        "workouts": [
-            {"date": "2026-05-26", "kind": "vo2max", "duration_min": 60}
-        ]
-    }
+    invalid = {"workouts": [{"date": "2026-05-26", "kind": "vo2max", "duration_min": 60}]}
     _patch_chat_structured(monkeypatch, [invalid, invalid])
     _, weeks = _run(pg.collect_plan(ctx))
     assert weeks[0].source == "fallback"
@@ -223,16 +199,8 @@ def test_generate_retries_on_invalid_then_uses_valid_response(monkeypatch):
         today=dt.date(2026, 5, 25),
         target_date=dt.date(2026, 6, 1),
     )
-    invalid = {
-        "workouts": [
-            {"date": "2026-05-26", "kind": "invalid", "duration_min": 60}
-        ]
-    }
-    valid = _llm_response(
-        [
-            {"date": "2026-05-26", "kind": "endurance", "duration_min": 60}
-        ]
-    )
+    invalid = {"workouts": [{"date": "2026-05-26", "kind": "invalid", "duration_min": 60}]}
+    valid = _llm_response([{"date": "2026-05-26", "kind": "endurance", "duration_min": 60}])
     _patch_chat_structured(monkeypatch, [invalid, valid])
     _, weeks = _run(pg.collect_plan(ctx))
     assert weeks[0].source == "llm"
@@ -255,8 +223,7 @@ def test_generated_plan_passes_through_validate_and_correct(monkeypatch):
         [
             _llm_response(
                 [
-                    {"date": f"2026-05-{25 + i}", "kind": "endurance",
-                     "duration_min": 240}
+                    {"date": f"2026-05-{25 + i}", "kind": "endurance", "duration_min": 240}
                     for i in range(6)
                 ]
             )
@@ -356,11 +323,7 @@ def test_one_week_llm_one_week_fallback(monkeypatch):
         today=dt.date(2026, 5, 25),
         target_date=dt.date(2026, 6, 8),  # 2 semaines
     )
-    valid = _llm_response(
-        [
-            {"date": "2026-06-01", "kind": "endurance", "duration_min": 60}
-        ]
-    )
+    valid = _llm_response([{"date": "2026-06-01", "kind": "endurance", "duration_min": 60}])
     _patch_chat_structured(monkeypatch, [None, None, valid])
     plan, weeks = _run(pg.collect_plan(ctx))
     assert len(weeks) == 2

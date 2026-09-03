@@ -22,6 +22,7 @@ from domestique_ai.config import get_db_path
 
 def _connect(db_path: Path | None = None) -> sqlite3.Connection:
     from domestique_ai.ingestion.strava import init_db
+
     path = Path(db_path) if db_path else get_db_path()
     init_db(path)
     return sqlite3.connect(path)

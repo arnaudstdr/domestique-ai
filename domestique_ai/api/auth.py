@@ -77,8 +77,9 @@ class BearerAuthMiddleware:
         "/api/strava/callback",
     }
 
-    def __init__(self, app: ASGIApp, token: str | None,
-                 platform_db_path: Path | None = None) -> None:
+    def __init__(
+        self, app: ASGIApp, token: str | None, platform_db_path: Path | None = None
+    ) -> None:
         self.app = app
         self._token = (token or "").strip()
         self._platform_db_path = platform_db_path

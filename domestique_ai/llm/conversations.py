@@ -21,6 +21,7 @@ from domestique_ai.config import get_db_path
 def _connect(db_path: Path | None = None) -> sqlite3.Connection:
     # Import local pour éviter les cycles avec ingestion.strava.
     from domestique_ai.ingestion.strava import init_db
+
     path = Path(db_path) if db_path else get_db_path()
     init_db(path)
     return sqlite3.connect(path)
@@ -31,8 +32,9 @@ def new_session_id() -> str:
     return uuid.uuid4().hex
 
 
-def append_message(session_id: str, role: str, payload: dict[str, Any],
-                   db_path: Path | None = None) -> int:
+def append_message(
+    session_id: str, role: str, payload: dict[str, Any], db_path: Path | None = None
+) -> int:
     """
     Ajoute un message à la conversation. Retourne l'id de la ligne insérée.
 
@@ -42,8 +44,7 @@ def append_message(session_id: str, role: str, payload: dict[str, Any],
     conn = _connect(db_path)
     try:
         cursor = conn.execute(
-            "INSERT INTO conversations (session_id, created_at, role, payload) "
-            "VALUES (?, ?, ?, ?)",
+            "INSERT INTO conversations (session_id, created_at, role, payload) VALUES (?, ?, ?, ?)",
             (
                 session_id,
                 dt.datetime.now(dt.UTC).isoformat(),
@@ -57,14 +58,12 @@ def append_message(session_id: str, role: str, payload: dict[str, Any],
         conn.close()
 
 
-def load_session(session_id: str,
-                 db_path: Path | None = None) -> list[dict[str, Any]]:
+def load_session(session_id: str, db_path: Path | None = None) -> list[dict[str, Any]]:
     """Charge tous les messages d'une session, dans l'ordre d'insertion."""
     conn = _connect(db_path)
     try:
         rows = conn.execute(
-            "SELECT payload FROM conversations "
-            "WHERE session_id = ? ORDER BY id ASC",
+            "SELECT payload FROM conversations WHERE session_id = ? ORDER BY id ASC",
             (session_id,),
         ).fetchall()
     finally:
@@ -72,8 +71,7 @@ def load_session(session_id: str,
     return [json.loads(row[0]) for row in rows]
 
 
-def delete_session(session_id: str,
-                   db_path: Path | None = None) -> int:
+def delete_session(session_id: str, db_path: Path | None = None) -> int:
     """Supprime tous les messages d'une session. Retourne le nombre de lignes supprimées."""
     conn = _connect(db_path)
     try:
@@ -91,8 +89,7 @@ def delete_session(session_id: str,
         conn.close()
 
 
-def get_session_title(session_id: str,
-                      db_path: Path | None = None) -> str | None:
+def get_session_title(session_id: str, db_path: Path | None = None) -> str | None:
     """Retourne le titre persisté d'une session, ou ``None`` si absent."""
     conn = _connect(db_path)
     try:
@@ -105,8 +102,7 @@ def get_session_title(session_id: str,
     return row[0] if row else None
 
 
-def set_session_title(session_id: str, title: str,
-                      db_path: Path | None = None) -> None:
+def set_session_title(session_id: str, title: str, db_path: Path | None = None) -> None:
     """Persiste (UPSERT) le titre d'une session."""
     conn = _connect(db_path)
     try:
@@ -126,8 +122,7 @@ def set_session_title(session_id: str, title: str,
         conn.close()
 
 
-async def generate_session_title(session_id: str,
-                                 db_path: Path | None = None) -> str | None:
+async def generate_session_title(session_id: str, db_path: Path | None = None) -> str | None:
     """Génère un titre court (3-6 mots) via Ollama et le persiste.
 
     Best-effort : si Ollama échoue ou si la session est vide, retourne ``None``
@@ -155,8 +150,7 @@ async def generate_session_title(session_id: str,
         "Donne un titre court (3 à 6 mots, en français) qui résume cette "
         "conversation entre un cycliste et son coach d'endurance. Renvoie "
         "UNIQUEMENT le titre, sans guillemets ni ponctuation finale, sans "
-        "préfixe \"Titre :\".\n\n"
-        + "\n".join(excerpts)
+        'préfixe "Titre :".\n\n' + "\n".join(excerpts)
     )
 
     title = ""
@@ -177,8 +171,7 @@ async def generate_session_title(session_id: str,
     return title
 
 
-def list_sessions(limit: int = 50,
-                  db_path: Path | None = None) -> list[dict[str, Any]]:
+def list_sessions(limit: int = 50, db_path: Path | None = None) -> list[dict[str, Any]]:
     """
     Liste les sessions (les plus récentes en premier) avec leur titre généré
     (s'il existe) et leur premier message utilisateur comme aperçu de secours.
@@ -207,13 +200,15 @@ def list_sessions(limit: int = 50,
                 "SELECT title FROM session_titles WHERE session_id = ?",
                 (session_id,),
             ).fetchone()
-            sessions.append({
-                "session_id": session_id,
-                "started_at": started_at,
-                "messages": count,
-                "preview": preview,
-                "title": title_row[0] if title_row else None,
-            })
+            sessions.append(
+                {
+                    "session_id": session_id,
+                    "started_at": started_at,
+                    "messages": count,
+                    "preview": preview,
+                    "title": title_row[0] if title_row else None,
+                }
+            )
         return sessions
     finally:
         conn.close()

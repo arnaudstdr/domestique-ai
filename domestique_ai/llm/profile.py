@@ -51,9 +51,7 @@ def _validate(payload: dict[str, Any]) -> dict[str, Any]:
     sex = payload.get("sex", "M")
     sex_upper = sex.strip().upper()[:1] or "M" if isinstance(sex, str) else "M"
     if sex_upper not in VALID_SEX:
-        raise ProfileError(
-            f"sex invalide: {sex!r}. Attendu: {sorted(VALID_SEX)}"
-        )
+        raise ProfileError(f"sex invalide: {sex!r}. Attendu: {sorted(VALID_SEX)}")
     payload["sex"] = sex_upper
 
     for key in ("ftp", "hr_rest", "hr_max"):
@@ -74,9 +72,7 @@ def _validate(payload: dict[str, Any]) -> dict[str, Any]:
     except (TypeError, ValueError) as exc:
         raise ProfileError(f"lthr_pct invalide: {lthr_pct!r}") from exc
     if not 0.5 <= lthr_pct <= 1.0:
-        raise ProfileError(
-            f"lthr_pct hors borne [0.5, 1.0], reçu {lthr_pct}"
-        )
+        raise ProfileError(f"lthr_pct hors borne [0.5, 1.0], reçu {lthr_pct}")
     payload["lthr_pct"] = lthr_pct
     return payload
 
@@ -88,9 +84,7 @@ def load_profile(path: Path | None = None) -> Profile | None:
         return None
     raw = yaml.safe_load(target.read_text()) or {}
     if not isinstance(raw, dict):
-        raise ProfileError(
-            f"Le fichier {target} doit contenir un dictionnaire YAML."
-        )
+        raise ProfileError(f"Le fichier {target} doit contenir un dictionnaire YAML.")
     payload = _validate(dict(raw))
     return Profile(
         ftp=payload.get("ftp"),
@@ -105,9 +99,7 @@ def save_profile(profile: Profile, path: Path | None = None) -> Path:
     """Sérialise le profil au format YAML."""
     target = path or get_profile_path()
     target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_text(
-        yaml.safe_dump(profile.to_dict(), allow_unicode=True, sort_keys=False)
-    )
+    target.write_text(yaml.safe_dump(profile.to_dict(), allow_unicode=True, sort_keys=False))
     return target
 
 

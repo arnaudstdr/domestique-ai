@@ -160,34 +160,39 @@ def find_similar_activities(
         if _sport_bucket(candidate["sport_type"]) != ref_bucket:
             continue
         if not _within_tolerance(
-            ref_dist, candidate["distance"] or 0,
-            _DISTANCE_TOLERANCE, _DISTANCE_FLOOR_M,
+            ref_dist,
+            candidate["distance"] or 0,
+            _DISTANCE_TOLERANCE,
+            _DISTANCE_FLOOR_M,
         ):
             continue
         cand_elev = float(candidate["elevation_gain"] or 0)
         if not _within_tolerance(
-            ref_elev, cand_elev, _ELEVATION_TOLERANCE, _ELEVATION_FLOOR_M,
+            ref_elev,
+            cand_elev,
+            _ELEVATION_TOLERANCE,
+            _ELEVATION_FLOOR_M,
         ):
             continue
-        matches.append({
-            "strava_id": candidate["strava_id"],
-            "date": candidate["date"],
-            "duration_sec": candidate["duration_sec"],
-            "avg_heart_rate": candidate["avg_heart_rate"],
-            "avg_power": candidate["avg_power"],
-            "elevation_m": cand_elev,
-            "distance_km": round((candidate["distance"] or 0) / 1000, 2),
-            "training_load": candidate["training_load"],
-            "duration_delta_pct": _safe_delta_pct(
-                reference["duration_sec"], candidate["duration_sec"]
-            ),
-            "tss_delta_pct": _safe_delta_pct(
-                reference["training_load"], candidate["training_load"]
-            ),
-            "power_delta_pct": _safe_delta_pct(
-                reference["avg_power"], candidate["avg_power"]
-            ),
-        })
+        matches.append(
+            {
+                "strava_id": candidate["strava_id"],
+                "date": candidate["date"],
+                "duration_sec": candidate["duration_sec"],
+                "avg_heart_rate": candidate["avg_heart_rate"],
+                "avg_power": candidate["avg_power"],
+                "elevation_m": cand_elev,
+                "distance_km": round((candidate["distance"] or 0) / 1000, 2),
+                "training_load": candidate["training_load"],
+                "duration_delta_pct": _safe_delta_pct(
+                    reference["duration_sec"], candidate["duration_sec"]
+                ),
+                "tss_delta_pct": _safe_delta_pct(
+                    reference["training_load"], candidate["training_load"]
+                ),
+                "power_delta_pct": _safe_delta_pct(reference["avg_power"], candidate["avg_power"]),
+            }
+        )
         if len(matches) >= limit:
             break
 

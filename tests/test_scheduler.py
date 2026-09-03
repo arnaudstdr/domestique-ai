@@ -139,10 +139,16 @@ def test_sync_targets_includes_tokened_skips_others(tmp_path, monkeypatch):
     def fake_ctx(user: dict) -> AthleteContext:
         root = tmp_path / user["public_id"]
         return AthleteContext(
-            db_path=root / "x.db", tokens_path=root / ".tok",
-            profile_path=root / "p.yaml", objective_path=root / "o.yaml",
+            db_path=root / "x.db",
+            tokens_path=root / ".tok",
+            profile_path=root / "p.yaml",
+            objective_path=root / "o.yaml",
             availability_path=root / "a.yaml",
-            ftp=250.0, hr_rest=None, hr_max=None, sex="M", lthr_pct=0.88,
+            ftp=250.0,
+            hr_rest=None,
+            hr_max=None,
+            sex="M",
+            lthr_pct=0.88,
         )
 
     monkeypatch.setattr(athlete_context, "context_for_athlete", fake_ctx)
@@ -242,9 +248,7 @@ def test_scheduler_registers_both_jobs_when_configured(monkeypatch):
     """Sync + HC activés — les deux jobs sont enregistrés."""
     monkeypatch.setenv("DOMESTIQUE_AI_AUTO_SYNC_MINUTES", "30")
     monkeypatch.setenv("DOMESTIQUE_AI_AUTO_SYNC_FIRST_RUN_DELAY_MIN", "60")
-    monkeypatch.setenv(
-        "HEALTHCHECKS_PING_URL", "https://hc-ping.com/abc-123"
-    )
+    monkeypatch.setenv("HEALTHCHECKS_PING_URL", "https://hc-ping.com/abc-123")
     scheduler._scheduler = None
     try:
         scheduler.start_scheduler()
@@ -258,9 +262,7 @@ def test_scheduler_registers_both_jobs_when_configured(monkeypatch):
 def test_scheduler_registers_only_healthcheck_when_sync_disabled(monkeypatch):
     """Sync désactivé (interval=0) mais HC activé — seul le ping tourne."""
     monkeypatch.setenv("DOMESTIQUE_AI_AUTO_SYNC_MINUTES", "0")
-    monkeypatch.setenv(
-        "HEALTHCHECKS_PING_URL", "https://hc-ping.com/abc-123"
-    )
+    monkeypatch.setenv("HEALTHCHECKS_PING_URL", "https://hc-ping.com/abc-123")
     scheduler._scheduler = None
     try:
         scheduler.start_scheduler()

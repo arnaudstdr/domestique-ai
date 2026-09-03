@@ -239,9 +239,7 @@ async def _llm_generation_stream(
                     "index": week.week_index,
                     "source": week.source,
                     "adjustments": week.adjustments,
-                    "workouts": [
-                        _workout_to_schema(w).model_dump() for w in week.workouts
-                    ],
+                    "workouts": [_workout_to_schema(w).model_dump() for w in week.workouts],
                 }
             )
     except Exception as exc:  # noqa: BLE001

@@ -149,10 +149,7 @@ def _aggregate_monthly_zones(
         if grand_total <= 0:
             result[month] = {key: 0.0 for key in HR_ZONE_KEYS}
             continue
-        result[month] = {
-            key: round(value / grand_total * 100, 1)
-            for key, value in totals.items()
-        }
+        result[month] = {key: round(value / grand_total * 100, 1) for key, value in totals.items()}
     return result
 
 
@@ -248,9 +245,7 @@ def get_trends(
         }
 
     first_date = min(
-        dt.date.fromisoformat(a["date"][:10])
-        for a in period_activities
-        if a.get("date")
+        dt.date.fromisoformat(a["date"][:10]) for a in period_activities if a.get("date")
     )
     month_keys = _months_in_range(first_date, today)
 
@@ -260,21 +255,23 @@ def get_trends(
         n1_key = _shift_month_one_year(month)
         n1 = monthly_all.get(n1_key)
         zones = zones_monthly.get(month)
-        monthly_payload.append({
-            "month": month,
-            "distance_km": round(cur.get("distance_km", 0.0), 1),
-            "elevation_m": round(cur.get("elevation_m", 0.0), 0),
-            "duration_sec": int(cur.get("duration_sec", 0)),
-            "sessions": int(cur.get("sessions", 0)),
-            "tss": round(cur.get("tss", 0.0), 1),
-            "distance_km_n1": round(n1["distance_km"], 1) if n1 else None,
-            "tss_n1": round(n1["tss"], 1) if n1 else None,
-            "z1_pct": zones["z1"] if zones else None,
-            "z2_pct": zones["z2"] if zones else None,
-            "z3_pct": zones["z3"] if zones else None,
-            "z4_pct": zones["z4"] if zones else None,
-            "z5_pct": zones["z5"] if zones else None,
-        })
+        monthly_payload.append(
+            {
+                "month": month,
+                "distance_km": round(cur.get("distance_km", 0.0), 1),
+                "elevation_m": round(cur.get("elevation_m", 0.0), 0),
+                "duration_sec": int(cur.get("duration_sec", 0)),
+                "sessions": int(cur.get("sessions", 0)),
+                "tss": round(cur.get("tss", 0.0), 1),
+                "distance_km_n1": round(n1["distance_km"], 1) if n1 else None,
+                "tss_n1": round(n1["tss"], 1) if n1 else None,
+                "z1_pct": zones["z1"] if zones else None,
+                "z2_pct": zones["z2"] if zones else None,
+                "z3_pct": zones["z3"] if zones else None,
+                "z4_pct": zones["z4"] if zones else None,
+                "z5_pct": zones["z5"] if zones else None,
+            }
+        )
 
     return {
         "period": period,

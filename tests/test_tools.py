@@ -35,12 +35,39 @@ def _seed_activities(db_path):
     conn = sqlite3.connect(db_path)
     try:
         rows = [
-            (1, "2026-04-25T08:00:00Z", 3600, 145, 175, None, 200, 30000, 80,
-             600, 1800, 900, 240, 60),
-            (2, "2026-04-27T08:00:00Z", 5400, 150, 180, None, 350, 60000, 110,
-             900, 2700, 1200, 500, 100),
-            (3, "2026-04-30T08:00:00Z", 1800, 130, 160, None, 100, 15000, 40,
-             600, 900, 300, 0, 0),
+            (
+                1,
+                "2026-04-25T08:00:00Z",
+                3600,
+                145,
+                175,
+                None,
+                200,
+                30000,
+                80,
+                600,
+                1800,
+                900,
+                240,
+                60,
+            ),
+            (
+                2,
+                "2026-04-27T08:00:00Z",
+                5400,
+                150,
+                180,
+                None,
+                350,
+                60000,
+                110,
+                900,
+                2700,
+                1200,
+                500,
+                100,
+            ),
+            (3, "2026-04-30T08:00:00Z", 1800, 130, 160, None, 100, 15000, 40, 600, 900, 300, 0, 0),
         ]
         conn.executemany(
             "INSERT INTO activities ("
@@ -88,9 +115,7 @@ def test_tool_schemas_have_required_shape():
 def test_propose_workout_today_dispatchable(tmp_path, monkeypatch):
     """Le tool est dispatchable et renvoie le contrat attendu."""
     monkeypatch.setenv("DOMESTIQUE_AI_DB_PATH", str(tmp_path / "today.db"))
-    monkeypatch.setenv(
-        "DOMESTIQUE_AI_AVAILABILITY_PATH", str(tmp_path / "avail.yaml")
-    )
+    monkeypatch.setenv("DOMESTIQUE_AI_AVAILABILITY_PATH", str(tmp_path / "avail.yaml"))
     init_db(tmp_path / "today.db")
     # Pas d'availability → pas de contrainte, TSB=0 par défaut → endurance.
     out = dispatch("propose_workout_today", {})
@@ -145,8 +170,9 @@ def test_get_zone_distribution_aggregates(seeded_db, freeze_today):
     z2 = dist["distribution"]["z2"]
     assert z2["seconds"] == 1800 + 2700 + 900  # somme z2 des 3 lignes
     assert z2["minutes"] == pytest.approx(z2["seconds"] / 60, abs=0.1)
-    assert sum(v["share_pct"] for v in dist["distribution"].values()) == \
-        pytest.approx(100.0, abs=0.5)
+    assert sum(v["share_pct"] for v in dist["distribution"].values()) == pytest.approx(
+        100.0, abs=0.5
+    )
 
 
 def test_get_zone_distribution_skips_null_zones(tmp_path, monkeypatch):
@@ -180,8 +206,7 @@ def test_get_zone_distribution_skips_null_zones(tmp_path, monkeypatch):
 
 
 def test_get_objective_missing(tmp_path, monkeypatch):
-    monkeypatch.setenv("DOMESTIQUE_AI_OBJECTIVE_PATH",
-                       str(tmp_path / "missing.yaml"))
+    monkeypatch.setenv("DOMESTIQUE_AI_OBJECTIVE_PATH", str(tmp_path / "missing.yaml"))
     out = get_objective()
     assert out["available"] is False
 
@@ -249,9 +274,7 @@ def test_dispatch_routes_to_correct_function(seeded_db, freeze_today):
 
 def test_generate_training_plan_with_objective(seeded_db, tmp_path, monkeypatch):
     obj_path = tmp_path / "objective.yaml"
-    obj_path.write_text(
-        "type: cyclosportive\ndate: 2026-09-01\ndistance_km: 100\n"
-    )
+    obj_path.write_text("type: cyclosportive\ndate: 2026-09-01\ndistance_km: 100\n")
     monkeypatch.setenv("DOMESTIQUE_AI_OBJECTIVE_PATH", str(obj_path))
 
     result = dispatch("generate_training_plan", {"sessions_per_week": 4})
@@ -263,12 +286,9 @@ def test_generate_training_plan_with_objective(seeded_db, tmp_path, monkeypatch)
     assert "first_session" in result and "structure" in result["first_session"]
 
 
-def test_generate_training_plan_fallback_no_objective(seeded_db, tmp_path,
-                                                     monkeypatch):
+def test_generate_training_plan_fallback_no_objective(seeded_db, tmp_path, monkeypatch):
     # Pas de fichier objective.yaml → fallback 4 semaines.
-    monkeypatch.setenv(
-        "DOMESTIQUE_AI_OBJECTIVE_PATH", str(tmp_path / "missing.yaml")
-    )
+    monkeypatch.setenv("DOMESTIQUE_AI_OBJECTIVE_PATH", str(tmp_path / "missing.yaml"))
     result = dispatch("generate_training_plan", {"sessions_per_week": 3})
     assert result["available"] is True
     assert result["sessions_count"] > 0
@@ -280,9 +300,7 @@ def test_generate_training_plan_invalid_sessions(seeded_db):
     assert result["available"] is False
 
 
-def test_generate_training_plan_uses_availability_when_present(
-    seeded_db, tmp_path, monkeypatch
-):
+def test_generate_training_plan_uses_availability_when_present(seeded_db, tmp_path, monkeypatch):
     avail_path = tmp_path / "availability.yaml"
     avail_path.write_text(
         "days:\n"
@@ -292,30 +310,25 @@ def test_generate_training_plan_uses_availability_when_present(
         "  sunday:\n    max_duration_min: 240\n    context: outdoor\n"
     )
     monkeypatch.setenv("DOMESTIQUE_AI_AVAILABILITY_PATH", str(avail_path))
-    monkeypatch.setenv(
-        "DOMESTIQUE_AI_OBJECTIVE_PATH", str(tmp_path / "missing.yaml")
-    )
+    monkeypatch.setenv("DOMESTIQUE_AI_OBJECTIVE_PATH", str(tmp_path / "missing.yaml"))
 
     result = dispatch("generate_training_plan", {"sessions_per_week": 4})
     assert result["available"] is True
     assert result["availability_loaded"] is True
     assert set(result["days_used"]) <= {
-        "wednesday", "thursday", "saturday", "sunday",
+        "wednesday",
+        "thursday",
+        "saturday",
+        "sunday",
     }
     # Aucun jour Lundi/Mardi/Vendredi → exclusion vérifiée.
     assert "monday" not in result["days_used"]
     assert "friday" not in result["days_used"]
 
 
-def test_generate_training_plan_falls_back_without_availability(
-    seeded_db, tmp_path, monkeypatch
-):
-    monkeypatch.setenv(
-        "DOMESTIQUE_AI_AVAILABILITY_PATH", str(tmp_path / "missing-avail.yaml")
-    )
-    monkeypatch.setenv(
-        "DOMESTIQUE_AI_OBJECTIVE_PATH", str(tmp_path / "missing-obj.yaml")
-    )
+def test_generate_training_plan_falls_back_without_availability(seeded_db, tmp_path, monkeypatch):
+    monkeypatch.setenv("DOMESTIQUE_AI_AVAILABILITY_PATH", str(tmp_path / "missing-avail.yaml"))
+    monkeypatch.setenv("DOMESTIQUE_AI_OBJECTIVE_PATH", str(tmp_path / "missing-obj.yaml"))
     result = dispatch("generate_training_plan", {"sessions_per_week": 4})
     assert result["available"] is True
     assert result["availability_loaded"] is False
@@ -337,11 +350,16 @@ def test_generate_training_plan_invalid_availability_yaml_returns_error(
 
 # ---- get_planned_workout -----------------------------------------------------
 
-def _make_workout(date: str, kind: str = "endurance",
-                  target_zone: str = "z2",
-                  duration_min: int = 90,
-                  estimated_tss: float = 70.0):
+
+def _make_workout(
+    date: str,
+    kind: str = "endurance",
+    target_zone: str = "z2",
+    duration_min: int = 90,
+    estimated_tss: float = 70.0,
+):
     from domestique_ai.processing.plan_builder import Workout, WorkoutStep
+
     return Workout(
         date=date,
         name=f"{kind.title()} {duration_min}min",
@@ -349,8 +367,7 @@ def _make_workout(date: str, kind: str = "endurance",
         kind=kind,
         duration_min=duration_min,
         target_zone=target_zone,
-        structure=[WorkoutStep(phase="active", zone=target_zone,
-                               duration_sec=duration_min * 60)],
+        structure=[WorkoutStep(phase="active", zone=target_zone, duration_sec=duration_min * 60)],
         estimated_tss=estimated_tss,
     )
 
@@ -366,15 +383,22 @@ def test_get_planned_workout_match(planned_db):
     import datetime as dt
 
     from domestique_ai.llm.plan_storage import save_plan
+
     plan = [
         _make_workout("2026-05-04", kind="endurance", target_zone="z2"),
-        _make_workout("2026-05-08", kind="threshold", target_zone="z4",
-                      duration_min=75, estimated_tss=95.0),
-        _make_workout("2026-05-11", kind="recovery", target_zone="z1",
-                      duration_min=45, estimated_tss=25.0),
+        _make_workout(
+            "2026-05-08", kind="threshold", target_zone="z4", duration_min=75, estimated_tss=95.0
+        ),
+        _make_workout(
+            "2026-05-11", kind="recovery", target_zone="z1", duration_min=45, estimated_tss=25.0
+        ),
     ]
-    save_plan(plan, target_date=dt.date(2026, 6, 1),
-              target_event_type="cyclosportive", sessions_per_week=4)
+    save_plan(
+        plan,
+        target_date=dt.date(2026, 6, 1),
+        target_event_type="cyclosportive",
+        sessions_per_week=4,
+    )
 
     out = get_planned_workout(date="2026-05-08")
     assert out["available"] is True
@@ -389,6 +413,7 @@ def test_get_planned_workout_rest_day(planned_db):
     import datetime as dt
 
     from domestique_ai.llm.plan_storage import save_plan
+
     plan = [
         _make_workout("2026-05-04"),
         _make_workout("2026-05-08"),
@@ -407,6 +432,7 @@ def test_get_planned_workout_outside_window(planned_db):
     import datetime as dt
 
     from domestique_ai.llm.plan_storage import save_plan
+
     plan = [
         _make_workout("2026-05-04"),
         _make_workout("2026-05-11"),
@@ -422,6 +448,7 @@ def test_get_planned_workout_multi_plans_picks_most_recent(planned_db):
     import datetime as dt
 
     from domestique_ai.llm.plan_storage import save_plan
+
     # Plan 1 : 04 → 11 mai, séance Z2 le 08.
     plan_v1 = [
         _make_workout("2026-05-04"),

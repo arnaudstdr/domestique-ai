@@ -32,7 +32,11 @@ def _ctx(db_path, *, ftp=250.0, hr_rest=None, hr_max=None) -> AthleteContext:
         profile_path=db_path.parent / "profile.yaml",
         objective_path=db_path.parent / "objective.yaml",
         availability_path=db_path.parent / "availability.yaml",
-        ftp=ftp, hr_rest=hr_rest, hr_max=hr_max, sex="M", lthr_pct=0.88,
+        ftp=ftp,
+        hr_rest=hr_rest,
+        hr_max=hr_max,
+        sex="M",
+        lthr_pct=0.88,
     )
 
 
@@ -44,8 +48,10 @@ def test_save_activity_uses_injected_context(tmp_path, monkeypatch):
     init_db(db)
     ctx = _ctx(db, ftp=300.0)
     activity = {
-        "id": 555, "date": "2025-04-01T08:00:00Z",
-        "duration": 3600, "avg_power": 300.0,
+        "id": 555,
+        "date": "2025-04-01T08:00:00Z",
+        "duration": 3600,
+        "avg_power": 300.0,
     }
     assert save_activity(activity, ctx=ctx) is True
 
@@ -117,32 +123,44 @@ def test_extract_activity_data():
 def test_extract_activity_data_captures_summary_polyline():
     """Le ``summary_polyline`` (tracé simplifié) est récupéré quand présent."""
     client = StravaClient(access_token="x")
-    extracted = client.extract_activity_data({
-        "id": 1, "start_date": "2025-04-01T08:00:00Z",
-        "elapsed_time": 0, "sport_type": "Ride",
-        "map": {"summary_polyline": "abc_xyz", "polyline": "fulltrace"},
-    })
+    extracted = client.extract_activity_data(
+        {
+            "id": 1,
+            "start_date": "2025-04-01T08:00:00Z",
+            "elapsed_time": 0,
+            "sport_type": "Ride",
+            "map": {"summary_polyline": "abc_xyz", "polyline": "fulltrace"},
+        }
+    )
     assert extracted["map_polyline"] == "abc_xyz"
 
 
 def test_extract_activity_data_polyline_empty_becomes_none():
     """Une chaîne vide (activité indoor sans GPS) est normalisée en ``None``."""
     client = StravaClient(access_token="x")
-    extracted = client.extract_activity_data({
-        "id": 1, "start_date": "2025-04-01T08:00:00Z",
-        "elapsed_time": 0, "sport_type": "VirtualRide",
-        "map": {"summary_polyline": ""},
-    })
+    extracted = client.extract_activity_data(
+        {
+            "id": 1,
+            "start_date": "2025-04-01T08:00:00Z",
+            "elapsed_time": 0,
+            "sport_type": "VirtualRide",
+            "map": {"summary_polyline": ""},
+        }
+    )
     assert extracted["map_polyline"] is None
 
 
 def test_extract_activity_data_falls_back_to_legacy_type():
     """Si `sport_type` est absent, on retombe sur le champ legacy `type`."""
     client = StravaClient(access_token="x")
-    extracted = client.extract_activity_data({
-        "id": 1, "start_date": "2025-04-01T08:00:00Z",
-        "elapsed_time": 0, "type": "Walk",
-    })
+    extracted = client.extract_activity_data(
+        {
+            "id": 1,
+            "start_date": "2025-04-01T08:00:00Z",
+            "elapsed_time": 0,
+            "type": "Walk",
+        }
+    )
     assert extracted["sport_type"] == "Walk"
 
 
@@ -188,30 +206,52 @@ class _StubClient(StravaClient):
         super().__init__(access_token="stub")
         self._activities = activities
 
-    def fetch_activities(self, after: int | None = None,
-                         per_page: int = 200) -> list[dict]:
+    def fetch_activities(self, after: int | None = None, per_page: int = 200) -> list[dict]:
         return self._activities
 
 
 def test_backfill_activity_fields_updates_only_existing(db_path: Path):
-    save_activity({
-        "id": 1, "date": "2025-04-01T08:00:00Z", "duration": 3600,
-        "avg_heart_rate": 150.0, "max_heart_rate": None,
-        "avg_power": 200.0, "elevation_gain": 0, "distance": 30000,
-    }, db_path=db_path, ftp=250.0)
+    save_activity(
+        {
+            "id": 1,
+            "date": "2025-04-01T08:00:00Z",
+            "duration": 3600,
+            "avg_heart_rate": 150.0,
+            "max_heart_rate": None,
+            "avg_power": 200.0,
+            "elevation_gain": 0,
+            "distance": 30000,
+        },
+        db_path=db_path,
+        ftp=250.0,
+    )
 
-    client = _StubClient([
-        # Connue → doit recevoir max_heart_rate=185
-        {"id": 1, "start_date": "2025-04-01T08:00:00Z",
-         "elapsed_time": 3600, "average_heartrate": 150.0,
-         "max_heartrate": 185.0, "average_watts": 200.0,
-         "total_elevation_gain": 0, "distance": 30000},
-        # Inconnue → doit être ignorée par le backfill
-        {"id": 2, "start_date": "2025-04-02T08:00:00Z",
-         "elapsed_time": 3600, "average_heartrate": 140.0,
-         "max_heartrate": 175.0, "average_watts": 180.0,
-         "total_elevation_gain": 0, "distance": 25000},
-    ])
+    client = _StubClient(
+        [
+            # Connue → doit recevoir max_heart_rate=185
+            {
+                "id": 1,
+                "start_date": "2025-04-01T08:00:00Z",
+                "elapsed_time": 3600,
+                "average_heartrate": 150.0,
+                "max_heartrate": 185.0,
+                "average_watts": 200.0,
+                "total_elevation_gain": 0,
+                "distance": 30000,
+            },
+            # Inconnue → doit être ignorée par le backfill
+            {
+                "id": 2,
+                "start_date": "2025-04-02T08:00:00Z",
+                "elapsed_time": 3600,
+                "average_heartrate": 140.0,
+                "max_heartrate": 175.0,
+                "average_watts": 180.0,
+                "total_elevation_gain": 0,
+                "distance": 25000,
+            },
+        ]
+    )
     assert backfill_activity_fields(client, db_path=db_path) == 1
 
     conn = sqlite3.connect(db_path)
@@ -225,35 +265,59 @@ def test_backfill_activity_fields_updates_only_existing(db_path: Path):
 
 
 def test_backfill_is_idempotent(db_path: Path):
-    save_activity({
-        "id": 1, "date": "2025-04-01T08:00:00Z", "duration": 3600,
-        "avg_heart_rate": 150.0, "max_heart_rate": 185.0,
-        "avg_power": 200.0, "elevation_gain": 0, "distance": 30000,
-    }, db_path=db_path, ftp=250.0)
+    save_activity(
+        {
+            "id": 1,
+            "date": "2025-04-01T08:00:00Z",
+            "duration": 3600,
+            "avg_heart_rate": 150.0,
+            "max_heart_rate": 185.0,
+            "avg_power": 200.0,
+            "elevation_gain": 0,
+            "distance": 30000,
+        },
+        db_path=db_path,
+        ftp=250.0,
+    )
 
-    client = _StubClient([{
-        "id": 1, "start_date": "2025-04-01T08:00:00Z",
-        "elapsed_time": 3600, "average_heartrate": 150.0,
-        "max_heartrate": 185.0, "average_watts": 200.0,
-        "total_elevation_gain": 0, "distance": 30000,
-    }])
+    client = _StubClient(
+        [
+            {
+                "id": 1,
+                "start_date": "2025-04-01T08:00:00Z",
+                "elapsed_time": 3600,
+                "average_heartrate": 150.0,
+                "max_heartrate": 185.0,
+                "average_watts": 200.0,
+                "total_elevation_gain": 0,
+                "distance": 30000,
+            }
+        ]
+    )
     assert backfill_activity_fields(client, db_path=db_path) == 0
 
 
 def test_save_activity_persists_sport_type(db_path: Path):
     """`save_activity` doit écrire le champ sport_type en base."""
-    save_activity({
-        "id": 42, "date": "2025-04-01T08:00:00Z", "duration": 3600,
-        "avg_heart_rate": 145.0, "max_heart_rate": 182.0,
-        "avg_power": 220.0, "elevation_gain": 0, "distance": 30000,
-        "sport_type": "MountainBikeRide",
-    }, db_path=db_path, ftp=250.0)
+    save_activity(
+        {
+            "id": 42,
+            "date": "2025-04-01T08:00:00Z",
+            "duration": 3600,
+            "avg_heart_rate": 145.0,
+            "max_heart_rate": 182.0,
+            "avg_power": 220.0,
+            "elevation_gain": 0,
+            "distance": 30000,
+            "sport_type": "MountainBikeRide",
+        },
+        db_path=db_path,
+        ftp=250.0,
+    )
 
     conn = sqlite3.connect(db_path)
     try:
-        row = conn.execute(
-            "SELECT sport_type FROM activities WHERE strava_id = 42"
-        ).fetchone()
+        row = conn.execute("SELECT sport_type FROM activities WHERE strava_id = 42").fetchone()
     finally:
         conn.close()
     assert row == ("MountainBikeRide",)
@@ -262,26 +326,41 @@ def test_save_activity_persists_sport_type(db_path: Path):
 def test_backfill_sport_types_fills_missing(db_path: Path):
     """Une activité sans sport_type doit être complétée par le backfill."""
     # save_activity sans sport_type → la colonne reste NULL
-    save_activity({
-        "id": 1, "date": "2025-04-01T08:00:00Z", "duration": 3600,
-        "avg_heart_rate": 150.0, "max_heart_rate": 185.0,
-        "avg_power": 200.0, "elevation_gain": 0, "distance": 30000,
-    }, db_path=db_path, ftp=250.0)
+    save_activity(
+        {
+            "id": 1,
+            "date": "2025-04-01T08:00:00Z",
+            "duration": 3600,
+            "avg_heart_rate": 150.0,
+            "max_heart_rate": 185.0,
+            "avg_power": 200.0,
+            "elevation_gain": 0,
+            "distance": 30000,
+        },
+        db_path=db_path,
+        ftp=250.0,
+    )
 
-    client = _StubClient([{
-        "id": 1, "start_date": "2025-04-01T08:00:00Z",
-        "elapsed_time": 3600, "average_heartrate": 150.0,
-        "max_heartrate": 185.0, "average_watts": 200.0,
-        "total_elevation_gain": 0, "distance": 30000,
-        "sport_type": "Ride",
-    }])
+    client = _StubClient(
+        [
+            {
+                "id": 1,
+                "start_date": "2025-04-01T08:00:00Z",
+                "elapsed_time": 3600,
+                "average_heartrate": 150.0,
+                "max_heartrate": 185.0,
+                "average_watts": 200.0,
+                "total_elevation_gain": 0,
+                "distance": 30000,
+                "sport_type": "Ride",
+            }
+        ]
+    )
     assert backfill_sport_types(client, db_path=db_path) == 1
 
     conn = sqlite3.connect(db_path)
     try:
-        row = conn.execute(
-            "SELECT sport_type FROM activities WHERE strava_id = 1"
-        ).fetchone()
+        row = conn.execute("SELECT sport_type FROM activities WHERE strava_id = 1").fetchone()
     finally:
         conn.close()
     assert row == ("Ride",)
@@ -290,12 +369,21 @@ def test_backfill_sport_types_fills_missing(db_path: Path):
 def test_backfill_sport_types_is_idempotent(db_path: Path):
     """Si toutes les activités ont déjà un sport_type, le backfill ne fait rien
     (pas d'appel Strava : `_StubClient` lèverait si on l'appelait à vide)."""
-    save_activity({
-        "id": 1, "date": "2025-04-01T08:00:00Z", "duration": 3600,
-        "avg_heart_rate": 150.0, "max_heart_rate": 185.0,
-        "avg_power": 200.0, "elevation_gain": 0, "distance": 30000,
-        "sport_type": "Ride",
-    }, db_path=db_path, ftp=250.0)
+    save_activity(
+        {
+            "id": 1,
+            "date": "2025-04-01T08:00:00Z",
+            "duration": 3600,
+            "avg_heart_rate": 150.0,
+            "max_heart_rate": 185.0,
+            "avg_power": 200.0,
+            "elevation_gain": 0,
+            "distance": 30000,
+            "sport_type": "Ride",
+        },
+        db_path=db_path,
+        ftp=250.0,
+    )
 
     class _NoFetchClient(_StubClient):
         def fetch_activities(self, *args, **kwargs):
@@ -306,26 +394,54 @@ def test_backfill_sport_types_is_idempotent(db_path: Path):
 
 def test_backfill_sport_types_does_not_overwrite_existing(db_path: Path):
     """Une activité ayant déjà un sport_type ne doit pas être réécrite."""
-    save_activity({
-        "id": 1, "date": "2025-04-01T08:00:00Z", "duration": 3600,
-        "avg_heart_rate": 150.0, "max_heart_rate": 185.0,
-        "avg_power": 200.0, "elevation_gain": 0, "distance": 30000,
-        "sport_type": "Ride",
-    }, db_path=db_path, ftp=250.0)
-    save_activity({
-        "id": 2, "date": "2025-04-02T08:00:00Z", "duration": 3600,
-        "avg_heart_rate": 140.0, "max_heart_rate": 175.0,
-        "avg_power": 180.0, "elevation_gain": 0, "distance": 25000,
-    }, db_path=db_path, ftp=250.0)
+    save_activity(
+        {
+            "id": 1,
+            "date": "2025-04-01T08:00:00Z",
+            "duration": 3600,
+            "avg_heart_rate": 150.0,
+            "max_heart_rate": 185.0,
+            "avg_power": 200.0,
+            "elevation_gain": 0,
+            "distance": 30000,
+            "sport_type": "Ride",
+        },
+        db_path=db_path,
+        ftp=250.0,
+    )
+    save_activity(
+        {
+            "id": 2,
+            "date": "2025-04-02T08:00:00Z",
+            "duration": 3600,
+            "avg_heart_rate": 140.0,
+            "max_heart_rate": 175.0,
+            "avg_power": 180.0,
+            "elevation_gain": 0,
+            "distance": 25000,
+        },
+        db_path=db_path,
+        ftp=250.0,
+    )
 
-    client = _StubClient([
-        # Si Strava renvoyait par erreur "Walk" pour l'activité 1, on ne
-        # doit pas écraser sa valeur "Ride" existante.
-        {"id": 1, "start_date": "2025-04-01T08:00:00Z",
-         "elapsed_time": 3600, "sport_type": "Walk"},
-        {"id": 2, "start_date": "2025-04-02T08:00:00Z",
-         "elapsed_time": 3600, "sport_type": "Run"},
-    ])
+    client = _StubClient(
+        [
+            # Si Strava renvoyait par erreur "Walk" pour l'activité 1, on ne
+            # doit pas écraser sa valeur "Ride" existante.
+            {
+                "id": 1,
+                "start_date": "2025-04-01T08:00:00Z",
+                "elapsed_time": 3600,
+                "sport_type": "Walk",
+            },
+            {
+                "id": 2,
+                "start_date": "2025-04-02T08:00:00Z",
+                "elapsed_time": 3600,
+                "sport_type": "Run",
+            },
+        ]
+    )
     assert backfill_sport_types(client, db_path=db_path) == 1
 
     conn = sqlite3.connect(db_path)
@@ -364,11 +480,17 @@ def test_save_activity_persists_temp(db_path: Path, monkeypatch):
     monkeypatch.delenv("STRAVA_HR_MAX", raising=False)
     save_activity(
         {
-            "id": 777, "date": "2025-07-15T08:00:00Z", "duration": 3600,
-            "avg_heart_rate": 145.0, "max_heart_rate": 182.0,
-            "avg_power": 220.0, "elevation_gain": 0, "distance": 30000,
+            "id": 777,
+            "date": "2025-07-15T08:00:00Z",
+            "duration": 3600,
+            "avg_heart_rate": 145.0,
+            "max_heart_rate": 182.0,
+            "avg_power": 220.0,
+            "elevation_gain": 0,
+            "distance": 30000,
         },
-        db_path=db_path, ftp=250.0,
+        db_path=db_path,
+        ftp=250.0,
         temp_summary=(28.5, 22.0, 34.0),
     )
     conn = sqlite3.connect(db_path)
@@ -386,11 +508,17 @@ def test_save_activity_leaves_temp_null_by_default(db_path: Path, monkeypatch):
     monkeypatch.delenv("STRAVA_HR_MAX", raising=False)
     save_activity(
         {
-            "id": 778, "date": "2025-07-15T08:00:00Z", "duration": 3600,
-            "avg_heart_rate": None, "max_heart_rate": None,
-            "avg_power": 220.0, "elevation_gain": 0, "distance": 30000,
+            "id": 778,
+            "date": "2025-07-15T08:00:00Z",
+            "duration": 3600,
+            "avg_heart_rate": None,
+            "max_heart_rate": None,
+            "avg_power": 220.0,
+            "elevation_gain": 0,
+            "distance": 30000,
         },
-        db_path=db_path, ftp=250.0,
+        db_path=db_path,
+        ftp=250.0,
     )
     conn = sqlite3.connect(db_path)
     try:
@@ -417,30 +545,49 @@ def test_backfill_temperature_fills_missing_only(db_path: Path, monkeypatch):
     monkeypatch.delenv("STRAVA_HR_REST", raising=False)
     monkeypatch.delenv("STRAVA_HR_MAX", raising=False)
     # Activité 1 : pas de temp en base → doit être enrichie.
-    save_activity({
-        "id": 1, "date": "2025-07-15T08:00:00Z", "duration": 3600,
-        "avg_heart_rate": None, "max_heart_rate": None,
-        "avg_power": 220.0, "elevation_gain": 0, "distance": 30000,
-    }, db_path=db_path, ftp=250.0)
+    save_activity(
+        {
+            "id": 1,
+            "date": "2025-07-15T08:00:00Z",
+            "duration": 3600,
+            "avg_heart_rate": None,
+            "max_heart_rate": None,
+            "avg_power": 220.0,
+            "elevation_gain": 0,
+            "distance": 30000,
+        },
+        db_path=db_path,
+        ftp=250.0,
+    )
     # Activité 2 : déjà ventilée → le backfill doit la laisser intacte.
-    save_activity({
-        "id": 2, "date": "2025-07-16T08:00:00Z", "duration": 3600,
-        "avg_heart_rate": None, "max_heart_rate": None,
-        "avg_power": 220.0, "elevation_gain": 0, "distance": 30000,
-    }, db_path=db_path, ftp=250.0,
-        temp_summary=(10.0, 8.0, 12.0))
+    save_activity(
+        {
+            "id": 2,
+            "date": "2025-07-16T08:00:00Z",
+            "duration": 3600,
+            "avg_heart_rate": None,
+            "max_heart_rate": None,
+            "avg_power": 220.0,
+            "elevation_gain": 0,
+            "distance": 30000,
+        },
+        db_path=db_path,
+        ftp=250.0,
+        temp_summary=(10.0, 8.0, 12.0),
+    )
 
-    client = _TempStreamsClient({
-        1: {"temp": [20.0, 25.0, 30.0]},
-        # 2 ne devrait jamais être appelée — pas pertinent.
-    })
+    client = _TempStreamsClient(
+        {
+            1: {"temp": [20.0, 25.0, 30.0]},
+            # 2 ne devrait jamais être appelée — pas pertinent.
+        }
+    )
     assert backfill_temperature(client, db_path=db_path) == 1
 
     conn = sqlite3.connect(db_path)
     try:
         rows = conn.execute(
-            "SELECT strava_id, avg_temp, min_temp, max_temp "
-            "FROM activities ORDER BY strava_id"
+            "SELECT strava_id, avg_temp, min_temp, max_temp FROM activities ORDER BY strava_id"
         ).fetchall()
     finally:
         conn.close()
@@ -469,25 +616,55 @@ class _ListingStubClient(StravaClient):
 def test_backfill_polylines_fills_missing_only(db_path: Path, monkeypatch):
     monkeypatch.delenv("STRAVA_HR_REST", raising=False)
     monkeypatch.delenv("STRAVA_HR_MAX", raising=False)
-    save_activity({
-        "id": 1, "date": "2025-07-15T08:00:00Z", "duration": 3600,
-        "avg_heart_rate": None, "max_heart_rate": None,
-        "avg_power": 220.0, "elevation_gain": 0, "distance": 30000,
-    }, db_path=db_path, ftp=250.0)
+    save_activity(
+        {
+            "id": 1,
+            "date": "2025-07-15T08:00:00Z",
+            "duration": 3600,
+            "avg_heart_rate": None,
+            "max_heart_rate": None,
+            "avg_power": 220.0,
+            "elevation_gain": 0,
+            "distance": 30000,
+        },
+        db_path=db_path,
+        ftp=250.0,
+    )
     # L'activité 2 a déjà un polyline → le backfill ne doit pas la toucher.
-    save_activity({
-        "id": 2, "date": "2025-07-16T08:00:00Z", "duration": 3600,
-        "avg_heart_rate": None, "max_heart_rate": None,
-        "avg_power": 220.0, "elevation_gain": 0, "distance": 30000,
-        "map_polyline": "preexisting",
-    }, db_path=db_path, ftp=250.0)
+    save_activity(
+        {
+            "id": 2,
+            "date": "2025-07-16T08:00:00Z",
+            "duration": 3600,
+            "avg_heart_rate": None,
+            "max_heart_rate": None,
+            "avg_power": 220.0,
+            "elevation_gain": 0,
+            "distance": 30000,
+            "map_polyline": "preexisting",
+        },
+        db_path=db_path,
+        ftp=250.0,
+    )
 
-    client = _ListingStubClient([
-        {"id": 1, "start_date": "2025-07-15T08:00:00Z", "elapsed_time": 3600,
-         "sport_type": "Ride", "map": {"summary_polyline": "newtrack"}},
-        {"id": 2, "start_date": "2025-07-16T08:00:00Z", "elapsed_time": 3600,
-         "sport_type": "Ride", "map": {"summary_polyline": "shouldnotbeused"}},
-    ])
+    client = _ListingStubClient(
+        [
+            {
+                "id": 1,
+                "start_date": "2025-07-15T08:00:00Z",
+                "elapsed_time": 3600,
+                "sport_type": "Ride",
+                "map": {"summary_polyline": "newtrack"},
+            },
+            {
+                "id": 2,
+                "start_date": "2025-07-16T08:00:00Z",
+                "elapsed_time": 3600,
+                "sport_type": "Ride",
+                "map": {"summary_polyline": "shouldnotbeused"},
+            },
+        ]
+    )
     assert backfill_polylines(client, db_path=db_path) == 1
 
     conn = sqlite3.connect(db_path)
@@ -504,21 +681,35 @@ def test_backfill_polylines_skips_when_strava_returns_empty(db_path: Path, monke
     """Une activité indoor sans GPS (polyline vide) est laissée NULL."""
     monkeypatch.delenv("STRAVA_HR_REST", raising=False)
     monkeypatch.delenv("STRAVA_HR_MAX", raising=False)
-    save_activity({
-        "id": 42, "date": "2025-07-15T08:00:00Z", "duration": 3600,
-        "avg_heart_rate": None, "max_heart_rate": None,
-        "avg_power": 220.0, "elevation_gain": 0, "distance": 30000,
-    }, db_path=db_path, ftp=250.0)
-    client = _ListingStubClient([
-        {"id": 42, "start_date": "2025-07-15T08:00:00Z", "elapsed_time": 3600,
-         "sport_type": "VirtualRide", "map": {"summary_polyline": ""}},
-    ])
+    save_activity(
+        {
+            "id": 42,
+            "date": "2025-07-15T08:00:00Z",
+            "duration": 3600,
+            "avg_heart_rate": None,
+            "max_heart_rate": None,
+            "avg_power": 220.0,
+            "elevation_gain": 0,
+            "distance": 30000,
+        },
+        db_path=db_path,
+        ftp=250.0,
+    )
+    client = _ListingStubClient(
+        [
+            {
+                "id": 42,
+                "start_date": "2025-07-15T08:00:00Z",
+                "elapsed_time": 3600,
+                "sport_type": "VirtualRide",
+                "map": {"summary_polyline": ""},
+            },
+        ]
+    )
     assert backfill_polylines(client, db_path=db_path) == 0
     conn = sqlite3.connect(db_path)
     try:
-        row = conn.execute(
-            "SELECT map_polyline FROM activities WHERE strava_id = 42"
-        ).fetchone()
+        row = conn.execute("SELECT map_polyline FROM activities WHERE strava_id = 42").fetchone()
     finally:
         conn.close()
     assert row == (None,)
@@ -526,6 +717,7 @@ def test_backfill_polylines_skips_when_strava_returns_empty(db_path: Path, monke
 
 def test_backfill_polylines_no_op_when_nothing_missing(db_path: Path):
     """Si toutes les activités ont déjà un polyline, aucun appel API."""
+
     # Aucune activité du tout → 0 ligne mise à jour, pas d'appel ``fetch_activities``.
     class _BoomClient(StravaClient):
         def __init__(self):
@@ -541,11 +733,20 @@ def test_backfill_temperature_skips_activities_without_stream(db_path: Path, mon
     """Si Strava ne renvoie pas de stream temp, on saute sans toucher la ligne."""
     monkeypatch.delenv("STRAVA_HR_REST", raising=False)
     monkeypatch.delenv("STRAVA_HR_MAX", raising=False)
-    save_activity({
-        "id": 99, "date": "2025-12-15T08:00:00Z", "duration": 3600,
-        "avg_heart_rate": None, "max_heart_rate": None,
-        "avg_power": 220.0, "elevation_gain": 0, "distance": 30000,
-    }, db_path=db_path, ftp=250.0)
+    save_activity(
+        {
+            "id": 99,
+            "date": "2025-12-15T08:00:00Z",
+            "duration": 3600,
+            "avg_heart_rate": None,
+            "max_heart_rate": None,
+            "avg_power": 220.0,
+            "elevation_gain": 0,
+            "distance": 30000,
+        },
+        db_path=db_path,
+        ftp=250.0,
+    )
     # Home trainer typiquement : pas de capteur température → streams None.
     client = _TempStreamsClient({99: None})  # type: ignore[arg-type]
     assert backfill_temperature(client, db_path=db_path) == 0
@@ -572,37 +773,31 @@ class _AthleteStubClient(StravaClient):
 
 def test_snapshot_athlete_weight_inserts_today_value(db_path: Path):
     client = _AthleteStubClient({"weight": 73.5})
-    assert snapshot_athlete_weight(client, db_path=db_path,
-                                   today="2025-04-01") is True
+    assert snapshot_athlete_weight(client, db_path=db_path, today="2025-04-01") is True
 
     conn = sqlite3.connect(db_path)
     try:
-        rows = conn.execute(
-            "SELECT date, weight FROM weight_history"
-        ).fetchall()
+        rows = conn.execute("SELECT date, weight FROM weight_history").fetchall()
     finally:
         conn.close()
     assert rows == [("2025-04-01", pytest.approx(73.5))]
 
 
 def test_snapshot_athlete_weight_returns_false_when_missing(db_path: Path):
-    assert snapshot_athlete_weight(_AthleteStubClient({"weight": None}),
-                                   db_path=db_path) is False
-    assert snapshot_athlete_weight(_AthleteStubClient({"weight": 0.0}),
-                                   db_path=db_path) is False
+    assert snapshot_athlete_weight(_AthleteStubClient({"weight": None}), db_path=db_path) is False
+    assert snapshot_athlete_weight(_AthleteStubClient({"weight": 0.0}), db_path=db_path) is False
     conn = sqlite3.connect(db_path)
     try:
-        count = conn.execute(
-            "SELECT COUNT(*) FROM weight_history"
-        ).fetchone()[0]
+        count = conn.execute("SELECT COUNT(*) FROM weight_history").fetchone()[0]
     finally:
         conn.close()
     assert count == 0
 
 
 class _MockResponse:
-    def __init__(self, status_code: int, json_data: dict | None = None,
-                 headers: dict | None = None):
+    def __init__(
+        self, status_code: int, json_data: dict | None = None, headers: dict | None = None
+    ):
         self.status_code = status_code
         self._json = json_data or {}
         self.headers = headers or {}
@@ -613,6 +808,7 @@ class _MockResponse:
     def raise_for_status(self) -> None:
         if self.status_code >= 400:
             import requests
+
             raise requests.HTTPError(f"HTTP {self.status_code}")
 
 
@@ -622,18 +818,19 @@ def test_fetch_streams_full_parses_keys(monkeypatch):
     def fake_get(url, headers=None, params=None, timeout=None):
         captured["url"] = url
         captured["params"] = params
-        return _MockResponse(200, {
-            "latlng": {"data": [[45.0, 4.0], [45.1, 4.1]]},
-            "altitude": {"data": [200.0, 201.0]},
-            "time": {"data": [0, 5]},
-            "heartrate": {"data": [120, 130]},
-        })
+        return _MockResponse(
+            200,
+            {
+                "latlng": {"data": [[45.0, 4.0], [45.1, 4.1]]},
+                "altitude": {"data": [200.0, 201.0]},
+                "time": {"data": [0, 5]},
+                "heartrate": {"data": [120, 130]},
+            },
+        )
 
     monkeypatch.setattr("domestique_ai.ingestion.strava.requests.get", fake_get)
     client = StravaClient(access_token="x")
-    streams = client.fetch_streams_full(
-        12345, ["latlng", "altitude", "time", "heartrate", "watts"]
-    )
+    streams = client.fetch_streams_full(12345, ["latlng", "altitude", "time", "heartrate", "watts"])
 
     assert streams is not None
     assert "12345/streams" in captured["url"]
@@ -702,18 +899,19 @@ def test_fetch_activity_summary_returns_none_on_404(monkeypatch):
 
 
 def test_snapshot_athlete_weight_overwrites_same_day(db_path: Path):
-    snapshot_athlete_weight(_AthleteStubClient({"weight": 73.5}),
-                            db_path=db_path, today="2025-04-01")
-    snapshot_athlete_weight(_AthleteStubClient({"weight": 74.1}),
-                            db_path=db_path, today="2025-04-01")
-    snapshot_athlete_weight(_AthleteStubClient({"weight": 74.2}),
-                            db_path=db_path, today="2025-04-02")
+    snapshot_athlete_weight(
+        _AthleteStubClient({"weight": 73.5}), db_path=db_path, today="2025-04-01"
+    )
+    snapshot_athlete_weight(
+        _AthleteStubClient({"weight": 74.1}), db_path=db_path, today="2025-04-01"
+    )
+    snapshot_athlete_weight(
+        _AthleteStubClient({"weight": 74.2}), db_path=db_path, today="2025-04-02"
+    )
 
     conn = sqlite3.connect(db_path)
     try:
-        rows = conn.execute(
-            "SELECT date, weight FROM weight_history ORDER BY date"
-        ).fetchall()
+        rows = conn.execute("SELECT date, weight FROM weight_history ORDER BY date").fetchall()
     finally:
         conn.close()
     assert rows == [
@@ -729,33 +927,57 @@ def test_last_activity_timestamp_none_when_db_empty(db_path: Path):
     assert _last_activity_timestamp(db_path=db_path) is None
 
 
-def test_last_activity_timestamp_uses_max_date_minus_1h(
-    db_path: Path, monkeypatch
-):
+def test_last_activity_timestamp_uses_max_date_minus_1h(db_path: Path, monkeypatch):
     """Retourne MAX(date) - 1h en epoch UTC."""
     monkeypatch.delenv("STRAVA_HR_REST", raising=False)
     monkeypatch.delenv("STRAVA_HR_MAX", raising=False)
-    save_activity({
-        "id": 1, "date": "2025-04-01T08:00:00Z", "duration": 3600,
-        "avg_heart_rate": None, "max_heart_rate": None,
-        "avg_power": 200.0, "elevation_gain": 0, "distance": 30000,
-    }, db_path=db_path, ftp=250.0)
-    save_activity({
-        "id": 2, "date": "2025-04-05T18:30:00Z", "duration": 3600,
-        "avg_heart_rate": None, "max_heart_rate": None,
-        "avg_power": 200.0, "elevation_gain": 0, "distance": 30000,
-    }, db_path=db_path, ftp=250.0)
-    save_activity({
-        "id": 3, "date": "2025-04-03T08:00:00Z", "duration": 3600,
-        "avg_heart_rate": None, "max_heart_rate": None,
-        "avg_power": 200.0, "elevation_gain": 0, "distance": 30000,
-    }, db_path=db_path, ftp=250.0)
+    save_activity(
+        {
+            "id": 1,
+            "date": "2025-04-01T08:00:00Z",
+            "duration": 3600,
+            "avg_heart_rate": None,
+            "max_heart_rate": None,
+            "avg_power": 200.0,
+            "elevation_gain": 0,
+            "distance": 30000,
+        },
+        db_path=db_path,
+        ftp=250.0,
+    )
+    save_activity(
+        {
+            "id": 2,
+            "date": "2025-04-05T18:30:00Z",
+            "duration": 3600,
+            "avg_heart_rate": None,
+            "max_heart_rate": None,
+            "avg_power": 200.0,
+            "elevation_gain": 0,
+            "distance": 30000,
+        },
+        db_path=db_path,
+        ftp=250.0,
+    )
+    save_activity(
+        {
+            "id": 3,
+            "date": "2025-04-03T08:00:00Z",
+            "duration": 3600,
+            "avg_heart_rate": None,
+            "max_heart_rate": None,
+            "avg_power": 200.0,
+            "elevation_gain": 0,
+            "distance": 30000,
+        },
+        db_path=db_path,
+        ftp=250.0,
+    )
 
     # 2025-04-05T18:30:00Z - 1h = 2025-04-05T17:30:00Z
     import datetime as dt
-    expected = int(
-        dt.datetime(2025, 4, 5, 17, 30, tzinfo=dt.UTC).timestamp()
-    )
+
+    expected = int(dt.datetime(2025, 4, 5, 17, 30, tzinfo=dt.UTC).timestamp())
     assert _last_activity_timestamp(db_path=db_path) == expected
 
 
@@ -790,18 +1012,25 @@ class _SyncStubClient(StravaClient):
         return {"weight": 0}  # snapshot_athlete_weight ne fait rien
 
 
-def test_sync_activities_uses_last_timestamp_when_after_omitted(
-    db_path: Path, monkeypatch
-):
+def test_sync_activities_uses_last_timestamp_when_after_omitted(db_path: Path, monkeypatch):
     """Sur DB peuplée, sync_activities sans after doit dériver le timestamp."""
     monkeypatch.setenv("DOMESTIQUE_AI_DB_PATH", str(db_path))
     monkeypatch.delenv("STRAVA_HR_REST", raising=False)
     monkeypatch.delenv("STRAVA_HR_MAX", raising=False)
-    save_activity({
-        "id": 1, "date": "2025-04-01T08:00:00Z", "duration": 3600,
-        "avg_heart_rate": None, "max_heart_rate": None,
-        "avg_power": 200.0, "elevation_gain": 0, "distance": 30000,
-    }, db_path=db_path, ftp=250.0)
+    save_activity(
+        {
+            "id": 1,
+            "date": "2025-04-01T08:00:00Z",
+            "duration": 3600,
+            "avg_heart_rate": None,
+            "max_heart_rate": None,
+            "avg_power": 200.0,
+            "elevation_gain": 0,
+            "distance": 30000,
+        },
+        db_path=db_path,
+        ftp=250.0,
+    )
 
     client = _SyncStubClient()
     sync_activities(client)
@@ -809,9 +1038,8 @@ def test_sync_activities_uses_last_timestamp_when_after_omitted(
     assert client.received_after is not None
     # 2025-04-01T08:00:00Z - 1h = 2025-04-01T07:00:00Z = epoch 1743490800
     import datetime as dt
-    expected = int(
-        dt.datetime(2025, 4, 1, 7, 0, tzinfo=dt.UTC).timestamp()
-    )
+
+    expected = int(dt.datetime(2025, 4, 1, 7, 0, tzinfo=dt.UTC).timestamp())
     assert client.received_after == expected
 
 
@@ -826,18 +1054,25 @@ def test_sync_activities_empty_db_passes_none(db_path: Path, monkeypatch):
     assert client.received_after is None
 
 
-def test_sync_activities_explicit_after_overrides_auto(
-    db_path: Path, monkeypatch
-):
+def test_sync_activities_explicit_after_overrides_auto(db_path: Path, monkeypatch):
     """Un ``after`` explicite (ex. 0) doit bypasser la dérivation automatique."""
     monkeypatch.setenv("DOMESTIQUE_AI_DB_PATH", str(db_path))
     monkeypatch.delenv("STRAVA_HR_REST", raising=False)
     monkeypatch.delenv("STRAVA_HR_MAX", raising=False)
-    save_activity({
-        "id": 1, "date": "2025-04-01T08:00:00Z", "duration": 3600,
-        "avg_heart_rate": None, "max_heart_rate": None,
-        "avg_power": 200.0, "elevation_gain": 0, "distance": 30000,
-    }, db_path=db_path, ftp=250.0)
+    save_activity(
+        {
+            "id": 1,
+            "date": "2025-04-01T08:00:00Z",
+            "duration": 3600,
+            "avg_heart_rate": None,
+            "max_heart_rate": None,
+            "avg_power": 200.0,
+            "elevation_gain": 0,
+            "distance": 30000,
+        },
+        db_path=db_path,
+        ftp=250.0,
+    )
 
     client = _SyncStubClient()
     sync_activities(client, after=0)

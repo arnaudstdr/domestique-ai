@@ -128,10 +128,12 @@ def _collect_signals(today: _dt.date, ctx: AthleteContext) -> dict[str, Any]:
             calculate_ctl_atl_tsb,
             fetch_activities_from_db,
         )
+
         curves = calculate_ctl_atl_tsb(fetch_activities_from_db(ctx=ctx), end_date=today)
         if curves:
             tsb = float(curves[-1]["TSB"])
             from domestique_ai.processing.today import _tsb_zone_label
+
             tsb_zone = _tsb_zone_label(tsb)
 
     return {
@@ -177,7 +179,7 @@ def _generate_summary_with_llm(signals: dict[str, Any]) -> str | None:
             "role": "user",
             "content": (
                 "Voici les signaux du jour. Renvoie UNIQUEMENT le JSON "
-                "{\"summary\": \"...\"} avec une phrase de synthèse.\n\n" + payload
+                '{"summary": "..."} avec une phrase de synthèse.\n\n' + payload
             ),
         },
     ]
@@ -253,11 +255,7 @@ def build_daily_brief(
     ctx = ctx or context_from_env()
     target = today or _dt.date.today()
     signals = _collect_signals(target, ctx)
-    alert_signature = (
-        [signals["primary_alert"]["message"]]
-        if signals.get("primary_alert")
-        else []
-    )
+    alert_signature = [signals["primary_alert"]["message"]] if signals.get("primary_alert") else []
     cache_key = (
         str(ctx.db_path),
         target.isoformat(),
@@ -299,8 +297,7 @@ def build_daily_brief(
     return payload
 
 
-def build_coach_context(today: _dt.date | None = None, *,
-                        ctx: AthleteContext | None = None) -> str:
+def build_coach_context(today: _dt.date | None = None, *, ctx: AthleteContext | None = None) -> str:
     """Bloc texte injecté au démarrage d'une nouvelle session coach (palier 2).
 
     Format pensé pour être ajouté en message ``system`` après le SYSTEM_PROMPT
@@ -319,17 +316,14 @@ def build_coach_context(today: _dt.date | None = None, *,
         f"- Date : {brief['date']}",
     ]
     if brief.get("tsb") is not None:
-        lines.append(
-            f"- TSB : {brief['tsb']:+.1f} ({brief.get('tsb_zone') or '—'})"
-        )
+        lines.append(f"- TSB : {brief['tsb']:+.1f} ({brief.get('tsb_zone') or '—'})")
     workout = brief.get("today_workout") or {}
     if workout.get("rest_day"):
         lines.append(f"- Séance du jour : repos ({workout.get('reason') or 'jour off'})")
     elif workout.get("kind"):
         duration = workout.get("duration_min")
         lines.append(
-            f"- Séance suggérée : {workout['kind']}"
-            + (f" {duration} min" if duration else "")
+            f"- Séance suggérée : {workout['kind']}" + (f" {duration} min" if duration else "")
         )
     alert = brief.get("primary_alert")
     if alert:

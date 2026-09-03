@@ -69,9 +69,9 @@ class ToolTrace:
     result: dict[str, Any]
 
 
-def build_initial_messages(history: list[dict[str, Any]] | None,
-                           user_message: str, *,
-                           ctx: AthleteContext | None = None) -> list[dict[str, Any]]:
+def build_initial_messages(
+    history: list[dict[str, Any]] | None, user_message: str, *, ctx: AthleteContext | None = None
+) -> list[dict[str, Any]]:
     """Construit la liste de messages à envoyer au LLM (system + history + user).
 
     L'historique est sanitisé : on ne réinjecte au modèle que les paires
@@ -92,6 +92,7 @@ def build_initial_messages(history: list[dict[str, Any]] | None,
         # KO, etc.), on continue sans bloquer le coach.
         try:
             from domestique_ai.llm.daily_brief import build_coach_context
+
             context = build_coach_context(ctx=ctx)
         except Exception:  # noqa: BLE001
             context = ""
@@ -151,11 +152,13 @@ async def run_turn_stream(
             if chunk["tool_calls"]:
                 turn_tool_calls = chunk["tool_calls"]
 
-        messages.append({
-            "role": "assistant",
-            "content": turn_content,
-            "tool_calls": turn_tool_calls,
-        })
+        messages.append(
+            {
+                "role": "assistant",
+                "content": turn_content,
+                "tool_calls": turn_tool_calls,
+            }
+        )
 
         if not turn_tool_calls:
             yield {
@@ -163,8 +166,7 @@ async def run_turn_stream(
                 "content": accumulated_content,
                 "thinking": accumulated_thinking or None,
                 "tool_trace": [
-                    {"name": t.name, "arguments": t.arguments, "result": t.result}
-                    for t in trace
+                    {"name": t.name, "arguments": t.arguments, "result": t.result} for t in trace
                 ],
             }
             return
@@ -176,11 +178,13 @@ async def run_turn_stream(
             result = dispatch(name, args, ctx)
             trace.append(ToolTrace(name=name, arguments=args, result=result))
             yield {"type": "tool_result", "name": name, "result": result}
-            messages.append({
-                "role": "tool",
-                "name": name,
-                "content": json.dumps(result, ensure_ascii=False, default=str),
-            })
+            messages.append(
+                {
+                    "role": "tool",
+                    "name": name,
+                    "content": json.dumps(result, ensure_ascii=False, default=str),
+                }
+            )
 
     fallback = "\n\n_(Le coach n'a pas pu finaliser : trop de tours d'outils.)_"
     yield {"type": "token", "value": fallback}
@@ -190,7 +194,6 @@ async def run_turn_stream(
         "content": accumulated_content,
         "thinking": accumulated_thinking or None,
         "tool_trace": [
-            {"name": t.name, "arguments": t.arguments, "result": t.result}
-            for t in trace
+            {"name": t.name, "arguments": t.arguments, "result": t.result} for t in trace
         ],
     }

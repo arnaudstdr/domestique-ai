@@ -72,9 +72,7 @@ def test_data_requires_token(client: TestClient) -> None:
 
 def _invite_and_accept(client: TestClient, role: str = "athlete") -> str:
     """Crée une invitation (coach) et l'accepte. Retourne le session token athlète."""
-    r = client.post(
-        "/api/auth/invitations", headers=_bearer(_LEGACY), json={"role": role}
-    )
+    r = client.post("/api/auth/invitations", headers=_bearer(_LEGACY), json={"role": role})
     assert r.status_code == 200, r.text
     invite_token = r.json()["invite_token"]
 
@@ -105,9 +103,7 @@ def test_athlete_is_blocked_on_data_and_invitations(client: TestClient) -> None:
 
 
 def test_accept_invite_twice_fails(client: TestClient) -> None:
-    r = client.post(
-        "/api/auth/invitations", headers=_bearer(_LEGACY), json={"role": "athlete"}
-    )
+    r = client.post("/api/auth/invitations", headers=_bearer(_LEGACY), json={"role": "athlete"})
     invite_token = r.json()["invite_token"]
     assert (
         client.post("/api/auth/accept-invite", json={"invite_token": invite_token}).status_code
@@ -128,9 +124,7 @@ def test_accept_unknown_invite_fails(client: TestClient) -> None:
 
 
 def test_revoke_pending_invitation(client: TestClient) -> None:
-    r = client.post(
-        "/api/auth/invitations", headers=_bearer(_LEGACY), json={"role": "athlete"}
-    )
+    r = client.post("/api/auth/invitations", headers=_bearer(_LEGACY), json={"role": "athlete"})
     invite_token = r.json()["invite_token"]
     listed = client.get("/api/auth/invitations", headers=_bearer(_LEGACY)).json()
     inv_id = listed[0]["id"]
@@ -151,19 +145,22 @@ def test_revoke_unknown_invitation_404(client: TestClient) -> None:
 
 
 def test_revoke_already_accepted_invitation_404(client: TestClient) -> None:
-    r = client.post(
-        "/api/auth/invitations", headers=_bearer(_LEGACY), json={"role": "athlete"}
-    )
+    r = client.post("/api/auth/invitations", headers=_bearer(_LEGACY), json={"role": "athlete"})
     invite_token = r.json()["invite_token"]
     client.post("/api/auth/accept-invite", json={"invite_token": invite_token})
     inv_id = client.get("/api/auth/invitations", headers=_bearer(_LEGACY)).json()[0]["id"]
     # Une invitation déjà acceptée n'est pas révocable (statut != pending).
-    assert client.delete(f"/api/auth/invitations/{inv_id}", headers=_bearer(_LEGACY)).status_code == 404
+    assert (
+        client.delete(f"/api/auth/invitations/{inv_id}", headers=_bearer(_LEGACY)).status_code
+        == 404
+    )
 
 
 def test_athlete_cannot_revoke_invitation(client: TestClient) -> None:
     session_token = _invite_and_accept(client, role="athlete")
-    assert client.delete("/api/auth/invitations/1", headers=_bearer(session_token)).status_code == 403
+    assert (
+        client.delete("/api/auth/invitations/1", headers=_bearer(session_token)).status_code == 403
+    )
 
 
 # ---- Logout révoque la session ----------------------------------------------
@@ -189,9 +186,7 @@ def test_reconnect_flow_after_logout(client: TestClient) -> None:
     assert client.get("/api/auth/me", headers=_bearer(session_token)).status_code == 401
 
     # Le coach génère un lien de reconnexion pour cet athlète.
-    link = client.post(
-        f"/api/roster/athletes/{pid}/reconnect-link", headers=_bearer(_LEGACY)
-    )
+    link = client.post(f"/api/roster/athletes/{pid}/reconnect-link", headers=_bearer(_LEGACY))
     assert link.status_code == 201, link.text
     url = link.json()["reconnect_url"]
     token = url.split("token=", 1)[1]
@@ -225,9 +220,7 @@ def test_reconnect_link_forbidden_for_athlete(client: TestClient) -> None:
     session_token = _invite_and_accept(client, role="athlete")
     pid = client.get("/api/auth/me", headers=_bearer(session_token)).json()["public_id"]
     # Un athlète ne peut pas générer de lien de reconnexion.
-    r = client.post(
-        f"/api/roster/athletes/{pid}/reconnect-link", headers=_bearer(session_token)
-    )
+    r = client.post(f"/api/roster/athletes/{pid}/reconnect-link", headers=_bearer(session_token))
     assert r.status_code == 403
 
 

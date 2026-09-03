@@ -47,9 +47,14 @@ class StravaAuthError(RuntimeError):
 class StravaClient:
     """Client pour l'API Strava avec gestion automatique du refresh token."""
 
-    def __init__(self, access_token: str, refresh_token: str | None = None,
-                 expires_at: int | None = None, client_id: str | None = None,
-                 client_secret: str | None = None):
+    def __init__(
+        self,
+        access_token: str,
+        refresh_token: str | None = None,
+        expires_at: int | None = None,
+        client_id: str | None = None,
+        client_secret: str | None = None,
+    ):
         self.access_token = access_token
         self.refresh_token = refresh_token
         self.expires_at = expires_at or 0
@@ -61,9 +66,14 @@ class StravaClient:
         return {"Authorization": f"Bearer {self.access_token}"}
 
     @classmethod
-    def from_tokens_file(cls, client_id: str, client_secret: str,
-                         tokens_path: Path | None = None, *,
-                         ctx: AthleteContext | None = None) -> StravaClient:
+    def from_tokens_file(
+        cls,
+        client_id: str,
+        client_secret: str,
+        tokens_path: Path | None = None,
+        *,
+        ctx: AthleteContext | None = None,
+    ) -> StravaClient:
         """Recharge un client depuis le fichier local de tokens, refresh si expiré."""
         path = tokens_path or (ctx.tokens_path if ctx else get_tokens_path())
         if not path.exists():
@@ -84,16 +94,20 @@ class StravaClient:
             client.save_tokens(path)
         return client
 
-    def save_tokens(self, path: Path | None = None, *,
-                    ctx: AthleteContext | None = None) -> None:
+    def save_tokens(self, path: Path | None = None, *, ctx: AthleteContext | None = None) -> None:
         """Persiste les tokens courants sur disque."""
         path = path or (ctx.tokens_path if ctx else get_tokens_path())
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps({
-            "access_token": self.access_token,
-            "refresh_token": self.refresh_token,
-            "expires_at": self.expires_at,
-        }, indent=2))
+        path.write_text(
+            json.dumps(
+                {
+                    "access_token": self.access_token,
+                    "refresh_token": self.refresh_token,
+                    "expires_at": self.expires_at,
+                },
+                indent=2,
+            )
+        )
 
     def refresh_access_token(self) -> None:
         """Rafraîchit l'access_token via le refresh_token. Met à jour les attributs en place."""
@@ -135,7 +149,8 @@ class StravaClient:
             return response.json()
 
     def fetch_activity_streams(
-        self, activity_id: int,
+        self,
+        activity_id: int,
     ) -> tuple[list[float], list[float]] | None:
         """
         Récupère les streams `heartrate` et `time` d'une activité.
@@ -167,7 +182,9 @@ class StravaClient:
             return hr, ts
 
     def fetch_streams_full(
-        self, activity_id: int, keys: list[str],
+        self,
+        activity_id: int,
+        keys: list[str],
     ) -> dict[str, list] | None:
         """
         Récupère un sous-ensemble configurable de streams pour une activité.
@@ -219,8 +236,9 @@ class StravaClient:
             response.raise_for_status()
             return response.json()
 
-    def fetch_activities(self, after: int | None = None,
-                         per_page: int = 200) -> list[dict[str, Any]]:
+    def fetch_activities(
+        self, after: int | None = None, per_page: int = 200
+    ) -> list[dict[str, Any]]:
         """
         Récupère toutes les activités paginées.
 
@@ -272,8 +290,9 @@ class StravaClient:
         }
 
     @staticmethod
-    def get_authorization_url(client_id: str, redirect_uri: str,
-                              scope: str = "activity:read_all") -> str:
+    def get_authorization_url(
+        client_id: str, redirect_uri: str, scope: str = "activity:read_all"
+    ) -> str:
         """URL OAuth2 à ouvrir dans le navigateur pour obtenir le code d'autorisation."""
         params = {
             "client_id": client_id,
@@ -285,8 +304,9 @@ class StravaClient:
         return f"{STRAVA_OAUTH_AUTHORIZE_URL}?{urlencode(params)}"
 
     @staticmethod
-    def exchange_code_for_token(client_id: str, client_secret: str, code: str,
-                                redirect_uri: str) -> dict[str, Any]:
+    def exchange_code_for_token(
+        client_id: str, client_secret: str, code: str, redirect_uri: str
+    ) -> dict[str, Any]:
         """Échange le code d'autorisation contre access_token + refresh_token + expires_at."""
         response = requests.post(
             STRAVA_OAUTH_TOKEN_URL,
@@ -303,16 +323,14 @@ class StravaClient:
         return response.json()
 
 
-def _ensure_column(conn: sqlite3.Connection, table: str, column: str,
-                   ddl: str) -> None:
+def _ensure_column(conn: sqlite3.Connection, table: str, column: str, ddl: str) -> None:
     """Ajoute une colonne si absente. Migration douce SQLite."""
     cols = {row[1] for row in conn.execute(f"PRAGMA table_info({table})")}
     if column not in cols:
         conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {ddl}")
 
 
-def init_db(db_path: Path | None = None, *,
-            ctx: AthleteContext | None = None) -> None:
+def init_db(db_path: Path | None = None, *, ctx: AthleteContext | None = None) -> None:
     """Crée la table `activities` et applique les migrations idempotentes."""
     path = Path(db_path) if db_path else (ctx.db_path if ctx else get_db_path())
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -343,8 +361,7 @@ def init_db(db_path: Path | None = None, *,
             )
         """)
         _ensure_column(conn, "activities", "max_heart_rate", "REAL")
-        for zone in ("hr_z1_time", "hr_z2_time", "hr_z3_time",
-                     "hr_z4_time", "hr_z5_time"):
+        for zone in ("hr_z1_time", "hr_z2_time", "hr_z3_time", "hr_z4_time", "hr_z5_time"):
             _ensure_column(conn, "activities", zone, "REAL")
         _ensure_column(conn, "activities", "sport_type", "TEXT")
         for temp_col in ("avg_temp", "min_temp", "max_temp"):
@@ -360,8 +377,7 @@ def init_db(db_path: Path | None = None, *,
             )
         """)
         conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_conversations_session "
-            "ON conversations(session_id, id)"
+            "CREATE INDEX IF NOT EXISTS idx_conversations_session ON conversations(session_id, id)"
         )
         conn.execute("""
             CREATE TABLE IF NOT EXISTS session_titles (
@@ -411,10 +427,7 @@ def init_db(db_path: Path | None = None, *,
                 payload TEXT NOT NULL
             )
         """)
-        conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_prescriptions_date "
-            "ON prescriptions(date)"
-        )
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_prescriptions_date ON prescriptions(date)")
         conn.execute("""
             CREATE TABLE IF NOT EXISTS today_suggestions (
                 date TEXT NOT NULL,
@@ -443,21 +456,22 @@ def summarize_temp_stream(
     """
     if not temp_stream:
         return None
-    clean = [
-        float(t) for t in temp_stream
-        if t is not None and -50 < float(t) < 60
-    ]
+    clean = [float(t) for t in temp_stream if t is not None and -50 < float(t) < 60]
     if not clean:
         return None
     avg = round(sum(clean) / len(clean), 1)
     return avg, round(min(clean), 1), round(max(clean), 1)
 
 
-def save_activity(activity: dict[str, Any], db_path: Path | None = None,
-                  ftp: float | None = None,
-                  hr_zones: dict[str, float] | None = None,
-                  temp_summary: tuple[float, float, float] | None = None,
-                  *, ctx: AthleteContext | None = None) -> bool:
+def save_activity(
+    activity: dict[str, Any],
+    db_path: Path | None = None,
+    ftp: float | None = None,
+    hr_zones: dict[str, float] | None = None,
+    temp_summary: tuple[float, float, float] | None = None,
+    *,
+    ctx: AthleteContext | None = None,
+) -> bool:
     """
     Sauvegarde une activité. Calcule la charge d'entraînement si absente
     (hr-TSS si HR configurée, sinon TSS puissance, sinon 0).
@@ -502,8 +516,7 @@ def save_activity(activity: dict[str, Any], db_path: Path | None = None,
         )
 
     zone_values = (
-        tuple(hr_zones.get(key) for key in HR_ZONE_KEYS)
-        if hr_zones is not None else (None,) * 5
+        tuple(hr_zones.get(key) for key in HR_ZONE_KEYS) if hr_zones is not None else (None,) * 5
     )
     temp_values = temp_summary if temp_summary is not None else (None, None, None)
 
@@ -512,38 +525,44 @@ def save_activity(activity: dict[str, Any], db_path: Path | None = None,
         cursor = conn.execute("SELECT 1 FROM activities WHERE strava_id = ?", (strava_id,))
         if cursor.fetchone():
             return False
-        conn.execute("""
+        conn.execute(
+            """
             INSERT INTO activities (
                 strava_id, date, duration, avg_heart_rate, max_heart_rate,
                 avg_power, elevation_gain, distance, training_load,
                 hr_z1_time, hr_z2_time, hr_z3_time, hr_z4_time, hr_z5_time,
                 sport_type, avg_temp, min_temp, max_temp, map_polyline
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, (
-            strava_id,
-            activity.get("date"),
-            activity.get("duration"),
-            activity.get("avg_heart_rate"),
-            activity.get("max_heart_rate"),
-            activity.get("avg_power"),
-            activity.get("elevation_gain"),
-            activity.get("distance"),
-            tss,
-            *zone_values,
-            activity.get("sport_type"),
-            *temp_values,
-            activity.get("map_polyline"),
-        ))
+        """,
+            (
+                strava_id,
+                activity.get("date"),
+                activity.get("duration"),
+                activity.get("avg_heart_rate"),
+                activity.get("max_heart_rate"),
+                activity.get("avg_power"),
+                activity.get("elevation_gain"),
+                activity.get("distance"),
+                tss,
+                *zone_values,
+                activity.get("sport_type"),
+                *temp_values,
+                activity.get("map_polyline"),
+            ),
+        )
         conn.commit()
         return True
     finally:
         conn.close()
 
 
-def snapshot_athlete_weight(client: StravaClient,
-                            db_path: Path | None = None,
-                            today: str | None = None,
-                            *, ctx: AthleteContext | None = None) -> bool:
+def snapshot_athlete_weight(
+    client: StravaClient,
+    db_path: Path | None = None,
+    today: str | None = None,
+    *,
+    ctx: AthleteContext | None = None,
+) -> bool:
     """
     Enregistre le poids actuel de l'athlète Strava avec la date du jour.
 
@@ -573,8 +592,9 @@ def snapshot_athlete_weight(client: StravaClient,
         conn.close()
 
 
-def _last_activity_timestamp(db_path: Path | None = None, *,
-                             ctx: AthleteContext | None = None) -> int | None:
+def _last_activity_timestamp(
+    db_path: Path | None = None, *, ctx: AthleteContext | None = None
+) -> int | None:
     """Timestamp epoch (UTC) de la dernière activité connue, ``None`` si vide.
 
     Soustrait 1 heure de marge pour rattraper d'éventuels uploads tardifs ou
@@ -601,8 +621,9 @@ def _last_activity_timestamp(db_path: Path | None = None, *,
     return int((when - dt.timedelta(hours=1)).timestamp())
 
 
-def sync_activities(client: StravaClient, after: int | None = None, *,
-                    ctx: AthleteContext | None = None) -> int:
+def sync_activities(
+    client: StravaClient, after: int | None = None, *, ctx: AthleteContext | None = None
+) -> int:
     """Récupère et sauvegarde les nouvelles activités. Retourne le nombre d'insertions.
 
     Sync incrémentale par défaut : si ``after`` n'est pas fourni, on dérive
@@ -628,9 +649,7 @@ def sync_activities(client: StravaClient, after: int | None = None, *,
     hr_rest = ctx.hr_rest if ctx else get_hr_rest()
     hr_max = ctx.hr_max if ctx else get_hr_max()
     zone_params: tuple[float, float] | None = (
-        (float(hr_rest), float(hr_max))
-        if hr_rest and hr_max and hr_max > hr_rest
-        else None
+        (float(hr_rest), float(hr_max)) if hr_rest and hr_max and hr_max > hr_rest else None
     )
 
     inserted = 0
@@ -639,9 +658,7 @@ def sync_activities(client: StravaClient, after: int | None = None, *,
         zones: dict[str, float] | None = None
         temp_summary: tuple[float, float, float] | None = None
         if zone_params and data.get("avg_heart_rate") and data.get("id"):
-            streams = client.fetch_streams_full(
-                data["id"], keys=["heartrate", "time", "temp"]
-            )
+            streams = client.fetch_streams_full(data["id"], keys=["heartrate", "time", "temp"])
             if streams is not None:
                 hr_stream = streams.get("heartrate")
                 time_stream = streams.get("time")
@@ -655,9 +672,9 @@ def sync_activities(client: StravaClient, after: int | None = None, *,
     return inserted
 
 
-def backfill_hr_zones(client: StravaClient,
-                      db_path: Path | None = None, *,
-                      ctx: AthleteContext | None = None) -> int:
+def backfill_hr_zones(
+    client: StravaClient, db_path: Path | None = None, *, ctx: AthleteContext | None = None
+) -> int:
     """
     Calcule rétroactivement les zones HR pour les activités déjà en base
     qui ont une avg_heart_rate mais pas encore de hr_z1_time.
@@ -674,8 +691,7 @@ def backfill_hr_zones(client: StravaClient,
     hr_max = ctx.hr_max if ctx else get_hr_max()
     if not (hr_rest and hr_max and hr_max > hr_rest):
         raise RuntimeError(
-            "STRAVA_HR_REST et STRAVA_HR_MAX doivent être configurés "
-            "pour calculer les zones HR."
+            "STRAVA_HR_REST et STRAVA_HR_MAX doivent être configurés pour calculer les zones HR."
         )
 
     conn = sqlite3.connect(path)
@@ -714,9 +730,9 @@ def backfill_hr_zones(client: StravaClient,
     return updated
 
 
-def backfill_temperature(client: StravaClient,
-                         db_path: Path | None = None, *,
-                         ctx: AthleteContext | None = None) -> int:
+def backfill_temperature(
+    client: StravaClient, db_path: Path | None = None, *, ctx: AthleteContext | None = None
+) -> int:
     """
     Récupère rétroactivement la température (min/avg/max) pour les activités
     déjà en base dont les colonnes ``*_temp`` sont NULL.
@@ -734,9 +750,7 @@ def backfill_temperature(client: StravaClient,
 
     conn = sqlite3.connect(path)
     try:
-        rows = conn.execute(
-            "SELECT strava_id FROM activities WHERE avg_temp IS NULL"
-        ).fetchall()
+        rows = conn.execute("SELECT strava_id FROM activities WHERE avg_temp IS NULL").fetchall()
     finally:
         conn.close()
 
@@ -764,9 +778,9 @@ def backfill_temperature(client: StravaClient,
     return updated
 
 
-def backfill_sport_types(client: StravaClient,
-                         db_path: Path | None = None, *,
-                         ctx: AthleteContext | None = None) -> int:
+def backfill_sport_types(
+    client: StravaClient, db_path: Path | None = None, *, ctx: AthleteContext | None = None
+) -> int:
     """
     Complète la colonne `sport_type` sur les activités existantes en base
     qui ne l'ont pas (lignes ajoutées avant l'introduction du champ).
@@ -781,9 +795,7 @@ def backfill_sport_types(client: StravaClient,
     try:
         missing = {
             row[0]
-            for row in conn.execute(
-                "SELECT strava_id FROM activities WHERE sport_type IS NULL"
-            )
+            for row in conn.execute("SELECT strava_id FROM activities WHERE sport_type IS NULL")
         }
     finally:
         conn.close()
@@ -814,9 +826,9 @@ def backfill_sport_types(client: StravaClient,
         conn.close()
 
 
-def backfill_polylines(client: StravaClient,
-                       db_path: Path | None = None, *,
-                       ctx: AthleteContext | None = None) -> int:
+def backfill_polylines(
+    client: StravaClient, db_path: Path | None = None, *, ctx: AthleteContext | None = None
+) -> int:
     """
     Complète la colonne ``map_polyline`` pour les activités déjà en base
     qui ne l'ont pas encore.
@@ -838,9 +850,7 @@ def backfill_polylines(client: StravaClient,
     try:
         missing = {
             row[0]
-            for row in conn.execute(
-                "SELECT strava_id FROM activities WHERE map_polyline IS NULL"
-            )
+            for row in conn.execute("SELECT strava_id FROM activities WHERE map_polyline IS NULL")
         }
     finally:
         conn.close()
@@ -871,9 +881,9 @@ def backfill_polylines(client: StravaClient,
         conn.close()
 
 
-def backfill_activity_fields(client: StravaClient,
-                             db_path: Path | None = None, *,
-                             ctx: AthleteContext | None = None) -> int:
+def backfill_activity_fields(
+    client: StravaClient, db_path: Path | None = None, *, ctx: AthleteContext | None = None
+) -> int:
     """
     Re-fetch tout l'historique Strava et complète les colonnes manquantes
     (max_heart_rate notamment) sur les activités déjà en base.
@@ -886,10 +896,7 @@ def backfill_activity_fields(client: StravaClient,
     activities = client.fetch_activities()
     conn = sqlite3.connect(path)
     try:
-        existing = {
-            row[0]
-            for row in conn.execute("SELECT strava_id FROM activities")
-        }
+        existing = {row[0] for row in conn.execute("SELECT strava_id FROM activities")}
         updated = 0
         for raw in activities:
             data = client.extract_activity_data(raw)
@@ -905,8 +912,7 @@ def backfill_activity_fields(client: StravaClient,
             new_max_hr = data.get("max_heart_rate")
             if new_max_hr is not None and current_max_hr != new_max_hr:
                 conn.execute(
-                    "UPDATE activities SET max_heart_rate = ? "
-                    "WHERE strava_id = ?",
+                    "UPDATE activities SET max_heart_rate = ? WHERE strava_id = ?",
                     (new_max_hr, strava_id),
                 )
                 updated += 1

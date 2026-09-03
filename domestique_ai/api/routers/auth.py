@@ -43,6 +43,7 @@ def _provision_athlete_space(user: dict) -> None:
         return
     from domestique_ai.athlete_context import context_for_athlete
     from domestique_ai.ingestion.strava import init_db
+
     ctx = context_for_athlete(user)
     try:
         ctx.db_path.parent.mkdir(parents=True, exist_ok=True)
@@ -115,9 +116,7 @@ def _athlete_activity_stats(db_path) -> tuple[int, str | None]:
     try:
         conn = sqlite3.connect(db_path)
         try:
-            row = conn.execute(
-                "SELECT COUNT(*), MAX(date) FROM activities"
-            ).fetchone()
+            row = conn.execute("SELECT COUNT(*), MAX(date) FROM activities").fetchone()
         finally:
             conn.close()
     except sqlite3.OperationalError:
@@ -141,13 +140,8 @@ def create_invite(
 ) -> InvitationCreated:
     expires_at: str | None = None
     if body.expires_in_days:
-        expires_at = (
-            dt.datetime.now(dt.UTC)
-            + dt.timedelta(days=body.expires_in_days)
-        ).isoformat()
-    inv, token = create_invitation(
-        created_by=coach["id"], role=body.role, expires_at=expires_at
-    )
+        expires_at = (dt.datetime.now(dt.UTC) + dt.timedelta(days=body.expires_in_days)).isoformat()
+    inv, token = create_invitation(created_by=coach["id"], role=body.role, expires_at=expires_at)
     return InvitationCreated(
         role=inv["role"],
         invite_token=token,
@@ -204,17 +198,11 @@ def list_athletes(coach: dict = Depends(require_coach)) -> list[AthleteSummary]:
 @router.post("/accept-invite", response_model=SessionTokenOut)
 def accept(body: AcceptInvite) -> SessionTokenOut:
     try:
-        user, token = accept_invitation(
-            body.invite_token, display_name=body.display_name
-        )
+        user, token = accept_invitation(body.invite_token, display_name=body.display_name)
     except InvitationError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
-        ) from exc
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     _provision_athlete_space(user)
-    return SessionTokenOut(
-        session_token=token, public_id=user["public_id"], role=user["role"]
-    )
+    return SessionTokenOut(session_token=token, public_id=user["public_id"], role=user["role"])
 
 
 @router.post("/reconnect", response_model=SessionTokenOut)
@@ -231,9 +219,7 @@ def reconnect(body: ReconnectRequest) -> SessionTokenOut:
             detail="Lien de reconnexion invalide, expiré ou déjà utilisé.",
         )
     _session, token = create_session(user["id"])
-    return SessionTokenOut(
-        session_token=token, public_id=user["public_id"], role=user["role"]
-    )
+    return SessionTokenOut(session_token=token, public_id=user["public_id"], role=user["role"])
 
 
 @router.post("/logout")
@@ -244,5 +230,5 @@ def logout(
     header = request.headers.get("authorization", "")
     prefix = "Bearer "
     if header.startswith(prefix):
-        revoke_session(header[len(prefix):].strip())
+        revoke_session(header[len(prefix) :].strip())
     return {"status": "logged_out"}

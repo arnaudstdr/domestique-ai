@@ -51,9 +51,7 @@ def _daily_loads(
     if end_date is None:
         end_date = dt.date.today()
     start_date = end_date - dt.timedelta(days=days - 1)
-    daily: dict[dt.date, float] = {
-        start_date + dt.timedelta(days=i): 0.0 for i in range(days)
-    }
+    daily: dict[dt.date, float] = {start_date + dt.timedelta(days=i): 0.0 for i in range(days)}
     for act in activities:
         d_str = act.get("date")
         if not d_str:
@@ -186,40 +184,48 @@ def detect_overtraining_signals(
 
     alerts = []
     if chronic.get("alert"):
-        alerts.append({
-            "indicator": "tsb_chronic",
-            "message": (
-                f"TSB moyen {chronic['mean_tsb']:.1f} sur 7 j "
-                f"(seuil {TSB_CHRONIC_THRESHOLD}). "
-                "Fatigue durable, planifier une semaine de récup."
-            ),
-        })
+        alerts.append(
+            {
+                "indicator": "tsb_chronic",
+                "message": (
+                    f"TSB moyen {chronic['mean_tsb']:.1f} sur 7 j "
+                    f"(seuil {TSB_CHRONIC_THRESHOLD}). "
+                    "Fatigue durable, planifier une semaine de récup."
+                ),
+            }
+        )
     if monstrain.get("alert_monotony"):
-        alerts.append({
-            "indicator": "monotony",
-            "message": (
-                f"Monotony {monstrain['monotony']:.2f} > {MONOTONY_THRESHOLD}. "
-                "Manque de variabilité dans la charge — alterner intensités."
-            ),
-        })
+        alerts.append(
+            {
+                "indicator": "monotony",
+                "message": (
+                    f"Monotony {monstrain['monotony']:.2f} > {MONOTONY_THRESHOLD}. "
+                    "Manque de variabilité dans la charge — alterner intensités."
+                ),
+            }
+        )
     if monstrain.get("alert_strain"):
-        alerts.append({
-            "indicator": "strain",
-            "message": (
-                f"Strain {monstrain['strain']:.0f} > {STRAIN_THRESHOLD}. "
-                "Charge cumulée élevée, réduire le volume cette semaine."
-            ),
-        })
+        alerts.append(
+            {
+                "indicator": "strain",
+                "message": (
+                    f"Strain {monstrain['strain']:.0f} > {STRAIN_THRESHOLD}. "
+                    "Charge cumulée élevée, réduire le volume cette semaine."
+                ),
+            }
+        )
     if weekly.get("alert"):
         delta = weekly.get("delta_pct")
         if delta is not None:
-            alerts.append({
-                "indicator": "weekly_jump",
-                "message": (
-                    f"Volume hebdo +{delta:.1f}% vs semaine précédente "
-                    f"(seuil +{WEEKLY_VOLUME_JUMP_PCT}%). Risque de blessure."
-                ),
-            })
+            alerts.append(
+                {
+                    "indicator": "weekly_jump",
+                    "message": (
+                        f"Volume hebdo +{delta:.1f}% vs semaine précédente "
+                        f"(seuil +{WEEKLY_VOLUME_JUMP_PCT}%). Risque de blessure."
+                    ),
+                }
+            )
     return {
         "available": True,
         "tsb_chronic": chronic,

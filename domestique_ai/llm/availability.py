@@ -47,9 +47,9 @@ class AvailabilityError(ValueError):
 class DayAvailability:
     """Disponibilité d'un jour de la semaine."""
 
-    weekday: int                 # 0..6 (lundi..dimanche)
+    weekday: int  # 0..6 (lundi..dimanche)
     max_duration_min: int
-    context: str                 # "indoor" | "outdoor"
+    context: str  # "indoor" | "outdoor"
 
     @property
     def name(self) -> str:
@@ -156,15 +156,11 @@ def load_availability(path: Path | None = None) -> Availability | None:
         return None
     raw = yaml.safe_load(target.read_text()) or {}
     if not isinstance(raw, dict):
-        raise AvailabilityError(
-            f"Le fichier {target} doit contenir un dictionnaire YAML."
-        )
+        raise AvailabilityError(f"Le fichier {target} doit contenir un dictionnaire YAML.")
 
     days_raw = raw.get("days")
     if not isinstance(days_raw, dict) or not days_raw:
-        raise AvailabilityError(
-            f"{target}: section 'days' manquante ou vide."
-        )
+        raise AvailabilityError(f"{target}: section 'days' manquante ou vide.")
 
     days = [_parse_day(name, payload) for name, payload in days_raw.items()]
     days.sort(key=lambda d: d.weekday)
@@ -183,9 +179,7 @@ def save_availability(availability: Availability, path: Path | None = None) -> P
     """Sérialise la disponibilité au format YAML."""
     target = path or get_availability_path()
     target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_text(
-        yaml.safe_dump(availability.to_dict(), allow_unicode=True, sort_keys=False)
-    )
+    target.write_text(yaml.safe_dump(availability.to_dict(), allow_unicode=True, sort_keys=False))
     return target
 
 
@@ -197,5 +191,3 @@ __all__ = [
     "load_availability",
     "save_availability",
 ]
-
-

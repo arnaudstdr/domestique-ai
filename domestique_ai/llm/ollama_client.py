@@ -69,7 +69,8 @@ async def stream_chat(
                         },
                     }
                     for tc in (getattr(msg, "tool_calls", None) or [])
-                ] or None,
+                ]
+                or None,
                 "done": bool(getattr(chunk, "done", False)),
             }
     except ConnectionError as exc:
@@ -78,9 +79,7 @@ async def stream_chat(
             f"Vérifier que le service tourne. Détail: {exc}"
         ) from exc
     except ollama.ResponseError as exc:
-        raise OllamaError(
-            f"Ollama a refusé la requête (modèle {target_model}): {exc}"
-        ) from exc
+        raise OllamaError(f"Ollama a refusé la requête (modèle {target_model}): {exc}") from exc
 
 
 async def chat_structured(
@@ -139,9 +138,13 @@ def chat_structured_sync(
     handler async), on exécute la coroutine dans un thread séparé pour ne pas
     se faire bloquer par ``asyncio.run`` qui refuse une boucle imbriquée.
     """
+
     async def _run() -> dict[str, Any] | None:
         return await chat_structured(
-            messages, model=model, timeout_s=timeout_s, options=options,
+            messages,
+            model=model,
+            timeout_s=timeout_s,
+            options=options,
         )
 
     try:
@@ -154,5 +157,6 @@ def chat_structured_sync(
         return asyncio.run(_run())
 
     import concurrent.futures
+
     with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
         return executor.submit(lambda: asyncio.run(_run())).result()

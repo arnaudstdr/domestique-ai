@@ -25,6 +25,7 @@ class PlanGenerationError(RuntimeError):
 
 def _connect(db_path: Path | None = None) -> sqlite3.Connection:
     from domestique_ai.ingestion.strava import init_db
+
     path = Path(db_path) if db_path else get_db_path()
     init_db(path)
     return sqlite3.connect(path)
@@ -91,9 +92,7 @@ def load_plan(plan_id: int, db_path: Path | None = None) -> list[Workout] | None
     """Charge un plan par son id."""
     conn = _connect(db_path)
     try:
-        row = conn.execute(
-            "SELECT payload FROM training_plans WHERE id = ?", (plan_id,)
-        ).fetchone()
+        row = conn.execute("SELECT payload FROM training_plans WHERE id = ?", (plan_id,)).fetchone()
     finally:
         conn.close()
     if not row:
@@ -124,9 +123,7 @@ def delete_plan(plan_id: int, db_path: Path | None = None) -> bool:
     """Supprime un plan. Retourne True s'il a été trouvé."""
     conn = _connect(db_path)
     try:
-        cursor = conn.execute(
-            "DELETE FROM training_plans WHERE id = ?", (plan_id,)
-        )
+        cursor = conn.execute("DELETE FROM training_plans WHERE id = ?", (plan_id,))
         conn.commit()
         return cursor.rowcount > 0
     finally:
@@ -199,9 +196,7 @@ def build_and_save_plan(
     )
 
     if not plan:
-        raise PlanGenerationError(
-            "Aucune séance générée (date cible déjà passée ?)."
-        )
+        raise PlanGenerationError("Aucune séance générée (date cible déjà passée ?).")
 
     plan_id = save_plan(
         plan,

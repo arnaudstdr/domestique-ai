@@ -35,6 +35,7 @@ class InvitationError(RuntimeError):
 # Bas niveau
 # ---------------------------------------------------------------------------
 
+
 def _now() -> str:
     return dt.datetime.now(dt.UTC).isoformat()
 
@@ -61,9 +62,7 @@ def _connect(path: Path | None = None) -> sqlite3.Connection:
 
 def _hash_token(plaintext: str) -> str:
     """HMAC-SHA256 du token (pepper = secret applicatif). Hex."""
-    return hmac.new(
-        get_session_secret(), plaintext.encode("utf-8"), hashlib.sha256
-    ).hexdigest()
+    return hmac.new(get_session_secret(), plaintext.encode("utf-8"), hashlib.sha256).hexdigest()
 
 
 def _generate_token() -> str:
@@ -86,10 +85,7 @@ def init_platform_db(path: Path | None = None) -> None:
                 created_at TEXT NOT NULL
             )
         """)
-        conn.execute(
-            "CREATE UNIQUE INDEX IF NOT EXISTS idx_users_public_id "
-            "ON users(public_id)"
-        )
+        conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_users_public_id ON users(public_id)")
         # Au plus un coach bootstrap (index partiel).
         conn.execute(
             "CREATE UNIQUE INDEX IF NOT EXISTS idx_users_bootstrap "
@@ -107,12 +103,9 @@ def init_platform_db(path: Path | None = None) -> None:
             )
         """)
         conn.execute(
-            "CREATE UNIQUE INDEX IF NOT EXISTS idx_sessions_token_hash "
-            "ON sessions(token_hash)"
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_sessions_token_hash ON sessions(token_hash)"
         )
-        conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id)"
-        )
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id)")
         conn.execute("""
             CREATE TABLE IF NOT EXISTS invitations (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -132,8 +125,7 @@ def init_platform_db(path: Path | None = None) -> None:
             "ON invitations(token_hash)"
         )
         conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_invitations_created_by "
-            "ON invitations(created_by)"
+            "CREATE INDEX IF NOT EXISTS idx_invitations_created_by ON invitations(created_by)"
         )
         conn.execute("""
             CREATE TABLE IF NOT EXISTS oauth_states (
@@ -146,8 +138,7 @@ def init_platform_db(path: Path | None = None) -> None:
             )
         """)
         conn.execute(
-            "CREATE UNIQUE INDEX IF NOT EXISTS idx_oauth_states_hash "
-            "ON oauth_states(state_hash)"
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_oauth_states_hash ON oauth_states(state_hash)"
         )
         conn.execute("""
             CREATE TABLE IF NOT EXISTS reconnect_tokens (
@@ -172,8 +163,7 @@ def init_platform_db(path: Path | None = None) -> None:
             )
         """)
         conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_coach_athlete_athlete "
-            "ON coach_athlete(athlete_id)"
+            "CREATE INDEX IF NOT EXISTS idx_coach_athlete_athlete ON coach_athlete(athlete_id)"
         )
         conn.commit()
     finally:
@@ -183,6 +173,7 @@ def init_platform_db(path: Path | None = None) -> None:
 # ---------------------------------------------------------------------------
 # Sérialisation (jamais token_hash dans les dicts exposés)
 # ---------------------------------------------------------------------------
+
 
 def _user_dict(row: sqlite3.Row) -> dict[str, Any]:
     return {
@@ -212,8 +203,10 @@ def _invitation_dict(row: sqlite3.Row) -> dict[str, Any]:
 # Users
 # ---------------------------------------------------------------------------
 
-def create_user(role: str, display_name: str | None = None,
-                is_bootstrap: bool = False, path: Path | None = None) -> dict[str, Any]:
+
+def create_user(
+    role: str, display_name: str | None = None, is_bootstrap: bool = False, path: Path | None = None
+) -> dict[str, Any]:
     if role not in VALID_ROLES:
         raise ValueError(f"role invalide: {role!r}")
     conn = _connect(path)
@@ -225,9 +218,7 @@ def create_user(role: str, display_name: str | None = None,
             (public_id, role, display_name, 1 if is_bootstrap else 0, _now()),
         )
         conn.commit()
-        row = conn.execute(
-            "SELECT * FROM users WHERE id = ?", (cur.lastrowid,)
-        ).fetchone()
+        row = conn.execute("SELECT * FROM users WHERE id = ?", (cur.lastrowid,)).fetchone()
         return _user_dict(row)
     finally:
         conn.close()
@@ -236,9 +227,7 @@ def create_user(role: str, display_name: str | None = None,
 def get_user_by_public_id(public_id: str, path: Path | None = None) -> dict[str, Any] | None:
     conn = _connect(path)
     try:
-        row = conn.execute(
-            "SELECT * FROM users WHERE public_id = ?", (public_id,)
-        ).fetchone()
+        row = conn.execute("SELECT * FROM users WHERE public_id = ?", (public_id,)).fetchone()
         return _user_dict(row) if row else None
     finally:
         conn.close()
@@ -247,16 +236,13 @@ def get_user_by_public_id(public_id: str, path: Path | None = None) -> dict[str,
 def get_user_by_id(user_id: int, path: Path | None = None) -> dict[str, Any] | None:
     conn = _connect(path)
     try:
-        row = conn.execute(
-            "SELECT * FROM users WHERE id = ?", (user_id,)
-        ).fetchone()
+        row = conn.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
         return _user_dict(row) if row else None
     finally:
         conn.close()
 
 
-def list_users(role: str | None = None,
-               path: Path | None = None) -> list[dict[str, Any]]:
+def list_users(role: str | None = None, path: Path | None = None) -> list[dict[str, Any]]:
     """Liste tous les utilisateurs (optionnellement filtrés par rôle), triés par id.
 
     Utilisé par le scheduler pour énumérer les athlètes à synchroniser.
@@ -277,9 +263,7 @@ def list_users(role: str | None = None,
 def get_bootstrap_coach(path: Path | None = None) -> dict[str, Any] | None:
     conn = _connect(path)
     try:
-        row = conn.execute(
-            "SELECT * FROM users WHERE is_bootstrap = 1 LIMIT 1"
-        ).fetchone()
+        row = conn.execute("SELECT * FROM users WHERE is_bootstrap = 1 LIMIT 1").fetchone()
         return _user_dict(row) if row else None
     finally:
         conn.close()
@@ -291,9 +275,7 @@ def get_or_create_bootstrap_coach(path: Path | None = None) -> dict[str, Any]:
     if existing is not None:
         return existing
     try:
-        return create_user(
-            role="coach", display_name="Owner", is_bootstrap=True, path=path
-        )
+        return create_user(role="coach", display_name="Owner", is_bootstrap=True, path=path)
     except sqlite3.IntegrityError:
         # Course : un autre appel l'a créé entre-temps.
         existing = get_bootstrap_coach(path)
@@ -306,8 +288,10 @@ def get_or_create_bootstrap_coach(path: Path | None = None) -> dict[str, Any]:
 # Sessions
 # ---------------------------------------------------------------------------
 
-def create_session(user_id: int, expires_at: str | None = None,
-                   path: Path | None = None) -> tuple[dict[str, Any], str]:
+
+def create_session(
+    user_id: int, expires_at: str | None = None, path: Path | None = None
+) -> tuple[dict[str, Any], str]:
     """Crée une session pour ``user_id``. Retourne (dict, token_clair)."""
     conn = _connect(path)
     try:
@@ -348,8 +332,7 @@ def resolve_session_token(plaintext: str, path: Path | None = None) -> dict[str,
     conn = _connect(path)
     try:
         row = conn.execute(
-            "SELECT id, user_id, expires_at, revoked_at FROM sessions "
-            "WHERE token_hash = ?",
+            "SELECT id, user_id, expires_at, revoked_at FROM sessions WHERE token_hash = ?",
             (token_hash,),
         ).fetchone()
         if row is None or row["revoked_at"] is not None:
@@ -361,9 +344,7 @@ def resolve_session_token(plaintext: str, path: Path | None = None) -> dict[str,
             (_now(), row["id"]),
         )
         conn.commit()
-        user = conn.execute(
-            "SELECT * FROM users WHERE id = ?", (row["user_id"],)
-        ).fetchone()
+        user = conn.execute("SELECT * FROM users WHERE id = ?", (row["user_id"],)).fetchone()
         return _user_dict(user) if user else None
     finally:
         conn.close()
@@ -376,8 +357,7 @@ def revoke_session(plaintext: str, path: Path | None = None) -> bool:
     conn = _connect(path)
     try:
         cur = conn.execute(
-            "UPDATE sessions SET revoked_at = ? "
-            "WHERE token_hash = ? AND revoked_at IS NULL",
+            "UPDATE sessions SET revoked_at = ? WHERE token_hash = ? AND revoked_at IS NULL",
             (_now(), _hash_token(plaintext)),
         )
         conn.commit()
@@ -390,9 +370,10 @@ def revoke_session(plaintext: str, path: Path | None = None) -> bool:
 # Invitations
 # ---------------------------------------------------------------------------
 
-def create_invitation(created_by: int | None, role: str,
-                      expires_at: str | None = None,
-                      path: Path | None = None) -> tuple[dict[str, Any], str]:
+
+def create_invitation(
+    created_by: int | None, role: str, expires_at: str | None = None, path: Path | None = None
+) -> tuple[dict[str, Any], str]:
     """Crée une invitation. Retourne (dict, token_clair). Le clair n'est montré qu'ici."""
     if role not in VALID_ROLES:
         raise ValueError(f"role invalide: {role!r}")
@@ -405,22 +386,19 @@ def create_invitation(created_by: int | None, role: str,
             (_hash_token(token), role, created_by, _now(), expires_at),
         )
         conn.commit()
-        row = conn.execute(
-            "SELECT * FROM invitations WHERE id = ?", (cur.lastrowid,)
-        ).fetchone()
+        row = conn.execute("SELECT * FROM invitations WHERE id = ?", (cur.lastrowid,)).fetchone()
         return (_invitation_dict(row), token)
     finally:
         conn.close()
 
 
-def list_invitations(created_by: int | None = None,
-                     path: Path | None = None) -> list[dict[str, Any]]:
+def list_invitations(
+    created_by: int | None = None, path: Path | None = None
+) -> list[dict[str, Any]]:
     conn = _connect(path)
     try:
         if created_by is None:
-            rows = conn.execute(
-                "SELECT * FROM invitations ORDER BY id DESC"
-            ).fetchall()
+            rows = conn.execute("SELECT * FROM invitations ORDER BY id DESC").fetchall()
         else:
             rows = conn.execute(
                 "SELECT * FROM invitations WHERE created_by = ? ORDER BY id DESC",
@@ -431,8 +409,9 @@ def list_invitations(created_by: int | None = None,
         conn.close()
 
 
-def revoke_invitation(invitation_id: int, created_by: int | None = None,
-                      path: Path | None = None) -> bool:
+def revoke_invitation(
+    invitation_id: int, created_by: int | None = None, path: Path | None = None
+) -> bool:
     """Révoque une invitation ``pending``. Retourne True si une ligne a changé.
 
     Si ``created_by`` est fourni, seule une invitation créée par ce coach peut
@@ -443,8 +422,7 @@ def revoke_invitation(invitation_id: int, created_by: int | None = None,
     try:
         if created_by is None:
             cur = conn.execute(
-                "UPDATE invitations SET status = 'revoked' "
-                "WHERE id = ? AND status = 'pending'",
+                "UPDATE invitations SET status = 'revoked' WHERE id = ? AND status = 'pending'",
                 (invitation_id,),
             )
         else:
@@ -459,8 +437,9 @@ def revoke_invitation(invitation_id: int, created_by: int | None = None,
         conn.close()
 
 
-def accept_invitation(plaintext: str, display_name: str | None = None,
-                      path: Path | None = None) -> tuple[dict[str, Any], str]:
+def accept_invitation(
+    plaintext: str, display_name: str | None = None, path: Path | None = None
+) -> tuple[dict[str, Any], str]:
     """Consomme une invitation : crée l'utilisateur + une session (+ lien coach si applicable).
 
     Retourne (user_dict, session_token_clair). Lève ``InvitationError`` si
@@ -498,9 +477,7 @@ def accept_invitation(plaintext: str, display_name: str | None = None,
         # Lien coach↔athlète si l'invite vient d'un coach et crée un athlète.
         created_by = inv["created_by"]
         if created_by is not None and inv["role"] == "athlete":
-            inviter = conn.execute(
-                "SELECT role FROM users WHERE id = ?", (created_by,)
-            ).fetchone()
+            inviter = conn.execute("SELECT role FROM users WHERE id = ?", (created_by,)).fetchone()
             if inviter is not None and inviter["role"] == "coach":
                 conn.execute(
                     "INSERT OR IGNORE INTO coach_athlete (coach_id, athlete_id, created_at) "
@@ -519,9 +496,7 @@ def accept_invitation(plaintext: str, display_name: str | None = None,
             (user_id, now, inv["id"]),
         )
         conn.commit()
-        user = conn.execute(
-            "SELECT * FROM users WHERE id = ?", (user_id,)
-        ).fetchone()
+        user = conn.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
         return (_user_dict(user), token)
     finally:
         conn.close()
@@ -531,8 +506,10 @@ def accept_invitation(plaintext: str, display_name: str | None = None,
 # OAuth state (anti-CSRF + porteur d'identité pour le callback Strava)
 # ---------------------------------------------------------------------------
 
-def create_oauth_state(user_id: int, expires_at: str | None = None,
-                       path: Path | None = None) -> tuple[dict[str, Any], str]:
+
+def create_oauth_state(
+    user_id: int, expires_at: str | None = None, path: Path | None = None
+) -> tuple[dict[str, Any], str]:
     """Crée un ``state`` OAuth lié à ``user_id``. Retourne (row, state_clair)."""
     conn = _connect(path)
     try:
@@ -544,8 +521,7 @@ def create_oauth_state(user_id: int, expires_at: str | None = None,
         )
         conn.commit()
         row = conn.execute(
-            "SELECT id, user_id, created_at, expires_at, used_at "
-            "FROM oauth_states WHERE id = ?",
+            "SELECT id, user_id, created_at, expires_at, used_at FROM oauth_states WHERE id = ?",
             (cur.lastrowid,),
         ).fetchone()
         state = {
@@ -571,8 +547,7 @@ def consume_oauth_state(plaintext: str, path: Path | None = None) -> dict[str, A
     conn = _connect(path)
     try:
         row = conn.execute(
-            "SELECT id, user_id, expires_at, used_at FROM oauth_states "
-            "WHERE state_hash = ?",
+            "SELECT id, user_id, expires_at, used_at FROM oauth_states WHERE state_hash = ?",
             (state_hash,),
         ).fetchone()
         if row is None or row["used_at"] is not None:
@@ -584,9 +559,7 @@ def consume_oauth_state(plaintext: str, path: Path | None = None) -> dict[str, A
             (_now(), row["id"]),
         )
         conn.commit()
-        user = conn.execute(
-            "SELECT * FROM users WHERE id = ?", (row["user_id"],)
-        ).fetchone()
+        user = conn.execute("SELECT * FROM users WHERE id = ?", (row["user_id"],)).fetchone()
         return _user_dict(user) if user else None
     finally:
         conn.close()
@@ -597,8 +570,9 @@ def consume_oauth_state(plaintext: str, path: Path | None = None) -> dict[str, A
 # ---------------------------------------------------------------------------
 
 
-def create_reconnect_token(user_id: int, expires_at: str | None = None,
-                           path: Path | None = None) -> tuple[dict[str, Any], str]:
+def create_reconnect_token(
+    user_id: int, expires_at: str | None = None, path: Path | None = None
+) -> tuple[dict[str, Any], str]:
     """Crée un token de reconnexion lié à ``user_id``. Retourne (row, token_clair)."""
     conn = _connect(path)
     try:
@@ -639,8 +613,7 @@ def consume_reconnect_token(plaintext: str, path: Path | None = None) -> dict[st
     conn = _connect(path)
     try:
         row = conn.execute(
-            "SELECT id, user_id, expires_at, used_at FROM reconnect_tokens "
-            "WHERE token_hash = ?",
+            "SELECT id, user_id, expires_at, used_at FROM reconnect_tokens WHERE token_hash = ?",
             (token_hash,),
         ).fetchone()
         if row is None or row["used_at"] is not None:
@@ -652,9 +625,7 @@ def consume_reconnect_token(plaintext: str, path: Path | None = None) -> dict[st
             (_now(), row["id"]),
         )
         conn.commit()
-        user = conn.execute(
-            "SELECT * FROM users WHERE id = ?", (row["user_id"],)
-        ).fetchone()
+        user = conn.execute("SELECT * FROM users WHERE id = ?", (row["user_id"],)).fetchone()
         return _user_dict(user) if user else None
     finally:
         conn.close()
@@ -664,8 +635,8 @@ def consume_reconnect_token(plaintext: str, path: Path | None = None) -> dict[st
 # Relations coach ↔ athlète
 # ---------------------------------------------------------------------------
 
-def link_coach_athlete(coach_id: int, athlete_id: int,
-                       path: Path | None = None) -> None:
+
+def link_coach_athlete(coach_id: int, athlete_id: int, path: Path | None = None) -> None:
     conn = _connect(path)
     try:
         conn.execute(
@@ -678,8 +649,7 @@ def link_coach_athlete(coach_id: int, athlete_id: int,
         conn.close()
 
 
-def list_athletes_for_coach(coach_id: int,
-                            path: Path | None = None) -> list[dict[str, Any]]:
+def list_athletes_for_coach(coach_id: int, path: Path | None = None) -> list[dict[str, Any]]:
     conn = _connect(path)
     try:
         rows = conn.execute(

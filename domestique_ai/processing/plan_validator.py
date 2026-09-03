@@ -87,9 +87,7 @@ def _high_intensity_seconds(workout: Workout) -> int:
 
 def _active_seconds(workout: Workout) -> int:
     """Temps actif (hors phases ``rest``)."""
-    return sum(
-        step.duration_sec for step in workout.structure if step.phase != "rest"
-    )
+    return sum(step.duration_sec for step in workout.structure if step.phase != "rest")
 
 
 def _rebuild_workout(
@@ -108,9 +106,7 @@ def _rebuild_workout(
     new_duration_min = max(20, new_duration_min)
     return Workout(
         date=workout.date,
-        name=_name_for(
-            new_kind, new_duration_min, week_idx, is_taper, is_recovery_week
-        ),
+        name=_name_for(new_kind, new_duration_min, week_idx, is_taper, is_recovery_week),
         sport=workout.sport,
         kind=new_kind,
         duration_min=new_duration_min,
@@ -135,15 +131,12 @@ def _enforce_availability(
         weekday = _dt.date.fromisoformat(w.date).weekday()
         day = allowed.get(weekday)
         if day is None:
-            adjustments.append(
-                f"{w.date} : séance retirée (jour hors disponibilité)"
-            )
+            adjustments.append(f"{w.date} : séance retirée (jour hors disponibilité)")
             continue
         if w.duration_min > day.max_duration_min:
             new_min = max(20, day.max_duration_min)
             adjustments.append(
-                f"{w.date} : durée plafonnée à {new_min} min "
-                f"(dispo = {day.max_duration_min})"
+                f"{w.date} : durée plafonnée à {new_min} min (dispo = {day.max_duration_min})"
             )
             week_idx = _weeks_since_plan_start(w.date, week[0].date)
             out.append(_rebuild_workout(w, w.kind, new_min, week_idx))
@@ -201,12 +194,8 @@ def _enforce_polarization(
     new_week = list(week)
     for idx, candidate in candidates:
         if candidate.kind == "intervals":
-            new_week[idx] = _rebuild_workout(
-                candidate, "tempo", candidate.duration_min, week_idx
-            )
-            adjustments.append(
-                f"{candidate.date} : intervals → tempo (polarisation 80/20)"
-            )
+            new_week[idx] = _rebuild_workout(candidate, "tempo", candidate.duration_min, week_idx)
+            adjustments.append(f"{candidate.date} : intervals → tempo (polarisation 80/20)")
             high = sum(_high_intensity_seconds(w) for w in new_week)
             active = sum(_active_seconds(w) for w in new_week)
             if active == 0 or high / active <= _MAX_HIGH_INTENSITY_SHARE:
@@ -239,12 +228,9 @@ def _enforce_tss_cap(
         new_min = max(45, int(candidate.duration_min - excess_min))
         if new_min == candidate.duration_min:
             continue
-        new_week[idx] = _rebuild_workout(
-            candidate, "endurance", new_min, week_idx
-        )
+        new_week[idx] = _rebuild_workout(candidate, "endurance", new_min, week_idx)
         adjustments.append(
-            f"{candidate.date} : endurance raccourcie à {new_min} min "
-            f"(plafond TSS hebdo)"
+            f"{candidate.date} : endurance raccourcie à {new_min} min (plafond TSS hebdo)"
         )
         total = sum(w.estimated_tss for w in new_week)
         if total <= cap:
@@ -320,10 +306,7 @@ def weekly_high_intensity_share(plan: list[Workout]) -> dict[tuple[int, int], fl
         k = _iso_week_key(w.date)
         high[k] += _high_intensity_seconds(w)
         active[k] += _active_seconds(w)
-    return {
-        k: (high[k] / active[k] if active[k] > 0 else 0.0)
-        for k in active
-    }
+    return {k: (high[k] / active[k] if active[k] > 0 else 0.0) for k in active}
 
 
 def expected_default_duration(kind: str) -> int:

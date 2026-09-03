@@ -20,10 +20,8 @@ def test_append_and_load_roundtrip(tmp_path, monkeypatch):
     session = new_session_id()
 
     append_message(session, "user", {"role": "user", "content": "Hello"})
-    append_message(session, "assistant", {"role": "assistant",
-                                           "content": "Hi", "thinking": "ok"})
-    append_message(session, "tool", {"role": "tool", "name": "ping",
-                                       "content": "pong"})
+    append_message(session, "assistant", {"role": "assistant", "content": "Hi", "thinking": "ok"})
+    append_message(session, "tool", {"role": "tool", "name": "ping", "content": "pong"})
 
     messages = load_session(session)
     assert len(messages) == 3

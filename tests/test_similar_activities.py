@@ -85,9 +85,7 @@ def test_finds_identical_loop_repeated_each_week(db_path: Path, monkeypatch):
     assert result["available"] is True
     assert len(result["matches"]) == 3
     # Tri date descendante.
-    assert [m["date"][:10] for m in result["matches"]] == [
-        "2026-05-22", "2026-05-15", "2026-05-08"
-    ]
+    assert [m["date"][:10] for m in result["matches"]] == ["2026-05-22", "2026-05-15", "2026-05-08"]
 
 
 def test_matches_within_5pct_distance_tolerance(db_path: Path, monkeypatch):
@@ -95,13 +93,19 @@ def test_matches_within_5pct_distance_tolerance(db_path: Path, monkeypatch):
     _save(db_path, 1, distance_m=50_000, elevation_m=500)
     # +4 % en distance → dans la tolérance.
     _save(
-        db_path, 2, date="2026-05-08T08:00:00Z",
-        distance_m=52_000, elevation_m=500,
+        db_path,
+        2,
+        date="2026-05-08T08:00:00Z",
+        distance_m=52_000,
+        elevation_m=500,
     )
     # +8 % en distance → hors tolérance.
     _save(
-        db_path, 3, date="2026-05-15T08:00:00Z",
-        distance_m=54_000, elevation_m=500,
+        db_path,
+        3,
+        date="2026-05-15T08:00:00Z",
+        distance_m=54_000,
+        elevation_m=500,
     )
     result = find_similar_activities(1, db_path=db_path)
     ids = [m["strava_id"] for m in result["matches"]]
@@ -114,13 +118,19 @@ def test_matches_within_10pct_elevation_tolerance(db_path: Path, monkeypatch):
     _save(db_path, 1, distance_m=50_000, elevation_m=500)
     # +8 % en dénivelé → dans la tolérance.
     _save(
-        db_path, 2, date="2026-05-08T08:00:00Z",
-        distance_m=50_000, elevation_m=540,
+        db_path,
+        2,
+        date="2026-05-08T08:00:00Z",
+        distance_m=50_000,
+        elevation_m=540,
     )
     # +20 % en dénivelé → hors tolérance.
     _save(
-        db_path, 3, date="2026-05-15T08:00:00Z",
-        distance_m=50_000, elevation_m=600,
+        db_path,
+        3,
+        date="2026-05-15T08:00:00Z",
+        distance_m=50_000,
+        elevation_m=600,
     )
     result = find_similar_activities(1, db_path=db_path)
     ids = [m["strava_id"] for m in result["matches"]]
@@ -136,8 +146,11 @@ def test_does_not_match_indoor_with_outdoor(db_path: Path, monkeypatch):
     monkeypatch.delenv("STRAVA_HR_REST", raising=False)
     _save(db_path, 1, distance_m=50_000, elevation_m=500, sport_type="Ride")
     _save(
-        db_path, 2, date="2026-05-08T08:00:00Z",
-        distance_m=50_000, elevation_m=500,
+        db_path,
+        2,
+        date="2026-05-08T08:00:00Z",
+        distance_m=50_000,
+        elevation_m=500,
         sport_type="VirtualRide",
     )
     result = find_similar_activities(1, db_path=db_path)
@@ -149,13 +162,19 @@ def test_matches_within_same_outdoor_bucket(db_path: Path, monkeypatch):
     monkeypatch.delenv("STRAVA_HR_REST", raising=False)
     _save(db_path, 1, distance_m=50_000, elevation_m=500, sport_type="Ride")
     _save(
-        db_path, 2, date="2026-05-08T08:00:00Z",
-        distance_m=51_000, elevation_m=510,
+        db_path,
+        2,
+        date="2026-05-08T08:00:00Z",
+        distance_m=51_000,
+        elevation_m=510,
         sport_type="GravelRide",
     )
     _save(
-        db_path, 3, date="2026-05-15T08:00:00Z",
-        distance_m=49_000, elevation_m=490,
+        db_path,
+        3,
+        date="2026-05-15T08:00:00Z",
+        distance_m=49_000,
+        elevation_m=490,
         sport_type="MountainBikeRide",
     )
     result = find_similar_activities(1, db_path=db_path)
@@ -168,12 +187,18 @@ def test_matches_within_indoor_bucket(db_path: Path, monkeypatch):
     """Deux séances home trainer comparables doivent matcher."""
     monkeypatch.delenv("STRAVA_HR_REST", raising=False)
     _save(
-        db_path, 1, distance_m=30_000, elevation_m=0,
+        db_path,
+        1,
+        distance_m=30_000,
+        elevation_m=0,
         sport_type="VirtualRide",
     )
     _save(
-        db_path, 2, date="2026-05-08T08:00:00Z",
-        distance_m=31_000, elevation_m=0,
+        db_path,
+        2,
+        date="2026-05-08T08:00:00Z",
+        distance_m=31_000,
+        elevation_m=0,
         sport_type="VirtualRide",
     )
     result = find_similar_activities(1, db_path=db_path)
@@ -185,8 +210,12 @@ def test_other_sport_does_not_match(db_path: Path, monkeypatch):
     monkeypatch.delenv("STRAVA_HR_REST", raising=False)
     _save(db_path, 1, distance_m=50_000, elevation_m=500, sport_type="Ride")
     _save(
-        db_path, 2, date="2026-05-08T08:00:00Z",
-        distance_m=50_000, elevation_m=500, sport_type="Run",
+        db_path,
+        2,
+        date="2026-05-08T08:00:00Z",
+        distance_m=50_000,
+        elevation_m=500,
+        sport_type="Run",
     )
     result = find_similar_activities(1, db_path=db_path)
     assert all(m["strava_id"] != 2 for m in result["matches"])
@@ -197,13 +226,25 @@ def test_other_sport_does_not_match(db_path: Path, monkeypatch):
 
 def test_delta_pct_computed_relative_to_reference(db_path: Path, monkeypatch):
     monkeypatch.delenv("STRAVA_HR_REST", raising=False)
-    _save(db_path, 1, distance_m=50_000, elevation_m=500, training_load=80.0,
-          avg_power=200.0, duration_sec=7200)
+    _save(
+        db_path,
+        1,
+        distance_m=50_000,
+        elevation_m=500,
+        training_load=80.0,
+        avg_power=200.0,
+        duration_sec=7200,
+    )
     # +10 % TSS, +5 % power, -10 % durée.
     _save(
-        db_path, 2, date="2026-05-08T08:00:00Z",
-        distance_m=50_000, elevation_m=500, training_load=88.0,
-        avg_power=210.0, duration_sec=6480,
+        db_path,
+        2,
+        date="2026-05-08T08:00:00Z",
+        distance_m=50_000,
+        elevation_m=500,
+        training_load=88.0,
+        avg_power=210.0,
+        duration_sec=6480,
     )
     result = find_similar_activities(1, db_path=db_path)
     match = next(m for m in result["matches"] if m["strava_id"] == 2)
@@ -216,8 +257,12 @@ def test_delta_pct_returns_none_when_reference_has_no_power(db_path: Path, monke
     monkeypatch.delenv("STRAVA_HR_REST", raising=False)
     _save(db_path, 1, distance_m=50_000, elevation_m=500, avg_power=None)
     _save(
-        db_path, 2, date="2026-05-08T08:00:00Z",
-        distance_m=50_000, elevation_m=500, avg_power=200.0,
+        db_path,
+        2,
+        date="2026-05-08T08:00:00Z",
+        distance_m=50_000,
+        elevation_m=500,
+        avg_power=200.0,
     )
     result = find_similar_activities(1, db_path=db_path)
     match = next(m for m in result["matches"] if m["strava_id"] == 2)
@@ -233,8 +278,11 @@ def test_results_sorted_by_date_desc(db_path: Path, monkeypatch):
     _save(db_path, 1, date="2026-07-01T08:00:00Z", distance_m=50_000, elevation_m=500)
     for i, date in enumerate(dates):
         _save(
-            db_path, 100 + i, date=f"{date}T08:00:00Z",
-            distance_m=50_000, elevation_m=500,
+            db_path,
+            100 + i,
+            date=f"{date}T08:00:00Z",
+            distance_m=50_000,
+            elevation_m=500,
         )
     result = find_similar_activities(1, db_path=db_path)
     dates_returned = [m["date"][:10] for m in result["matches"]]
@@ -246,8 +294,11 @@ def test_limit_caps_result_size(db_path: Path, monkeypatch):
     _save(db_path, 1, distance_m=50_000, elevation_m=500)
     for i in range(15):
         _save(
-            db_path, 100 + i, date=f"2026-05-{(i % 28) + 1:02d}T08:00:00Z",
-            distance_m=50_000, elevation_m=500,
+            db_path,
+            100 + i,
+            date=f"2026-05-{(i % 28) + 1:02d}T08:00:00Z",
+            distance_m=50_000,
+            elevation_m=500,
         )
     result = find_similar_activities(1, limit=5, db_path=db_path)
     assert len(result["matches"]) == 5
@@ -261,8 +312,11 @@ def test_no_similar_activity_returns_empty_list(db_path: Path, monkeypatch):
     _save(db_path, 1, distance_m=50_000, elevation_m=500)
     # Une activité avec un profil très différent.
     _save(
-        db_path, 2, date="2026-05-08T08:00:00Z",
-        distance_m=120_000, elevation_m=2000,
+        db_path,
+        2,
+        date="2026-05-08T08:00:00Z",
+        distance_m=120_000,
+        elevation_m=2000,
     )
     result = find_similar_activities(1, db_path=db_path)
     assert result["available"] is True
@@ -282,8 +336,7 @@ def test_index_on_distance_is_created(db_path: Path):
         names = {
             row[0]
             for row in conn.execute(
-                "SELECT name FROM sqlite_master "
-                "WHERE type = 'index' AND tbl_name = 'activities'"
+                "SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = 'activities'"
             )
         }
     finally:

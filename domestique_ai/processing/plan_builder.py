@@ -32,10 +32,10 @@ from domestique_ai.processing.analyzer import HR_ZONE_KEYS
 # que le plan tombe sur des journées cohérentes ; l'utilisateur reste libre de
 # déplacer ses séances dans Garmin.
 _WEEKDAY_PROFILES: dict[int, list[int]] = {
-    2: [2, 6],                 # Mercredi + Dimanche
-    3: [1, 3, 6],              # Mardi, Jeudi, Dimanche
-    4: [0, 2, 4, 6],           # Lundi, Mercredi, Vendredi, Dimanche
-    5: [0, 2, 3, 4, 6],        # + Jeudi (récup intermédiaire)
+    2: [2, 6],  # Mercredi + Dimanche
+    3: [1, 3, 6],  # Mardi, Jeudi, Dimanche
+    4: [0, 2, 4, 6],  # Lundi, Mercredi, Vendredi, Dimanche
+    5: [0, 2, 3, 4, 6],  # + Jeudi (récup intermédiaire)
     6: [0, 1, 2, 4, 5, 6],
     7: [0, 1, 2, 3, 4, 5, 6],
 }
@@ -82,20 +82,20 @@ _TSS_PER_MIN: dict[str, float] = {
 class WorkoutStep:
     """Un step d'une séance (warmup, intervalle, récup, cooldown)."""
 
-    phase: str            # "warmup" | "active" | "rest" | "cooldown"
-    zone: str             # "z1".."z5"
+    phase: str  # "warmup" | "active" | "rest" | "cooldown"
+    zone: str  # "z1".."z5"
     duration_sec: int
-    repeat: int = 1       # nb de répétitions (déjà aplati par défaut, mais utile pour fit.py)
+    repeat: int = 1  # nb de répétitions (déjà aplati par défaut, mais utile pour fit.py)
 
 
 @dataclass
 class Workout:
     """Une séance planifiée."""
 
-    date: str             # ISO YYYY-MM-DD
-    name: str             # ex "Sweetspot 2x20"
-    sport: str            # "cycling"
-    kind: str             # recovery | endurance | tempo | intervals
+    date: str  # ISO YYYY-MM-DD
+    name: str  # ex "Sweetspot 2x20"
+    sport: str  # "cycling"
+    kind: str  # recovery | endurance | tempo | intervals
     duration_min: int
     target_zone: str
     structure: list[WorkoutStep] = field(default_factory=list)
@@ -168,8 +168,9 @@ def _structure_for(kind: str, duration_min: int) -> list[WorkoutStep]:
     return [WorkoutStep(phase="active", zone="z2", duration_sec=total_sec)]
 
 
-def _name_for(kind: str, duration_min: int, week_idx: int, is_taper: bool,
-              is_recovery_week: bool) -> str:
+def _name_for(
+    kind: str, duration_min: int, week_idx: int, is_taper: bool, is_recovery_week: bool
+) -> str:
     if is_taper:
         suffix = " (taper)"
     elif is_recovery_week:
@@ -319,9 +320,7 @@ def _allocate_days(
             selected[d.weekday] = "tempo"
 
     by_weekday = {d.weekday: d for d in days}
-    return [
-        (by_weekday[w], selected[w]) for w in sorted(selected.keys())
-    ]
+    return [(by_weekday[w], selected[w]) for w in sorted(selected.keys())]
 
 
 def _legacy_schedule(
@@ -350,10 +349,7 @@ def _resolve_schedule(
     if availability is None:
         return _legacy_schedule(sessions_per_week)
     allocations = _allocate_days(availability, sessions_per_week)
-    return [
-        (day.weekday, kind, day.max_duration_min, day.context)
-        for day, kind in allocations
-    ]
+    return [(day.weekday, kind, day.max_duration_min, day.context) for day, kind in allocations]
 
 
 def _compose_notes(focus: str | None, context: str | None) -> str:
@@ -461,24 +457,29 @@ def build_training_plan(
                     new_min = max(45, int(w.duration_min * scale))
                     # Le plafond de la dispo s'applique aussi au scaling.
                     day_cap = next(
-                        (cap for wd, _k, cap, _c in schedule
-                         if wd == _dt.date.fromisoformat(w.date).weekday() and cap),
+                        (
+                            cap
+                            for wd, _k, cap, _c in schedule
+                            if wd == _dt.date.fromisoformat(w.date).weekday() and cap
+                        ),
                         None,
                     )
                     if day_cap is not None:
                         new_min = min(new_min, day_cap)
                     new_struct = _structure_for("endurance", new_min)
-                    scaled.append(Workout(
-                        date=w.date,
-                        name=_name_for("endurance", new_min, week_idx, is_taper, is_recovery),
-                        sport=w.sport,
-                        kind=w.kind,
-                        duration_min=new_min,
-                        target_zone=w.target_zone,
-                        structure=new_struct,
-                        estimated_tss=round(_TSS_PER_MIN["endurance"] * new_min, 1),
-                        notes=w.notes,
-                    ))
+                    scaled.append(
+                        Workout(
+                            date=w.date,
+                            name=_name_for("endurance", new_min, week_idx, is_taper, is_recovery),
+                            sport=w.sport,
+                            kind=w.kind,
+                            duration_min=new_min,
+                            target_zone=w.target_zone,
+                            structure=new_struct,
+                            estimated_tss=round(_TSS_PER_MIN["endurance"] * new_min, 1),
+                            notes=w.notes,
+                        )
+                    )
                 else:
                     scaled.append(w)
             sessions_this_week = scaled

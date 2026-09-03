@@ -37,14 +37,13 @@ class PrescriptionError(ValueError):
 
 def _connect(db_path: Path | None = None) -> sqlite3.Connection:
     from domestique_ai.ingestion.strava import init_db
+
     path = Path(db_path) if db_path else get_db_path()
     init_db(path)
     return sqlite3.connect(path)
 
 
-def workout_from_choice(
-    date: str, kind: str, duration_min: int, notes: str = ""
-) -> Workout:
+def workout_from_choice(date: str, kind: str, duration_min: int, notes: str = "") -> Workout:
     """Reconstruit un ``Workout`` complet depuis les choix de haut niveau du coach.
 
     Réutilise les helpers du builder déterministe (``_structure_for``,
@@ -53,15 +52,11 @@ def workout_from_choice(
     produire de structure aberrante.
     """
     if kind not in _VALID_KINDS:
-        raise PrescriptionError(
-            f"kind invalide: {kind!r}. Attendu l'un de {_VALID_KINDS}."
-        )
+        raise PrescriptionError(f"kind invalide: {kind!r}. Attendu l'un de {_VALID_KINDS}.")
     try:
         _dt.date.fromisoformat(date)
     except (TypeError, ValueError) as exc:
-        raise PrescriptionError(
-            f"date invalide: {date!r}. Format attendu YYYY-MM-DD."
-        ) from exc
+        raise PrescriptionError(f"date invalide: {date!r}. Format attendu YYYY-MM-DD.") from exc
     duration = max(_MIN_DURATION, int(duration_min))
     return Workout(
         date=date,
@@ -102,8 +97,7 @@ def save_prescription(
     conn = _connect(db_path)
     try:
         cursor = conn.execute(
-            "INSERT INTO prescriptions (date, created_at, created_by, payload) "
-            "VALUES (?, ?, ?, ?)",
+            "INSERT INTO prescriptions (date, created_at, created_by, payload) VALUES (?, ?, ?, ?)",
             (date, created_at, created_by, payload),
         )
         conn.commit()
@@ -141,15 +135,12 @@ def list_prescriptions(
     return [_row_to_dict(r) for r in rows]
 
 
-def get_prescription_for_date(
-    date: str, db_path: Path | None = None
-) -> Workout | None:
+def get_prescription_for_date(date: str, db_path: Path | None = None) -> Workout | None:
     """Séance prescrite pour ``date`` (la plus récente si plusieurs), ou None."""
     conn = _connect(db_path)
     try:
         row = conn.execute(
-            "SELECT payload FROM prescriptions WHERE date = ? "
-            "ORDER BY id DESC LIMIT 1",
+            "SELECT payload FROM prescriptions WHERE date = ? ORDER BY id DESC LIMIT 1",
             (date,),
         ).fetchone()
     finally:

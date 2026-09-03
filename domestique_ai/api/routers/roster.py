@@ -145,9 +145,7 @@ def create_reconnect_link(
     précédente est révoquée et le lien d'invitation est déjà consommé).
     """
     target, _ctx = _athlete_ctx(public_id, coach)
-    expires_at = (
-        dt.datetime.now(dt.UTC) + dt.timedelta(minutes=_RECONNECT_TTL_MIN)
-    ).isoformat()
+    expires_at = (dt.datetime.now(dt.UTC) + dt.timedelta(minutes=_RECONNECT_TTL_MIN)).isoformat()
     _row, token = create_reconnect_token(target["id"], expires_at=expires_at)
     base = get_app_base_url()
     log.info(

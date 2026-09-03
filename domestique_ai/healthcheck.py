@@ -53,8 +53,6 @@ def ping_healthcheck() -> bool:
         )
         return False
     if response.status_code >= 400:
-        log.warning(
-            "Healthcheck ping : réponse non-2xx (%d)", response.status_code
-        )
+        log.warning("Healthcheck ping : réponse non-2xx (%d)", response.status_code)
         return False
     return True

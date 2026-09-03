@@ -106,23 +106,35 @@ def test_get_trends_returns_empty_payload_when_no_db(tmp_path):
 
 def test_get_trends_aggregates_monthly_volumes(tmp_path):
     db = tmp_path / "trends.db"
-    _seed_activities(db, [
-        {
-            "strava_id": 1, "date": "2026-05-10T08:00:00Z",
-            "distance": 50_000, "elevation_gain": 600,
-            "duration": 7200, "training_load": 80.0,
-        },
-        {
-            "strava_id": 2, "date": "2026-05-15T08:00:00Z",
-            "distance": 30_000, "elevation_gain": 200,
-            "duration": 3600, "training_load": 50.0,
-        },
-        {
-            "strava_id": 3, "date": "2026-04-20T08:00:00Z",
-            "distance": 40_000, "elevation_gain": 400,
-            "duration": 5400, "training_load": 60.0,
-        },
-    ])
+    _seed_activities(
+        db,
+        [
+            {
+                "strava_id": 1,
+                "date": "2026-05-10T08:00:00Z",
+                "distance": 50_000,
+                "elevation_gain": 600,
+                "duration": 7200,
+                "training_load": 80.0,
+            },
+            {
+                "strava_id": 2,
+                "date": "2026-05-15T08:00:00Z",
+                "distance": 30_000,
+                "elevation_gain": 200,
+                "duration": 3600,
+                "training_load": 50.0,
+            },
+            {
+                "strava_id": 3,
+                "date": "2026-04-20T08:00:00Z",
+                "distance": 40_000,
+                "elevation_gain": 400,
+                "duration": 5400,
+                "training_load": 60.0,
+            },
+        ],
+    )
 
     result = get_trends("3m", db_path=db, today=dt.date(2026, 5, 21))
     by_month = {entry["month"]: entry for entry in result["monthly"]}
@@ -139,18 +151,25 @@ def test_get_trends_aggregates_monthly_volumes(tmp_path):
 
 def test_get_trends_n1_comparison_when_available(tmp_path):
     db = tmp_path / "trends_n1.db"
-    _seed_activities(db, [
-        # Année courante : mai 2026
-        {
-            "strava_id": 1, "date": "2026-05-10T08:00:00Z",
-            "distance": 50_000, "training_load": 80.0,
-        },
-        # Année N-1 : mai 2025 — doit apparaître en distance_km_n1.
-        {
-            "strava_id": 100, "date": "2025-05-10T08:00:00Z",
-            "distance": 30_000, "training_load": 50.0,
-        },
-    ])
+    _seed_activities(
+        db,
+        [
+            # Année courante : mai 2026
+            {
+                "strava_id": 1,
+                "date": "2026-05-10T08:00:00Z",
+                "distance": 50_000,
+                "training_load": 80.0,
+            },
+            # Année N-1 : mai 2025 — doit apparaître en distance_km_n1.
+            {
+                "strava_id": 100,
+                "date": "2025-05-10T08:00:00Z",
+                "distance": 30_000,
+                "training_load": 50.0,
+            },
+        ],
+    )
 
     result = get_trends("all", db_path=db, today=dt.date(2026, 5, 21))
     by_month = {entry["month"]: entry for entry in result["monthly"]}
@@ -161,20 +180,31 @@ def test_get_trends_n1_comparison_when_available(tmp_path):
 
 def test_get_trends_zones_distribution_pct(tmp_path):
     db = tmp_path / "trends_zones.db"
-    _seed_activities(db, [
-        {
-            "strava_id": 1, "date": "2026-05-10T08:00:00Z",
-            "training_load": 100.0,
-            "hr_z1_time": 0.0, "hr_z2_time": 3000.0,
-            "hr_z3_time": 600.0, "hr_z4_time": 0.0, "hr_z5_time": 0.0,
-        },
-        {
-            "strava_id": 2, "date": "2026-05-15T08:00:00Z",
-            "training_load": 50.0,
-            "hr_z1_time": 0.0, "hr_z2_time": 0.0,
-            "hr_z3_time": 0.0, "hr_z4_time": 300.0, "hr_z5_time": 100.0,
-        },
-    ])
+    _seed_activities(
+        db,
+        [
+            {
+                "strava_id": 1,
+                "date": "2026-05-10T08:00:00Z",
+                "training_load": 100.0,
+                "hr_z1_time": 0.0,
+                "hr_z2_time": 3000.0,
+                "hr_z3_time": 600.0,
+                "hr_z4_time": 0.0,
+                "hr_z5_time": 0.0,
+            },
+            {
+                "strava_id": 2,
+                "date": "2026-05-15T08:00:00Z",
+                "training_load": 50.0,
+                "hr_z1_time": 0.0,
+                "hr_z2_time": 0.0,
+                "hr_z3_time": 0.0,
+                "hr_z4_time": 300.0,
+                "hr_z5_time": 100.0,
+            },
+        ],
+    )
 
     result = get_trends("3m", db_path=db, today=dt.date(2026, 5, 21))
     may = next(e for e in result["monthly"] if e["month"] == "2026-05")
@@ -187,13 +217,17 @@ def test_get_trends_zones_distribution_pct(tmp_path):
 
 def test_get_trends_zones_none_when_not_ventilated(tmp_path):
     db = tmp_path / "trends_no_zones.db"
-    _seed_activities(db, [
-        {
-            "strava_id": 1, "date": "2026-05-10T08:00:00Z",
-            "training_load": 80.0,
-            # Toutes les zones HR à None : activité non ventilée.
-        },
-    ])
+    _seed_activities(
+        db,
+        [
+            {
+                "strava_id": 1,
+                "date": "2026-05-10T08:00:00Z",
+                "training_load": 80.0,
+                # Toutes les zones HR à None : activité non ventilée.
+            },
+        ],
+    )
 
     result = get_trends("3m", db_path=db, today=dt.date(2026, 5, 21))
     may = next(e for e in result["monthly"] if e["month"] == "2026-05")
@@ -204,16 +238,21 @@ def test_get_trends_zones_none_when_not_ventilated(tmp_path):
 def test_get_trends_resolution_per_period(tmp_path):
     db = tmp_path / "trends_res.db"
     # Une activité ancienne pour qu'il y ait de l'historique CTL.
-    _seed_activities(db, [
-        {
-            "strava_id": 1, "date": "2025-05-15T08:00:00Z",
-            "training_load": 80.0,
-        },
-        {
-            "strava_id": 2, "date": "2026-05-15T08:00:00Z",
-            "training_load": 80.0,
-        },
-    ])
+    _seed_activities(
+        db,
+        [
+            {
+                "strava_id": 1,
+                "date": "2025-05-15T08:00:00Z",
+                "training_load": 80.0,
+            },
+            {
+                "strava_id": 2,
+                "date": "2026-05-15T08:00:00Z",
+                "training_load": 80.0,
+            },
+        ],
+    )
 
     today = dt.date(2026, 5, 21)
     assert get_trends("3m", db_path=db, today=today)["resolution"] == "day"
@@ -251,9 +290,7 @@ def test_ftp_projection_no_activities_yields_low_confidence(tmp_path, monkeypatc
     assert result["projected_ftp"] is None  # pas de delta → pas de projection
 
 
-def test_ftp_projection_positive_ctl_progression_yields_positive_delta(
-    tmp_path, monkeypatch
-):
+def test_ftp_projection_positive_ctl_progression_yields_positive_delta(tmp_path, monkeypatch):
     """CTL en hausse sur 28 j → ``delta_pct`` positif, plafonné à +5 %."""
     monkeypatch.setenv("STRAVA_FTP", "250")
     monkeypatch.setenv("DOMESTIQUE_AI_PROFILE_PATH", str(tmp_path / "no_profile.yaml"))
@@ -263,12 +300,14 @@ def test_ftp_projection_positive_ctl_progression_yields_positive_delta(
     rows = []
     base_date = dt.date(2026, 3, 23)  # ~60 jours avant 2026-05-21
     for i in range(60):
-        rows.append({
-            "strava_id": 1000 + i,
-            "date": f"{(base_date + dt.timedelta(days=i)).isoformat()}T08:00:00Z",
-            # Plus chargé sur la fin de période → CTL accélère.
-            "training_load": 50.0 if i < 30 else 100.0,
-        })
+        rows.append(
+            {
+                "strava_id": 1000 + i,
+                "date": f"{(base_date + dt.timedelta(days=i)).isoformat()}T08:00:00Z",
+                # Plus chargé sur la fin de période → CTL accélère.
+                "training_load": 50.0 if i < 30 else 100.0,
+            }
+        )
     _seed_activities(db, rows)
 
     result = get_ftp_projection(db_path=db, today=dt.date(2026, 5, 21))
@@ -291,11 +330,13 @@ def test_ftp_projection_delta_pct_clamped_to_minus_5(tmp_path, monkeypatch):
     # (≥ -25, soit gain_pct = -5).
     rows = []
     for i in range(30):
-        rows.append({
-            "strava_id": 2000 + i,
-            "date": f"{(dt.date(2026, 3, 1) + dt.timedelta(days=i)).isoformat()}T08:00:00Z",
-            "training_load": 200.0,
-        })
+        rows.append(
+            {
+                "strava_id": 2000 + i,
+                "date": f"{(dt.date(2026, 3, 1) + dt.timedelta(days=i)).isoformat()}T08:00:00Z",
+                "training_load": 200.0,
+            }
+        )
     _seed_activities(db, rows)
 
     result = get_ftp_projection(db_path=db, today=dt.date(2026, 5, 21))

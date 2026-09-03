@@ -45,9 +45,7 @@ def _read_positive_int(env_name: str, default: int) -> int:
 
 
 def _auto_sync_interval_minutes() -> int:
-    return _read_positive_int(
-        "DOMESTIQUE_AI_AUTO_SYNC_MINUTES", _DEFAULT_INTERVAL_MIN
-    )
+    return _read_positive_int("DOMESTIQUE_AI_AUTO_SYNC_MINUTES", _DEFAULT_INTERVAL_MIN)
 
 
 def _first_run_delay_minutes() -> int:
@@ -97,9 +95,7 @@ def _auto_sync_job() -> None:
 
 
 def _healthcheck_interval_minutes() -> int:
-    return _read_positive_int(
-        "HEALTHCHECKS_PING_INTERVAL_MIN", _DEFAULT_HEALTHCHECK_INTERVAL_MIN
-    )
+    return _read_positive_int("HEALTHCHECKS_PING_INTERVAL_MIN", _DEFAULT_HEALTHCHECK_INTERVAL_MIN)
 
 
 def _healthcheck_ping_job() -> None:
@@ -133,9 +129,7 @@ def start_scheduler() -> None:
 
     if not sync_enabled and not hc_enabled:
         if interval == 0:
-            log.info(
-                "Auto-sync Strava désactivé (DOMESTIQUE_AI_AUTO_SYNC_MINUTES=0)."
-            )
+            log.info("Auto-sync Strava désactivé (DOMESTIQUE_AI_AUTO_SYNC_MINUTES=0).")
         if not hc_url_configured:
             log.info("Healthchecks ping désactivé (HEALTHCHECKS_PING_URL absent).")
         return
@@ -151,8 +145,7 @@ def start_scheduler() -> None:
             id="strava_auto_sync",
             coalesce=True,
             max_instances=1,
-            next_run_time=dt.datetime.now(dt.UTC)
-            + dt.timedelta(minutes=delay),
+            next_run_time=dt.datetime.now(dt.UTC) + dt.timedelta(minutes=delay),
         )
         log.info(
             "Scheduler : sync Strava toutes les %d min (1er run dans %d min).",
@@ -160,9 +153,7 @@ def start_scheduler() -> None:
             delay,
         )
     else:
-        log.info(
-            "Auto-sync Strava désactivé (DOMESTIQUE_AI_AUTO_SYNC_MINUTES=0)."
-        )
+        log.info("Auto-sync Strava désactivé (DOMESTIQUE_AI_AUTO_SYNC_MINUTES=0).")
 
     if hc_enabled:
         # 1er ping immédiat (au démarrage) pour confirmer à Healthchecks.io
@@ -176,9 +167,7 @@ def start_scheduler() -> None:
             max_instances=1,
             next_run_time=dt.datetime.now(dt.UTC),
         )
-        log.info(
-            "Scheduler : ping Healthchecks.io toutes les %d min.", hc_interval
-        )
+        log.info("Scheduler : ping Healthchecks.io toutes les %d min.", hc_interval)
     elif not hc_url_configured:
         log.info("Healthchecks ping désactivé (HEALTHCHECKS_PING_URL absent).")
 

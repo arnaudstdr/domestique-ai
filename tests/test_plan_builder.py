@@ -16,7 +16,9 @@ from domestique_ai.processing.plan_builder import (
 )
 
 
-def _user_availability(long_pref: int | None = None, intervals_pref: int | None = None) -> Availability:
+def _user_availability(
+    long_pref: int | None = None, intervals_pref: int | None = None
+) -> Availability:
     """Cas utilisateur : mer/jeu HT 90 min + sam/dim outdoor 240 min."""
     return Availability(
         days=[
@@ -64,7 +66,9 @@ def test_taper_reduces_volume_in_last_two_weeks():
     today = dt.date(2026, 5, 4)
     target = today + dt.timedelta(weeks=8)
     plan = build_training_plan(
-        target_date=target, ctl_current=50.0, sessions_per_week=4,
+        target_date=target,
+        ctl_current=50.0,
+        sessions_per_week=4,
         start_date=today,
     )
     by_week: dict[str, float] = {}
@@ -84,7 +88,9 @@ def test_intervals_swapped_in_recovery_week():
     today = dt.date(2026, 5, 4)
     target = today + dt.timedelta(weeks=6)
     plan = build_training_plan(
-        target_date=target, ctl_current=40.0, sessions_per_week=4,
+        target_date=target,
+        ctl_current=40.0,
+        sessions_per_week=4,
         start_date=today,
     )
     # Vérifie qu'aucune semaine entière n'est composée uniquement d'intervalles.
@@ -103,11 +109,15 @@ def test_progression_is_capped_by_ctl():
     target = today + dt.timedelta(weeks=12)
     # CTL très bas → progression capée.
     plan_low = build_training_plan(
-        target_date=target, ctl_current=10.0, sessions_per_week=4,
+        target_date=target,
+        ctl_current=10.0,
+        sessions_per_week=4,
         start_date=today,
     )
     plan_high = build_training_plan(
-        target_date=target, ctl_current=80.0, sessions_per_week=4,
+        target_date=target,
+        ctl_current=80.0,
+        sessions_per_week=4,
         start_date=today,
     )
     total_low = sum(w.estimated_tss for w in plan_low)
@@ -123,7 +133,9 @@ def test_intensity_share_is_polarized():
     today = dt.date(2026, 5, 4)
     target = today + dt.timedelta(weeks=8)
     plan = build_training_plan(
-        target_date=target, ctl_current=40.0, sessions_per_week=4,
+        target_date=target,
+        ctl_current=40.0,
+        sessions_per_week=4,
         start_date=today,
     )
     high_seconds = 0
@@ -142,7 +154,8 @@ def test_invalid_sessions_per_week_raises():
     with pytest.raises(ValueError):
         build_training_plan(
             target_date=today + dt.timedelta(weeks=4),
-            ctl_current=40.0, sessions_per_week=1,
+            ctl_current=40.0,
+            sessions_per_week=1,
             start_date=today,
         )
 
@@ -151,7 +164,8 @@ def test_workout_roundtrip_via_dict():
     today = dt.date(2026, 5, 4)
     plan = build_training_plan(
         target_date=today + dt.timedelta(weeks=4),
-        ctl_current=40.0, sessions_per_week=3,
+        ctl_current=40.0,
+        sessions_per_week=3,
         start_date=today,
     )
     serialized = [w.to_dict() for w in plan]
@@ -167,7 +181,8 @@ def test_zones_are_all_valid():
     today = dt.date(2026, 5, 4)
     plan = build_training_plan(
         target_date=today + dt.timedelta(weeks=4),
-        ctl_current=40.0, sessions_per_week=4,
+        ctl_current=40.0,
+        sessions_per_week=4,
         start_date=today,
     )
     assert_zones_valid(plan)
@@ -238,7 +253,7 @@ def test_duration_capped_by_max_duration_min():
     )
     plan = build_training_plan(
         target_date=today + dt.timedelta(weeks=8),  # endurance progresserait à >120 sans cap
-        ctl_current=80.0,                            # CTL haut → progression rapide
+        ctl_current=80.0,  # CTL haut → progression rapide
         sessions_per_week=4,
         availability=capped,
         start_date=today,
@@ -338,7 +353,7 @@ def test_availability_with_fewer_days_than_sessions_caps_silently():
     plan = build_training_plan(
         target_date=today + dt.timedelta(weeks=2),
         ctl_current=40.0,
-        sessions_per_week=4,        # > nb jours dispo → on plafonne à 2
+        sessions_per_week=4,  # > nb jours dispo → on plafonne à 2
         availability=only_two,
         start_date=today,
     )

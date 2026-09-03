@@ -111,9 +111,9 @@ def get_profile_path() -> Path:
 
 _profile_cache_lock = threading.Lock()
 _profile_cache: dict[str, object] = {
-    "path": None,        # str | None
-    "mtime_ns": None,    # int | None
-    "profile": None,     # Profile | None
+    "path": None,  # str | None
+    "mtime_ns": None,  # int | None
+    "profile": None,  # Profile | None
 }
 
 
@@ -140,10 +140,7 @@ def _profile_or_none() -> Profile | None:
             mtime_ns = None
 
     with _profile_cache_lock:
-        if (
-            _profile_cache["path"] == path_str
-            and _profile_cache["mtime_ns"] == mtime_ns
-        ):
+        if _profile_cache["path"] == path_str and _profile_cache["mtime_ns"] == mtime_ns:
             return _profile_cache["profile"]  # type: ignore[return-value]
 
         try:
@@ -245,8 +242,7 @@ def get_lthr_pct() -> float:
         return 0.88
     if not (0.5 <= value <= 1.0):
         logger.warning(
-            "STRAVA_LTHR_PCT=%r hors bornes (attendu entre 0.5 et 1.0) — "
-            "fallback à 0.88.",
+            "STRAVA_LTHR_PCT=%r hors bornes (attendu entre 0.5 et 1.0) — fallback à 0.88.",
             raw,
         )
         return 0.88

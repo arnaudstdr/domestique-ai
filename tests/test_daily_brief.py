@@ -29,6 +29,7 @@ def _isolated_cache():
 @pytest.fixture()
 def stable_signals(monkeypatch):
     """Stub ``_collect_signals`` pour rendre les tests déterministes."""
+
     def fake_collect(today, ctx=None):
         return {
             "today": today.isoformat(),
@@ -202,9 +203,7 @@ def test_build_daily_brief_uses_llm_when_available(stable_signals, monkeypatch):
 
 
 def test_build_daily_brief_falls_back_when_llm_returns_none(stable_signals, monkeypatch):
-    monkeypatch.setattr(
-        daily_brief, "_generate_summary_with_llm", lambda signals: None
-    )
+    monkeypatch.setattr(daily_brief, "_generate_summary_with_llm", lambda signals: None)
     brief = build_daily_brief(today=dt.date(2026, 5, 21))
     assert brief["source"] == "fallback"
 

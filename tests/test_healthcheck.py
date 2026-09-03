@@ -100,6 +100,7 @@ def test_ping_returns_true_on_2xx(monkeypatch):
     monkeypatch.setenv("HEALTHCHECKS_PING_URL", "https://hc-ping.com/abc")
 
     for code in (200, 201, 204, 299):
+
         def fake_get(*args, _code=code, **kwargs):
             resp = MagicMock()
             resp.status_code = _code

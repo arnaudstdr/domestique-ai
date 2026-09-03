@@ -36,9 +36,7 @@ def _mk_workout(
         active_sec = total_sec - 600
         structure = [
             WorkoutStep(phase="warmup", zone="z1", duration_sec=300),
-            WorkoutStep(
-                phase="active", zone="z4", duration_sec=high_intensity_sec
-            ),
+            WorkoutStep(phase="active", zone="z4", duration_sec=high_intensity_sec),
             WorkoutStep(
                 phase="active",
                 zone=target_zone,
@@ -49,9 +47,7 @@ def _mk_workout(
     else:
         structure = [
             WorkoutStep(phase="warmup", zone="z1", duration_sec=300),
-            WorkoutStep(
-                phase="active", zone=target_zone, duration_sec=total_sec - 600
-            ),
+            WorkoutStep(phase="active", zone=target_zone, duration_sec=total_sec - 600),
             WorkoutStep(phase="cooldown", zone="z1", duration_sec=300),
         ]
     tss = (
@@ -260,9 +256,7 @@ def test_validator_applies_availability_before_other_rules():
     ]
     # Seul le lundi est dispo → on perd le mardi.
     avail = _mk_availability({0: (180, "outdoor")})
-    out, adjustments = validate_and_correct(
-        plan, ctl_current=100.0, availability=avail
-    )
+    out, adjustments = validate_and_correct(plan, ctl_current=100.0, availability=avail)
     assert len(out) == 1
     assert out[0].date == "2026-05-25"
     assert any("hors disponibilité" in a for a in adjustments)

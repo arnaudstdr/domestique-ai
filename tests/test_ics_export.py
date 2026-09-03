@@ -104,9 +104,7 @@ def test_fold_line_respects_utf8_codepoint_boundaries():
 
 def test_fold_line_preserves_content_after_concatenation():
     """La concaténation des segments doit redonner exactement la ligne d'origine."""
-    long_line = (
-        "Séance d'intervalles à haute intensité avec éléments tempo " * 3
-    )
+    long_line = "Séance d'intervalles à haute intensité avec éléments tempo " * 3
     folded = _fold_line(long_line)
     rebuilt = folded.replace("\r\n ", "")
     assert rebuilt == long_line
@@ -178,9 +176,7 @@ def test_plan_to_ics_uses_stable_uid():
     """L'UID doit dépendre du plan_id et de la date — pas du temps d'export."""
     plan = [_make_workout(date="2026-05-25")]
     a = plan_to_ics(plan, plan_id=7, now=FIXED_NOW).decode("utf-8")
-    b = plan_to_ics(
-        plan, plan_id=7, now=FIXED_NOW + dt.timedelta(hours=1)
-    ).decode("utf-8")
+    b = plan_to_ics(plan, plan_id=7, now=FIXED_NOW + dt.timedelta(hours=1)).decode("utf-8")
     # Les UID restent identiques même si DTSTAMP change → idempotence côté
     # client calendrier (réimport = update, pas duplicat).
     assert "UID:plan-7-2026-05-25@domestique-ai" in a
@@ -211,10 +207,12 @@ def test_plan_to_ics_description_contains_structure_and_tss():
 
 
 def test_plan_to_ics_escapes_special_chars_in_summary_and_notes():
-    plan = [_make_workout(
-        name="Sweetspot 2x20'; bloc principal",
-        notes="Outdoor — vent fort, prudence",
-    )]
+    plan = [
+        _make_workout(
+            name="Sweetspot 2x20'; bloc principal",
+            notes="Outdoor — vent fort, prudence",
+        )
+    ]
     text = plan_to_ics(plan, plan_id=1, now=FIXED_NOW).decode("utf-8")
     # Le ; doit être échappé en \; dans la valeur sérialisée.
     assert "SUMMARY:Sweetspot 2x20'\\; bloc principal" in text
@@ -268,9 +266,7 @@ def test_plan_to_ics_empty_plan_returns_minimal_calendar():
 
 def test_plan_to_ics_custom_default_hour():
     plan = [_make_workout(date="2026-05-25")]
-    text = plan_to_ics(
-        plan, plan_id=1, default_hour=7, now=FIXED_NOW
-    ).decode("utf-8")
+    text = plan_to_ics(plan, plan_id=1, default_hour=7, now=FIXED_NOW).decode("utf-8")
     assert "DTSTART:20260525T070000" in text
     # Pas de fuite de l'ancienne valeur.
     assert "T180000" not in text
@@ -333,7 +329,5 @@ def test_endpoint_returns_404_when_plan_missing(tmp_path, monkeypatch):
 @pytest.mark.parametrize("hour", [6, 12, 18, 21])
 def test_default_hour_param_emits_correct_dtstart(hour: int):
     plan = [_make_workout()]
-    text = plan_to_ics(
-        plan, plan_id=1, default_hour=hour, now=FIXED_NOW
-    ).decode("utf-8")
+    text = plan_to_ics(plan, plan_id=1, default_hour=hour, now=FIXED_NOW).decode("utf-8")
     assert f"T{hour:02d}0000" in text

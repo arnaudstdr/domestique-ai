@@ -77,9 +77,7 @@ def send_pushover(
         payload["device"] = device
 
     try:
-        response = requests.post(
-            _PUSHOVER_URL, data=payload, timeout=_HTTP_TIMEOUT_SEC
-        )
+        response = requests.post(_PUSHOVER_URL, data=payload, timeout=_HTTP_TIMEOUT_SEC)
     except requests.RequestException as exc:
         log.warning("Pushover : échec d'envoi (%s) — %s", type(exc).__name__, exc)
         return False

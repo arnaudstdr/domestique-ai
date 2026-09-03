@@ -57,8 +57,7 @@ def get_load(
     cutoff = dt.date.today() - dt.timedelta(days=max(days, 1))
     filtered = [c for c in curves if c["date"] >= cutoff.isoformat()]
     history = [
-        LoadPoint(date=c["date"], ctl=c["CTL"], atl=c["ATL"], tsb=c["TSB"])
-        for c in filtered
+        LoadPoint(date=c["date"], ctl=c["CTL"], atl=c["ATL"], tsb=c["TSB"]) for c in filtered
     ]
     last = curves[-1]
     zone, label = _zone_from_tsb(last["TSB"])
@@ -158,9 +157,7 @@ def get_ride_volume(
         if not date_str:
             continue
         try:
-            act_date = dt.datetime.fromisoformat(
-                date_str.replace("Z", "+00:00")
-            ).date()
+            act_date = dt.datetime.fromisoformat(date_str.replace("Z", "+00:00")).date()
         except ValueError:
             continue
         distance = float(act.get("distance") or 0)

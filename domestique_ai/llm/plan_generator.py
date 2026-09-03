@@ -84,16 +84,12 @@ class GeneratedWeek:
     adjustments: list[str]
 
 
-def _expand_to_workout(
-    draft: LLMWorkoutDraft, week_index: int, focus: str | None
-) -> Workout:
+def _expand_to_workout(draft: LLMWorkoutDraft, week_index: int, focus: str | None) -> Workout:
     """Construit un ``Workout`` complet à partir des choix de haut niveau du LLM."""
     duration_min = max(20, int(draft.duration_min))
     return Workout(
         date=draft.date,
-        name=_name_for(
-            draft.kind, duration_min, week_index, False, False
-        ),
+        name=_name_for(draft.kind, duration_min, week_index, False, False),
         sport="cycling",
         kind=draft.kind,
         duration_min=duration_min,
@@ -213,17 +209,23 @@ async def _generate_week_with_llm(
     """Tente une génération LLM avec retry. Retourne ``None`` si échec définitif."""
     system = _build_system_prompt()
     user = _build_user_prompt(
-        week_index, total_weeks, dates, objective_type, weeks_to_event,
-        ctl_current, focus, is_taper, is_recovery_week, availability,
+        week_index,
+        total_weeks,
+        dates,
+        objective_type,
+        weeks_to_event,
+        ctl_current,
+        focus,
+        is_taper,
+        is_recovery_week,
+        availability,
     )
     messages = [
         {"role": "system", "content": system},
         {"role": "user", "content": user},
     ]
     for _attempt in range(2):
-        raw = await chat_structured(
-            messages, timeout_s=_GENERATION_TIMEOUT_S
-        )
+        raw = await chat_structured(messages, timeout_s=_GENERATION_TIMEOUT_S)
         if raw is None:
             continue
         try:
@@ -244,10 +246,7 @@ async def _generate_week_with_llm(
             continue
         if not parsed.workouts:
             continue
-        return [
-            _expand_to_workout(draft, week_index, focus)
-            for draft in parsed.workouts
-        ]
+        return [_expand_to_workout(draft, week_index, focus) for draft in parsed.workouts]
     return None
 
 
@@ -280,11 +279,7 @@ def _fallback_week(
         fallback_weeks=max(1, total_weeks - week_index),
     )
     week_end = week_start + _dt.timedelta(days=7)
-    return [
-        w
-        for w in plan
-        if week_start <= _dt.date.fromisoformat(w.date) < week_end
-    ]
+    return [w for w in plan if week_start <= _dt.date.fromisoformat(w.date) < week_end]
 
 
 @dataclass
@@ -333,13 +328,9 @@ async def generate_plan_stream(
             continue
 
         weeks_to_event = (
-            (ctx.target_date - cur_week_start).days // 7
-            if ctx.target_date is not None
-            else None
+            (ctx.target_date - cur_week_start).days // 7 if ctx.target_date is not None else None
         )
-        is_taper = (
-            weeks_to_event is not None and 0 <= weeks_to_event < 2
-        )
+        is_taper = weeks_to_event is not None and 0 <= weeks_to_event < 2
         is_recovery_week = (week_index % 4 == 3) and not is_taper
 
         try:

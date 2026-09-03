@@ -17,4 +17,5 @@ def _isolate_platform_db(tmp_path, monkeypatch):
     # Les tests qui montent `TestClient(app)` sans `with` ne déclenchent pas le
     # lifespan (donc pas l'init plateforme) ; on l'initialise ici pour tous.
     from domestique_ai.platform_db import init_platform_db
+
     init_platform_db()

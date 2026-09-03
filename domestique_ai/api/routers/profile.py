@@ -33,9 +33,7 @@ def _to_schema(model: ProfileModel) -> ProfileSchema:
     )
 
 
-def _hr_relevant_fields_changed(
-    previous: ProfileModel | None, new: ProfileSchema
-) -> bool:
+def _hr_relevant_fields_changed(previous: ProfileModel | None, new: ProfileSchema) -> bool:
     """Vrai si l'un des paramètres qui influencent le hr-TSS a changé.
 
     hr_rest, hr_max, sex et lthr_pct entrent dans le calcul de
@@ -44,9 +42,11 @@ def _hr_relevant_fields_changed(
     """
     if previous is None:
         # Aucun profil avant : si on en pose un avec des valeurs HR, on recalcule.
-        return any(
-            v is not None for v in (new.hr_rest, new.hr_max)
-        ) or new.lthr_pct != 0.88 or new.sex != "M"
+        return (
+            any(v is not None for v in (new.hr_rest, new.hr_max))
+            or new.lthr_pct != 0.88
+            or new.sex != "M"
+        )
     return (
         previous.hr_rest != new.hr_rest
         or previous.hr_max != new.hr_max
@@ -96,9 +96,7 @@ def put_profile(
     invalidate_profile_cache()
 
     if _hr_relevant_fields_changed(previous, payload):
-        log.info(
-            "Profil HR modifié — recalcul training_load lancé en arrière-plan."
-        )
+        log.info("Profil HR modifié — recalcul training_load lancé en arrière-plan.")
         background_tasks.add_task(recalculate_training_loads, ctx=ctx)
 
     return payload

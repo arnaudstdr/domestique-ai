@@ -15,9 +15,7 @@ from domestique_ai.ingestion.strava import init_db
 def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[TestClient]:
     db = tmp_path / "avail_test.db"
     monkeypatch.setenv("DOMESTIQUE_AI_DB_PATH", str(db))
-    monkeypatch.setenv(
-        "DOMESTIQUE_AI_AVAILABILITY_PATH", str(tmp_path / "avail.yaml")
-    )
+    monkeypatch.setenv("DOMESTIQUE_AI_AVAILABILITY_PATH", str(tmp_path / "avail.yaml"))
     init_db(db)
 
     from domestique_ai.api.main import app
@@ -91,7 +89,4 @@ def test_put_availability_orphan_preference_silently_ignored(
     assert r.status_code == 200
     body = r.json()
     # `monday` n'est pas dans `days` → la préférence est filtrée.
-    assert (
-        body["preferences"] is None
-        or body["preferences"]["long_endurance_day"] is None
-    )
+    assert body["preferences"] is None or body["preferences"]["long_endurance_day"] is None

@@ -59,9 +59,7 @@ class ObjectiveError(ValueError):
 def _validate(payload: dict[str, Any]) -> dict[str, Any]:
     obj_type = payload.get("type", "maintenance")
     if obj_type not in VALID_TYPES:
-        raise ObjectiveError(
-            f"type invalide: {obj_type!r}. Attendu: {sorted(VALID_TYPES)}"
-        )
+        raise ObjectiveError(f"type invalide: {obj_type!r}. Attendu: {sorted(VALID_TYPES)}")
     return payload
 
 
@@ -72,14 +70,17 @@ def load_objective(path: Path | None = None) -> Objective | None:
         return None
     raw = yaml.safe_load(target.read_text()) or {}
     if not isinstance(raw, dict):
-        raise ObjectiveError(
-            f"Le fichier {target} doit contenir un dictionnaire YAML."
-        )
+        raise ObjectiveError(f"Le fichier {target} doit contenir un dictionnaire YAML.")
     payload = _validate(raw)
 
     known_fields = {
-        "type", "date", "distance_km", "elevation_m",
-        "target_ftp", "target_avg_hr_zone", "notes",
+        "type",
+        "date",
+        "distance_km",
+        "elevation_m",
+        "target_ftp",
+        "target_avg_hr_zone",
+        "notes",
     }
     extra = {k: v for k, v in payload.items() if k not in known_fields}
     return Objective(
@@ -98,6 +99,5 @@ def save_objective(objective: Objective, path: Path | None = None) -> Path:
     """Sérialise l'objectif au format YAML."""
     target = path or get_objective_path()
     target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_text(yaml.safe_dump(objective.to_dict(), allow_unicode=True,
-                                      sort_keys=False))
+    target.write_text(yaml.safe_dump(objective.to_dict(), allow_unicode=True, sort_keys=False))
     return target

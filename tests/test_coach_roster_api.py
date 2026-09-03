@@ -38,9 +38,15 @@ def _make_app() -> FastAPI:
     app.add_middleware(BearerAuthMiddleware, token=_LEGACY)
     app.include_router(auth_router.router)
     for mod in (
-        metrics_router, activities_router, morning_router,
-        objective_router, profile_router, availability_router,
-        strava_router, coach_router, plan_router,
+        metrics_router,
+        activities_router,
+        morning_router,
+        objective_router,
+        profile_router,
+        availability_router,
+        strava_router,
+        coach_router,
+        plan_router,
     ):
         app.include_router(mod.router)
     return app
@@ -59,13 +65,9 @@ def env(tmp_path: Path, monkeypatch) -> Iterator[dict]:
 
 def _new_athlete(client: TestClient) -> tuple[str, str]:
     """Invite (coach legacy) + accepte un athlète. Retourne (session_token, public_id)."""
-    inv = client.post(
-        "/api/auth/invitations", headers=_bearer(_LEGACY), json={"role": "athlete"}
-    )
+    inv = client.post("/api/auth/invitations", headers=_bearer(_LEGACY), json={"role": "athlete"})
     assert inv.status_code == 200, inv.text
-    acc = client.post(
-        "/api/auth/accept-invite", json={"invite_token": inv.json()["invite_token"]}
-    )
+    acc = client.post("/api/auth/accept-invite", json={"invite_token": inv.json()["invite_token"]})
     assert acc.status_code == 200, acc.text
     session = acc.json()["session_token"]
     me = client.get("/api/auth/me", headers=_bearer(session))
@@ -74,25 +76,21 @@ def _new_athlete(client: TestClient) -> tuple[str, str]:
 
 def _new_coach(client: TestClient) -> str:
     """Invite + accepte un second coach (sans athlètes). Retourne son session_token."""
-    inv = client.post(
-        "/api/auth/invitations", headers=_bearer(_LEGACY), json={"role": "coach"}
-    )
+    inv = client.post("/api/auth/invitations", headers=_bearer(_LEGACY), json={"role": "coach"})
     assert inv.status_code == 200, inv.text
-    acc = client.post(
-        "/api/auth/accept-invite", json={"invite_token": inv.json()["invite_token"]}
-    )
+    acc = client.post("/api/auth/accept-invite", json={"invite_token": inv.json()["invite_token"]})
     assert acc.status_code == 200, acc.text
     return acc.json()["session_token"]
 
 
-def _seed_activity(root: Path, public_id: str, *, strava_id: int,
-                   training_load: float, date_iso: str) -> None:
+def _seed_activity(
+    root: Path, public_id: str, *, strava_id: int, training_load: float, date_iso: str
+) -> None:
     db = root / public_id / "strava_activities.db"
     conn = sqlite3.connect(db)
     try:
         conn.execute(
-            "INSERT INTO activities (strava_id, date, duration, training_load) "
-            "VALUES (?, ?, ?, ?)",
+            "INSERT INTO activities (strava_id, date, duration, training_load) VALUES (?, ?, ?, ?)",
             (strava_id, date_iso, 3600, training_load),
         )
         conn.commit()
@@ -101,6 +99,7 @@ def _seed_activity(root: Path, public_id: str, *, strava_id: int,
 
 
 # --- GET /api/auth/athletes ---------------------------------------------------
+
 
 def test_list_athletes_returns_coach_roster(env):
     c, root = env["client"], env["root"]
@@ -130,6 +129,7 @@ def test_list_athletes_forbidden_for_athlete(env):
 
 # --- Impersonation autorisée --------------------------------------------------
 
+
 def test_impersonation_returns_target_data(env):
     c, root = env["client"], env["root"]
     a_sess, a_pid = _new_athlete(c)
@@ -139,12 +139,8 @@ def test_impersonation_returns_target_data(env):
     _seed_activity(root, b_pid, strava_id=1, training_load=40.0, date_iso=today)
 
     # Le coach (legacy) consulte A puis B : il voit bien LEURS données distinctes.
-    coach_a = c.get(
-        "/api/metrics/load", headers=_bearer(_LEGACY), params={"athlete": a_pid}
-    ).json()
-    coach_b = c.get(
-        "/api/metrics/load", headers=_bearer(_LEGACY), params={"athlete": b_pid}
-    ).json()
+    coach_a = c.get("/api/metrics/load", headers=_bearer(_LEGACY), params={"athlete": a_pid}).json()
+    coach_b = c.get("/api/metrics/load", headers=_bearer(_LEGACY), params={"athlete": b_pid}).json()
     own_a = c.get("/api/metrics/load", headers=_bearer(a_sess)).json()
     own_b = c.get("/api/metrics/load", headers=_bearer(b_sess)).json()
 
@@ -155,21 +151,18 @@ def test_impersonation_returns_target_data(env):
 
 # --- Impersonation refusée ----------------------------------------------------
 
+
 def test_impersonation_out_of_roster_forbidden(env):
     c = env["client"]
     _, a_pid = _new_athlete(c)
     other_coach = _new_coach(c)  # n'a aucun athlète
-    r = c.get(
-        "/api/metrics/load", headers=_bearer(other_coach), params={"athlete": a_pid}
-    )
+    r = c.get("/api/metrics/load", headers=_bearer(other_coach), params={"athlete": a_pid})
     assert r.status_code == 403
 
 
 def test_impersonation_unknown_public_id_forbidden(env):
     c = env["client"]
-    r = c.get(
-        "/api/metrics/load", headers=_bearer(_LEGACY), params={"athlete": "does-not-exist"}
-    )
+    r = c.get("/api/metrics/load", headers=_bearer(_LEGACY), params={"athlete": "does-not-exist"})
     assert r.status_code == 403
 
 
@@ -184,15 +177,26 @@ def test_impersonation_by_non_coach_forbidden(env):
 
 # --- Lecture seule ------------------------------------------------------------
 
+
 def test_impersonation_is_read_only(env):
     c = env["client"]
     _, a_pid = _new_athlete(c)
     # POST et PUT sur un athlète ciblé → 403 (consultation lecture seule).
-    assert c.post(
-        "/api/morning", headers=_bearer(_LEGACY), params={"athlete": a_pid},
-        json={"hrv_ms": 80},
-    ).status_code == 403
-    assert c.put(
-        "/api/profile", headers=_bearer(_LEGACY), params={"athlete": a_pid},
-        json={"ftp": 300, "hr_rest": None, "hr_max": None, "sex": "M", "lthr_pct": 0.88},
-    ).status_code == 403
+    assert (
+        c.post(
+            "/api/morning",
+            headers=_bearer(_LEGACY),
+            params={"athlete": a_pid},
+            json={"hrv_ms": 80},
+        ).status_code
+        == 403
+    )
+    assert (
+        c.put(
+            "/api/profile",
+            headers=_bearer(_LEGACY),
+            params={"athlete": a_pid},
+            json={"ftp": 300, "hr_rest": None, "hr_max": None, "sex": "M", "lthr_pct": 0.88},
+        ).status_code
+        == 403
+    )

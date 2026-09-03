@@ -85,9 +85,7 @@ def test_invitation_unknown_token_raises():
 
 
 def test_invitation_expired_raises():
-    inv, token = pdb.create_invitation(
-        created_by=None, role="athlete", expires_at=_past()
-    )
+    inv, token = pdb.create_invitation(created_by=None, role="athlete", expires_at=_past())
     with pytest.raises(pdb.InvitationError):
         pdb.accept_invitation(token)
 

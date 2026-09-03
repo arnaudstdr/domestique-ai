@@ -67,8 +67,7 @@ def test_monotony_alert_when_constant_load():
     # Charge quasi constante → stdev faible → monotony élevée
     loads = [100.0, 102.0, 98.0, 101.0, 99.0, 100.0, 100.0]
     activities = _activities_n_days(loads)
-    result = compute_monotony_strain(activities, days=7,
-                                     end_date=_last_date(loads))
+    result = compute_monotony_strain(activities, days=7, end_date=_last_date(loads))
     assert result["available"] is True
     assert result["monotony"] > MONOTONY_THRESHOLD
     assert result["alert_monotony"] is True
@@ -78,8 +77,7 @@ def test_monotony_no_alert_when_varied_load():
     # Alternance fort/repos → stdev grand → monotony faible
     loads = [200.0, 0.0, 150.0, 0.0, 100.0, 0.0, 180.0]
     activities = _activities_n_days(loads)
-    result = compute_monotony_strain(activities, days=7,
-                                     end_date=_last_date(loads))
+    result = compute_monotony_strain(activities, days=7, end_date=_last_date(loads))
     assert result["available"] is True
     assert result["alert_monotony"] is False
 
@@ -88,8 +86,7 @@ def test_strain_alert_when_high_volume_and_monotony():
     # Charge élevée presque constante → strain énorme
     loads = [150.0, 152.0, 148.0, 151.0, 149.0, 150.0, 150.0]
     activities = _activities_n_days(loads)
-    result = compute_monotony_strain(activities, days=7,
-                                     end_date=_last_date(loads))
+    result = compute_monotony_strain(activities, days=7, end_date=_last_date(loads))
     assert result["available"] is True
     assert result["strain"] > STRAIN_THRESHOLD
     assert result["alert_strain"] is True
@@ -98,8 +95,7 @@ def test_strain_alert_when_high_volume_and_monotony():
 def test_monotony_unavailable_with_zero_load():
     loads = [0.0] * 7
     activities = _activities_n_days(loads)
-    result = compute_monotony_strain(activities, days=7,
-                                     end_date=_last_date(loads))
+    result = compute_monotony_strain(activities, days=7, end_date=_last_date(loads))
     assert result["available"] is False
 
 
@@ -148,8 +144,7 @@ def test_weekly_jump_ignores_old_activities_when_athlete_stops():
     # Semaines de mars : charge élevée. Aujourd'hui (15 mai) : aucune sortie.
     march_loads = [150.0] * 14
     activities = [
-        _activity((dt.date(2026, 3, 1) + dt.timedelta(days=i)).isoformat(),
-                  load)
+        _activity((dt.date(2026, 3, 1) + dt.timedelta(days=i)).isoformat(), load)
         for i, load in enumerate(march_loads)
     ]
     # Avec end_date=2026-05-15 (today simulé), les 14 derniers jours sont

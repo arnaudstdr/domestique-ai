@@ -40,9 +40,7 @@ def _model_to_schema(model: Availability) -> AvailabilitySchema:
                 else None
             ),
             intervals_day=(
-                _WEEKDAY_BY_INDEX[model.intervals_day]
-                if model.intervals_day is not None
-                else None
+                _WEEKDAY_BY_INDEX[model.intervals_day] if model.intervals_day is not None else None
             ),
         )
     return AvailabilitySchema(days=days, preferences=prefs)
@@ -70,15 +68,11 @@ def _schema_to_model(payload: AvailabilitySchema) -> Availability:
     if payload.preferences is not None:
         known = {d.weekday for d in days}
         if payload.preferences.long_endurance_day:
-            wd = _WEEKDAY_NAMES.get(
-                payload.preferences.long_endurance_day.strip().lower()
-            )
+            wd = _WEEKDAY_NAMES.get(payload.preferences.long_endurance_day.strip().lower())
             if wd in known:
                 long_endurance = wd
         if payload.preferences.intervals_day:
-            wd = _WEEKDAY_NAMES.get(
-                payload.preferences.intervals_day.strip().lower()
-            )
+            wd = _WEEKDAY_NAMES.get(payload.preferences.intervals_day.strip().lower())
             if wd in known:
                 intervals = wd
 

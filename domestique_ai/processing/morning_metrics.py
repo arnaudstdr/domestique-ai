@@ -21,8 +21,7 @@ from typing import Any
 
 from domestique_ai.config import get_db_path
 
-METRIC_COLUMNS = ("hrv_ms", "resting_hr", "sleep_hours",
-                  "sleep_score", "stress_score")
+METRIC_COLUMNS = ("hrv_ms", "resting_hr", "sleep_hours", "sleep_score", "stress_score")
 
 # Sens d'alerte par métrique : -1 = baisse mauvaise (HRV, sommeil),
 # +1 = hausse mauvaise (FC repos, stress).
@@ -55,10 +54,10 @@ def save_morning_entry(
     Retourne True si l'opération a écrit quelque chose, False si tous les
     champs métriques étaient None (pas d'écriture utile).
     """
-    if all(v is None for v in (hrv_ms, resting_hr, sleep_hours,
-                               sleep_score, stress_score, notes)):
+    if all(v is None for v in (hrv_ms, resting_hr, sleep_hours, sleep_score, stress_score, notes)):
         return False
     from domestique_ai.ingestion.strava import init_db
+
     path = Path(db_path) if db_path else get_db_path()
     init_db(path)
     conn = sqlite3.connect(path)
@@ -74,8 +73,7 @@ def save_morning_entry(
             "sleep_score = excluded.sleep_score, "
             "stress_score = excluded.stress_score, "
             "notes = excluded.notes",
-            (date, hrv_ms, resting_hr, sleep_hours,
-             sleep_score, stress_score, notes),
+            (date, hrv_ms, resting_hr, sleep_hours, sleep_score, stress_score, notes),
         )
         conn.commit()
     finally:
@@ -84,10 +82,12 @@ def save_morning_entry(
 
 
 def fetch_morning_entry(
-    date: str, db_path: Path | None = None,
+    date: str,
+    db_path: Path | None = None,
 ) -> dict[str, Any] | None:
     """Charge l'entrée d'une date donnée. None si absente."""
     from domestique_ai.ingestion.strava import init_db
+
     path = Path(db_path) if db_path else get_db_path()
     init_db(path)
     conn = sqlite3.connect(path)
@@ -106,7 +106,8 @@ def fetch_morning_entry(
 
 
 def fetch_morning_history(
-    days: int | None = None, db_path: Path | None = None,
+    days: int | None = None,
+    db_path: Path | None = None,
 ) -> list[dict[str, Any]]:
     """
     Charge l'historique trié par date croissante. Si `days` est fourni,
@@ -114,6 +115,7 @@ def fetch_morning_history(
     la dernière entrée connue).
     """
     from domestique_ai.ingestion.strava import init_db
+
     path = Path(db_path) if db_path else get_db_path()
     init_db(path)
     conn = sqlite3.connect(path)
@@ -198,15 +200,16 @@ def detect_morning_alerts(
         delta = baseline["delta_pct"]
         # delta * direction > 0 = écart dans le sens défavorable
         if delta * direction >= threshold_pct:
-            alerts.append({
-                "metric": metric,
-                "delta_pct": delta,
-                "baseline": baseline["baseline"],
-                "latest": baseline["latest"],
-                "latest_date": baseline["latest_date"],
-                "severity": "critical" if abs(delta) >= 2 * threshold_pct
-                            else "warning",
-            })
+            alerts.append(
+                {
+                    "metric": metric,
+                    "delta_pct": delta,
+                    "baseline": baseline["baseline"],
+                    "latest": baseline["latest"],
+                    "latest_date": baseline["latest_date"],
+                    "severity": "critical" if abs(delta) >= 2 * threshold_pct else "warning",
+                }
+            )
     return alerts
 
 

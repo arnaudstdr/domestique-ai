@@ -43,12 +43,8 @@ def env(tmp_path: Path, monkeypatch) -> Iterator[dict]:
 
 
 def _new_athlete(client: TestClient) -> tuple[str, str]:
-    inv = client.post(
-        "/api/auth/invitations", headers=_bearer(_LEGACY), json={"role": "athlete"}
-    )
-    acc = client.post(
-        "/api/auth/accept-invite", json={"invite_token": inv.json()["invite_token"]}
-    )
+    inv = client.post("/api/auth/invitations", headers=_bearer(_LEGACY), json={"role": "athlete"})
+    acc = client.post("/api/auth/accept-invite", json={"invite_token": inv.json()["invite_token"]})
     session = acc.json()["session_token"]
     pid = client.get("/api/auth/me", headers=_bearer(session)).json()["public_id"]
     return session, pid
@@ -74,9 +70,7 @@ def test_callback_connects_and_writes_tokens(env, monkeypatch):
     sess, pid = _new_athlete(c)
 
     # Avant connexion.
-    assert c.get("/api/strava/connection", headers=_bearer(sess)).json() == {
-        "connected": False
-    }
+    assert c.get("/api/strava/connection", headers=_bearer(sess)).json() == {"connected": False}
 
     # Récupère un state valide via authorize.
     url = c.get("/api/strava/authorize", headers=_bearer(sess)).json()["authorize_url"]
@@ -86,7 +80,9 @@ def test_callback_connects_and_writes_tokens(env, monkeypatch):
         strava_router.StravaClient,
         "exchange_code_for_token",
         lambda *a, **k: {
-            "access_token": "acc", "refresh_token": "ref", "expires_at": 9_999_999_999
+            "access_token": "acc",
+            "refresh_token": "ref",
+            "expires_at": 9_999_999_999,
         },
     )
 
@@ -100,9 +96,7 @@ def test_callback_connects_and_writes_tokens(env, monkeypatch):
     # Tokens écrits dans l'espace de l'athlète.
     assert (root / pid / ".strava_tokens.json").exists()
     # connection reflète l'état.
-    assert c.get("/api/strava/connection", headers=_bearer(sess)).json() == {
-        "connected": True
-    }
+    assert c.get("/api/strava/connection", headers=_bearer(sess)).json() == {"connected": True}
 
 
 def test_callback_rejects_replayed_state(env, monkeypatch):
@@ -116,13 +110,15 @@ def test_callback_rejects_replayed_state(env, monkeypatch):
         lambda *a, **k: {"access_token": "a", "refresh_token": "r", "expires_at": 1},
     )
     first = c.get(
-        "/api/strava/callback", params={"code": "c", "state": state},
+        "/api/strava/callback",
+        params={"code": "c", "state": state},
         follow_redirects=False,
     )
     assert first.headers["location"] == "/?strava=connected"
     # Rejeu du même state → erreur.
     second = c.get(
-        "/api/strava/callback", params={"code": "c", "state": state},
+        "/api/strava/callback",
+        params={"code": "c", "state": state},
         follow_redirects=False,
     )
     assert second.status_code == 302
@@ -132,7 +128,8 @@ def test_callback_rejects_replayed_state(env, monkeypatch):
 def test_callback_invalid_state_redirects_error(env):
     c = env["client"]
     r = c.get(
-        "/api/strava/callback", params={"code": "c", "state": "bogus"},
+        "/api/strava/callback",
+        params={"code": "c", "state": "bogus"},
         follow_redirects=False,
     )
     assert r.status_code == 302
@@ -142,7 +139,8 @@ def test_callback_invalid_state_redirects_error(env):
 def test_callback_is_public(env):
     # Joignable sans header Bearer (exempté) — pas de 401.
     r = env["client"].get(
-        "/api/strava/callback", params={"error": "access_denied"},
+        "/api/strava/callback",
+        params={"error": "access_denied"},
         follow_redirects=False,
     )
     assert r.status_code == 302

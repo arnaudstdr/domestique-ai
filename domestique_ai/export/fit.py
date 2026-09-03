@@ -81,8 +81,9 @@ def _zone_to_garmin_zone_index(zone: str) -> int:
     return 2
 
 
-def _build_step(step: WorkoutStep, hr_rest: float | None,
-                hr_max: float | None) -> WorkoutStepMessage:
+def _build_step(
+    step: WorkoutStep, hr_rest: float | None, hr_max: float | None
+) -> WorkoutStepMessage:
     """Construit un WorkoutStepMessage depuis notre WorkoutStep."""
     msg = WorkoutStepMessage()
     msg.workout_step_name = f"{step.phase} {step.zone.upper()}"
@@ -101,8 +102,9 @@ def _build_step(step: WorkoutStep, hr_rest: float | None,
     return msg
 
 
-def workout_to_fit(workout: Workout, hr_rest: float | None = None,
-                   hr_max: float | None = None) -> bytes:
+def workout_to_fit(
+    workout: Workout, hr_rest: float | None = None, hr_max: float | None = None
+) -> bytes:
     """Sérialise une séance en fichier `.FIT` Garmin Workout (bytes)."""
     file_id = FileIdMessage()
     file_id.type = FileType.WORKOUT
@@ -132,8 +134,9 @@ def _safe_filename(name: str) -> str:
     return cleaned or "workout"
 
 
-def plan_to_zip(plan: Iterable[Workout], hr_rest: float | None = None,
-                hr_max: float | None = None) -> bytes:
+def plan_to_zip(
+    plan: Iterable[Workout], hr_rest: float | None = None, hr_max: float | None = None
+) -> bytes:
     """Empaquette un plan complet en archive ZIP (1 `.FIT` par séance)."""
     buffer = io.BytesIO()
     with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as zf:

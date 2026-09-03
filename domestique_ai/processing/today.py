@@ -221,6 +221,7 @@ def _planned_workout_for(today: _dt.date, ctx: AthleteContext) -> dict[str, Any]
     # Une séance prescrite par le coach prime sur le plan généré ce jour-là.
     try:
         from domestique_ai.llm.prescription_storage import get_prescription_for_date
+
         prescribed = get_prescription_for_date(today.isoformat(), db_path=ctx.db_path)
         if prescribed is not None:
             return prescribed.to_dict()
@@ -260,17 +261,17 @@ def _alerts_summary(ctx: AthleteContext) -> dict[str, Any]:
     summary: dict[str, Any] = {"critical": False, "messages": []}
     try:
         from domestique_ai.processing.overtraining import detect_overtraining_signals
+
         report = detect_overtraining_signals(ctx=ctx)
         for alert in report.get("alerts", []) or []:
-            summary["messages"].append(
-                f"{alert.get('indicator')}: {alert.get('message')}"
-            )
+            summary["messages"].append(f"{alert.get('indicator')}: {alert.get('message')}")
             if alert.get("indicator") in ("tsb_chronic", "strain"):
                 summary["critical"] = True
     except Exception:  # noqa: BLE001
         log.debug("Échec calcul overtraining", exc_info=True)
     try:
         from domestique_ai.processing.morning_metrics import detect_morning_alerts
+
         for alert in detect_morning_alerts(db_path=ctx.db_path) or []:
             summary["messages"].append(
                 f"morning/{alert.get('metric')}: "
@@ -313,6 +314,7 @@ def _build_decision_dossier(
     objective_dict: dict[str, Any] | None = None
     try:
         from domestique_ai.llm.objectives import load_objective
+
         obj = load_objective(ctx.objective_path)
         if obj is not None:
             objective_dict = obj.to_dict()
@@ -348,9 +350,7 @@ def _build_decision_dossier(
         "planned_today": planned_today,
         "last_kind": last_kind,
         "last_days_ago": last_days_ago,
-        "weekly_zone_distribution": {
-            k: round(v, 3) for k, v in weekly_zones.items()
-        },
+        "weekly_zone_distribution": {k: round(v, 3) for k, v in weekly_zones.items()},
         "alerts": alerts,
     }
 
@@ -461,8 +461,7 @@ def _decide_kind_fallback(dossier: dict[str, Any]) -> dict[str, Any]:
         "kind": "endurance",
         "duration_min": None,
         "rationale": (
-            f"TSB {tsb:.1f} (Optimal) : foncier Z2, base aérobie qui "
-            "répare ET construit."
+            f"TSB {tsb:.1f} (Optimal) : foncier Z2, base aérobie qui répare ET construit."
         ),
     }
 
@@ -526,9 +525,7 @@ def _decide_kind_with_llm(dossier: dict[str, Any]) -> dict[str, Any] | None:
         duration_int = int(duration) if duration is not None else None
     except (TypeError, ValueError):
         return None
-    if duration_int is not None and not (
-        _MIN_DURATION_MIN <= duration_int <= _MAX_DURATION_MIN
-    ):
+    if duration_int is not None and not (_MIN_DURATION_MIN <= duration_int <= _MAX_DURATION_MIN):
         duration_int = None
     try:
         confidence_f = float(confidence)
@@ -572,8 +569,7 @@ def _build_workout_payload(
         notes_parts.append(str(context).capitalize())
     workout = Workout(
         date=today.isoformat(),
-        name=_name_for(kind, duration_min, week_idx=0, is_taper=False,
-                       is_recovery_week=False),
+        name=_name_for(kind, duration_min, week_idx=0, is_taper=False, is_recovery_week=False),
         sport="cycling",
         kind=kind,
         duration_min=duration_min,
@@ -624,10 +620,7 @@ def _planned_workout_to_payload(
             {
                 "kind": planned.get("kind", "endurance"),
                 "duration_min": available_min,
-                "rationale": (
-                    "Séance du plan persisté, durée ajustée selon le "
-                    "paramètre fourni."
-                ),
+                "rationale": ("Séance du plan persisté, durée ajustée selon le paramètre fourni."),
             },
             source="plan",
         )
@@ -637,8 +630,7 @@ def _planned_workout_to_payload(
         "tsb": dossier["tsb"],
         "tsb_zone": dossier["tsb_zone"],
         "rationale": (
-            "Séance prévue dans le plan d'entraînement en cours pour cette "
-            "date — on s'y tient."
+            "Séance prévue dans le plan d'entraînement en cours pour cette date — on s'y tient."
         ),
         "signals": {
             "tsb": dossier["tsb"],

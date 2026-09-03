@@ -13,8 +13,7 @@ from domestique_ai.llm.objectives import (
 
 
 def test_load_returns_none_when_file_missing(tmp_path, monkeypatch):
-    monkeypatch.setenv("DOMESTIQUE_AI_OBJECTIVE_PATH",
-                       str(tmp_path / "missing.yaml"))
+    monkeypatch.setenv("DOMESTIQUE_AI_OBJECTIVE_PATH", str(tmp_path / "missing.yaml"))
     assert load_objective() is None
 
 
@@ -76,15 +75,13 @@ def test_load_coerces_native_date_to_string(tmp_path, monkeypatch):
 
     # to_dict() doit aussi renvoyer une chaîne (utilisé par le tool get_objective)
     import json
+
     json.dumps(loaded.to_dict())  # ne doit pas lever
 
 
 def test_extra_fields_round_trip(tmp_path, monkeypatch):
     path = tmp_path / "obj.yaml"
-    path.write_text(
-        "type: course\ndate: 2026-04-01\ndistance_km: 21.1\n"
-        "custom_field: foo\n"
-    )
+    path.write_text("type: course\ndate: 2026-04-01\ndistance_km: 21.1\ncustom_field: foo\n")
     monkeypatch.setenv("DOMESTIQUE_AI_OBJECTIVE_PATH", str(path))
     loaded = load_objective()
     assert loaded is not None
