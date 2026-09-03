@@ -84,41 +84,43 @@ def test_exchange_code_saves_tokens(client: GoogleHealthClient):
 def test_fetch_morning_data_maps_values(client: GoogleHealthClient):
     def side_effect(method, url, **kwargs):
         if DATA_TYPE_DAILY_HRV in url:
-            return _mock_response({
-                "dataPoints": [
-                    {
-                        "date": "2026-05-10",
-                        "value": {"averageHeartRateVariabilityMilliseconds": 62.0},
-                    }
-                ]
-            })
+            return _mock_response(
+                {
+                    "dataPoints": [
+                        {
+                            "date": "2026-05-10",
+                            "value": {"averageHeartRateVariabilityMilliseconds": 62.0},
+                        }
+                    ]
+                }
+            )
         if DATA_TYPE_DAILY_RHR in url:
-            return _mock_response({
-                "dataPoints": [
-                    {"date": "2026-05-10", "value": {"beatsPerMinute": 47}}
-                ]
-            })
+            return _mock_response(
+                {"dataPoints": [{"date": "2026-05-10", "value": {"beatsPerMinute": 47}}]}
+            )
         if "steps" in url:
-            return _mock_response({
-                "dataPoints": [{"date": "2026-05-10", "value": {"count": 12345}}]
-            })
+            return _mock_response(
+                {"dataPoints": [{"date": "2026-05-10", "value": {"count": 12345}}]}
+            )
         if DATA_TYPE_SLEEP in url:
-            return _mock_response({
-                "dataPoints": [
-                    {
-                        "startTime": "2026-05-10T22:00:00Z",
-                        "endTime": "2026-05-11T06:00:00Z",
-                        "value": {
-                            "stages": [
-                                {"stage": "deep", "seconds": 5400},
-                                {"stage": "rem", "seconds": 7200},
-                                {"stage": "light", "seconds": 14400},
-                                {"stage": "awake", "seconds": 1800},
-                            ]
-                        },
-                    }
-                ]
-            })
+            return _mock_response(
+                {
+                    "dataPoints": [
+                        {
+                            "startTime": "2026-05-10T22:00:00Z",
+                            "endTime": "2026-05-11T06:00:00Z",
+                            "value": {
+                                "stages": [
+                                    {"stage": "deep", "seconds": 5400},
+                                    {"stage": "rem", "seconds": 7200},
+                                    {"stage": "light", "seconds": 14400},
+                                    {"stage": "awake", "seconds": 1800},
+                                ]
+                            },
+                        }
+                    ]
+                }
+            )
         # Réponses par défaut pour les autres data types.
         return _mock_response({"dataPoints": []})
 
@@ -161,30 +163,32 @@ def test_sync_google_health_morning_metrics_writes_db(client: GoogleHealthClient
 
     def side_effect(method, url, **kwargs):
         if DATA_TYPE_DAILY_HRV in url:
-            return _mock_response({
-                "dataPoints": [
-                    {
-                        "date": "2026-05-10",
-                        "value": {"averageHeartRateVariabilityMilliseconds": 60.0},
-                    }
-                ]
-            })
+            return _mock_response(
+                {
+                    "dataPoints": [
+                        {
+                            "date": "2026-05-10",
+                            "value": {"averageHeartRateVariabilityMilliseconds": 60.0},
+                        }
+                    ]
+                }
+            )
         if DATA_TYPE_DAILY_RHR in url:
-            return _mock_response({
-                "dataPoints": [
-                    {"date": "2026-05-10", "value": {"beatsPerMinute": 48}}
-                ]
-            })
+            return _mock_response(
+                {"dataPoints": [{"date": "2026-05-10", "value": {"beatsPerMinute": 48}}]}
+            )
         if DATA_TYPE_SLEEP in url:
-            return _mock_response({
-                "dataPoints": [
-                    {
-                        "startTime": "2026-05-09T22:00:00Z",
-                        "endTime": "2026-05-10T06:00:00Z",
-                        "value": {"stages": []},
-                    }
-                ]
-            })
+            return _mock_response(
+                {
+                    "dataPoints": [
+                        {
+                            "startTime": "2026-05-09T22:00:00Z",
+                            "endTime": "2026-05-10T06:00:00Z",
+                            "value": {"stages": []},
+                        }
+                    ]
+                }
+            )
         return _mock_response({"dataPoints": []})
 
     with patch("requests.request", side_effect=side_effect):
@@ -223,24 +227,28 @@ def test_sync_respects_manual_sleep_score(client: GoogleHealthClient, tmp_path: 
 
     def side_effect(method, url, **kwargs):
         if DATA_TYPE_DAILY_HRV in url:
-            return _mock_response({
-                "dataPoints": [
-                    {
-                        "date": "2026-05-10",
-                        "value": {"averageHeartRateVariabilityMilliseconds": 60.0},
-                    }
-                ]
-            })
+            return _mock_response(
+                {
+                    "dataPoints": [
+                        {
+                            "date": "2026-05-10",
+                            "value": {"averageHeartRateVariabilityMilliseconds": 60.0},
+                        }
+                    ]
+                }
+            )
         if DATA_TYPE_SLEEP in url:
-            return _mock_response({
-                "dataPoints": [
-                    {
-                        "startTime": "2026-05-09T22:00:00Z",
-                        "endTime": "2026-05-10T06:00:00Z",
-                        "value": {"stages": []},
-                    }
-                ]
-            })
+            return _mock_response(
+                {
+                    "dataPoints": [
+                        {
+                            "startTime": "2026-05-09T22:00:00Z",
+                            "endTime": "2026-05-10T06:00:00Z",
+                            "value": {"stages": []},
+                        }
+                    ]
+                }
+            )
         return _mock_response({"dataPoints": []})
 
     with patch("requests.request", side_effect=side_effect):

@@ -352,9 +352,7 @@ def calculate_sleep_score(
     if sleep_hours is not None:
         total_sleep_min = sleep_hours * 60
     elif sleep_light_min is not None or sleep_deep_min is not None or sleep_rem_min is not None:
-        total_sleep_min = (
-            (sleep_light_min or 0) + (sleep_deep_min or 0) + (sleep_rem_min or 0)
-        )
+        total_sleep_min = (sleep_light_min or 0) + (sleep_deep_min or 0) + (sleep_rem_min or 0)
     else:
         return None
 

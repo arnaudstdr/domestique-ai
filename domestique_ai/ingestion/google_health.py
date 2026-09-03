@@ -337,9 +337,7 @@ class GoogleHealthClient:
         )
         skin_temp_by_date = self.fetch_daily_rollups(DATA_TYPE_SKIN_TEMP, start_date, end_date)
         steps_by_date = self.fetch_daily_rollups(DATA_TYPE_STEPS, start_date, end_date)
-        calories_by_date = self.fetch_daily_rollups(
-            DATA_TYPE_ACTIVE_CALORIES, start_date, end_date
-        )
+        calories_by_date = self.fetch_daily_rollups(DATA_TYPE_ACTIVE_CALORIES, start_date, end_date)
         sleep_sessions_by_date = self.fetch_sleep_sessions(start_date, end_date)
 
         result: dict[str, dict[str, Any]] = {}
@@ -349,9 +347,7 @@ class GoogleHealthClient:
                 "hrv_ms": _extract_hrv(hrv_by_date.get(date_str)),
                 "resting_hr": _extract_rhr(rhr_by_date.get(date_str)),
                 "spo2_avg_pct": _extract_spo2(spo2_by_date.get(date_str)),
-                "respiratory_rate_avg_bpm": _extract_respiratory(
-                    respiratory_by_date.get(date_str)
-                ),
+                "respiratory_rate_avg_bpm": _extract_respiratory(respiratory_by_date.get(date_str)),
                 "skin_temp_delta_c": _extract_skin_temp(skin_temp_by_date.get(date_str)),
                 "steps": _extract_steps(steps_by_date.get(date_str)),
                 "active_calories": _extract_active_calories(calories_by_date.get(date_str)),
@@ -531,10 +527,7 @@ def _summarize_sleep_sessions(sessions: list[dict[str, Any]] | None) -> dict[str
         stages = value.get("stages") or value.get("sleepStages") or []
         for stage in stages:
             stage_type = (
-                stage.get("stage")
-                or stage.get("type")
-                or stage.get("sleepStageType")
-                or ""
+                stage.get("stage") or stage.get("type") or stage.get("sleepStageType") or ""
             ).upper()
             seconds = stage.get("seconds") or stage.get("durationSeconds") or 0
             try:
@@ -669,7 +662,10 @@ def sync_google_health_morning_metrics(
         # Conserve les champs manuels existants (stress, notes) si présents.
         if existing:
             for manual_field in ("stress_score", "notes"):
-                if existing.get(manual_field) is not None and metric_values.get(manual_field) is None:
+                if (
+                    existing.get(manual_field) is not None
+                    and metric_values.get(manual_field) is None
+                ):
                     kwargs[manual_field] = existing[manual_field]
 
         save_morning_entry(db_path=db_path, **kwargs)
