@@ -273,9 +273,7 @@ class GoogleHealthClient:
         Utilisé pour les data types Daily et les sessions. Retourne un dict
         ``{date_iso: data_point}`` où ``date_iso`` est extrait du point.
         """
-        start = dt.datetime.combine(start_date, dt.time.min, tzinfo=dt.UTC)
-        end = dt.datetime.combine(end_date + dt.timedelta(days=1), dt.time.min, tzinfo=dt.UTC)
-        filter_str = f"start_time>{_to_google_health_timestamp(start)},end_time<={_to_google_health_timestamp(end)}"
+        filter_str = _build_list_filter(data_type, start_date, end_date)
         data = self._request(
             "GET",
             f"/users/me/dataTypes/{data_type}/dataPoints",
@@ -330,9 +328,7 @@ class GoogleHealthClient:
         Retourne un dict ``{date_iso: [sessions]}``. La date clé est la date de
         réveil (end time) de la session, convertie en civil time si possible.
         """
-        start = dt.datetime.combine(start_date, dt.time.min, tzinfo=dt.UTC)
-        end = dt.datetime.combine(end_date + dt.timedelta(days=1), dt.time.min, tzinfo=dt.UTC)
-        filter_str = f"start_time>{_to_google_health_timestamp(start)},end_time<={_to_google_health_timestamp(end)}"
+        filter_str = _build_list_filter(DATA_TYPE_SLEEP, start_date, end_date)
         data = self._request(
             "GET",
             f"/users/me/dataTypes/{DATA_TYPE_SLEEP}/dataPoints",
@@ -441,6 +437,44 @@ def _to_google_health_timestamp(ts: dt.datetime) -> str:
     """
     utc = ts.astimezone(dt.UTC).replace(tzinfo=None)
     return utc.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _civil_date_str(date: dt.date) -> str:
+    """Formate une date au format civil ISO 8601 attendu par les filtres."""
+    return date.isoformat()
+
+
+def _build_list_filter(data_type: str, start_date: dt.date, end_date: dt.date) -> str:
+    """Construit le filtre AIP-160 correct pour un data type Google Health.
+
+    Les data types Daily filtrent sur ``<data_type>.date``. Sleep et les
+    sessions filtrent sur leur champ d'interval civil. Les types Sample
+    (point-in-time) filtrent sur ``sample_time.civil_time``.
+    """
+    start = _civil_date_str(start_date)
+    end = _civil_date_str(end_date + dt.timedelta(days=1))
+
+    if data_type == DATA_TYPE_SLEEP:
+        return (
+            f'{DATA_TYPE_SLEEP}.interval.civil_end_time >= "{start}"'
+            f' AND {DATA_TYPE_SLEEP}.interval.civil_end_time < "{end}"'
+        )
+
+    if data_type in {
+        DATA_TYPE_DAILY_HRV,
+        DATA_TYPE_DAILY_RHR,
+        DATA_TYPE_DAILY_SPO2,
+        DATA_TYPE_SKIN_TEMP,
+    }:
+        prefix = data_type.replace("-", "_")
+        return f'{prefix}.date >= "{start}" AND {prefix}.date < "{end}"'
+
+    # Types Sample (point-in-time), ex. respiratory-rate-sleep-summary.
+    prefix = data_type.replace("-", "_")
+    return (
+        f'{prefix}.sample_time.civil_time >= "{start}"'
+        f' AND {prefix}.sample_time.civil_time < "{end}"'
+    )
 
 
 def _civil_date_time(date: dt.date, hour: int, minute: int, second: int) -> dict[str, Any]:

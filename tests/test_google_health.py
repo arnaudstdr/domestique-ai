@@ -12,9 +12,11 @@ from domestique_ai.ingestion.google_health import (
     DATA_TYPE_ACTIVE_ENERGY_BURNED,
     DATA_TYPE_DAILY_HRV,
     DATA_TYPE_DAILY_RHR,
+    DATA_TYPE_RESPIRATORY_SLEEP,
     DATA_TYPE_SLEEP,
     DATA_TYPE_STEPS,
     GoogleHealthClient,
+    _build_list_filter,
     _extract_active_calories,
     _extract_steps,
     _summarize_sleep_sessions,
@@ -315,3 +317,22 @@ def test_sync_respects_manual_sleep_score(client: GoogleHealthClient, tmp_path: 
     entry = fetch_morning_entry("2026-05-10", db_path=db_path)
     assert entry["sleep_score"] == 95
     assert entry["sleep_score_computed"] == 0
+
+
+def test_build_list_filter_uses_typed_fields():
+    import datetime as dt
+
+    start = dt.date(2026, 8, 28)
+    end = dt.date(2026, 9, 3)
+
+    hrv = _build_list_filter(DATA_TYPE_DAILY_HRV, start, end)
+    assert 'daily_heart_rate_variability.date >= "2026-08-28"' in hrv
+    assert 'daily_heart_rate_variability.date < "2026-09-04"' in hrv
+
+    sleep = _build_list_filter(DATA_TYPE_SLEEP, start, end)
+    assert 'sleep.interval.civil_end_time >= "2026-08-28"' in sleep
+    assert 'sleep.interval.civil_end_time < "2026-09-04"' in sleep
+
+    respiratory = _build_list_filter(DATA_TYPE_RESPIRATORY_SLEEP, start, end)
+    assert 'respiratory_rate_sleep_summary.sample_time.civil_time >= "2026-08-28"' in respiratory
+    assert 'respiratory_rate_sleep_summary.sample_time.civil_time < "2026-09-04"' in respiratory
