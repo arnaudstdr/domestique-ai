@@ -48,7 +48,7 @@ def fetch_activities_from_db(
     conn = sqlite3.connect(path)
     try:
         cursor = conn.execute(
-            "SELECT strava_id, date, duration, avg_heart_rate, max_heart_rate, "
+            "SELECT strava_id, garmin_id, date, duration, avg_heart_rate, max_heart_rate, "
             "avg_power, elevation_gain, distance, training_load, "
             "hr_z1_time, hr_z2_time, hr_z3_time, hr_z4_time, hr_z5_time, "
             "sport_type, avg_temp, min_temp, max_temp, map_polyline "
@@ -60,24 +60,25 @@ def fetch_activities_from_db(
     return [
         {
             "strava_id": row[0],
-            "date": row[1],
-            "duration": row[2],
-            "avg_heart_rate": row[3],
-            "max_heart_rate": row[4],
-            "avg_power": row[5],
-            "elevation_gain": row[6],
-            "distance": row[7],
-            "training_load": row[8],
-            "hr_z1_time": row[9],
-            "hr_z2_time": row[10],
-            "hr_z3_time": row[11],
-            "hr_z4_time": row[12],
-            "hr_z5_time": row[13],
-            "sport_type": row[14],
-            "avg_temp": row[15],
-            "min_temp": row[16],
-            "max_temp": row[17],
-            "map_polyline": row[18],
+            "garmin_id": row[1],
+            "date": row[2],
+            "duration": row[3],
+            "avg_heart_rate": row[4],
+            "max_heart_rate": row[5],
+            "avg_power": row[6],
+            "elevation_gain": row[7],
+            "distance": row[8],
+            "training_load": row[9],
+            "hr_z1_time": row[10],
+            "hr_z2_time": row[11],
+            "hr_z3_time": row[12],
+            "hr_z4_time": row[13],
+            "hr_z5_time": row[14],
+            "sport_type": row[15],
+            "avg_temp": row[16],
+            "min_temp": row[17],
+            "max_temp": row[18],
+            "map_polyline": row[19],
         }
         for row in rows
     ]

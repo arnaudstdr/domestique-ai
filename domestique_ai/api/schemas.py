@@ -133,6 +133,9 @@ class ActivitySummary(BaseModel):
     min_temp: float | None = None
     max_temp: float | None = None
     map_polyline: str | None = None
+    # Source d'ingestion : "strava" (défaut, legacy) ou "garmin". Le champ
+    # ``strava_id`` porte l'id externe de la source (garmin_id si source Garmin).
+    source: str = "strava"
 
 
 class ActivitiesList(BaseModel):

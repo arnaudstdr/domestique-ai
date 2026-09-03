@@ -215,6 +215,51 @@ def test_activities_filter_invalid_date_returns_400(client: TestClient) -> None:
     assert r.status_code == 400
 
 
+def test_activities_list_includes_garmin_rows(client: TestClient, tmp_path: Path) -> None:
+    """Régression : les lignes Garmin (strava_id NULL) ne font plus planter la liste.
+
+    Le champ ``strava_id`` de l'API porte l'id externe (garmin_id) et ``source``
+    distingue la provenance.
+    """
+    db = Path(tmp_path / "api_test.db")
+    from domestique_ai.ingestion.garmin import save_garmin_activity
+
+    save_garmin_activity(
+        {
+            "id": 18435401234,
+            "date": "2026-08-30T08:12:33Z",
+            "duration": 3600,
+            "avg_heart_rate": 140.0,
+            "distance": 60000,
+            "elevation_gain": 400,
+            "sport_type": "Ride",
+        },
+        db_path=db,
+    )
+    r = client.get("/api/activities")
+    assert r.status_code == 200
+    items = r.json()["items"]
+    assert len(items) == 1
+    assert items[0]["strava_id"] == 18435401234
+    assert items[0]["source"] == "garmin"
+
+
+def test_activities_detail_accepts_garmin_id(client: TestClient, tmp_path: Path) -> None:
+    """Le détail d'une activité Garmin est servi sans appel Strava."""
+    db = Path(tmp_path / "api_test.db")
+    from domestique_ai.ingestion.garmin import save_garmin_activity
+
+    save_garmin_activity(
+        {"id": 555, "date": "2026-08-30T08:12:33Z", "duration": 600, "sport_type": "Ride"},
+        db_path=db,
+    )
+    r = client.get("/api/activities/555")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["activity"]["strava_id"] == 555
+    assert body["activity"]["source"] == "garmin"
+
+
 def test_activities_sport_types_endpoint(
     client: TestClient,
     tmp_path: Path,

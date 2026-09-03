@@ -28,6 +28,24 @@ from domestique_ai.processing.similar import find_similar_activities
 router = APIRouter(prefix="/api/activities", tags=["activities"])
 log = get_logger("activities")
 
+
+def _optional_strava_client(
+    ctx: AthleteContext = Depends(get_athlete_context),  # noqa: B008
+) -> StravaClient | None:
+    """Client Strava si disponible, sinon ``None``.
+
+    Utilisé par le détail d'activité : les lignes Garmin n'ont pas besoin du
+    client Strava — une dépendance obligatoire renverrait une 503 même quand
+    la réponse peut être servie depuis la base locale.
+    """
+    from fastapi import HTTPException as _HTTPException
+
+    try:
+        return get_strava_client(ctx)
+    except _HTTPException:
+        return None
+
+
 _DETAIL_STREAM_KEYS = [
     "time",
     "latlng",
@@ -47,8 +65,13 @@ _cache_lock = Lock()
 
 def _activity_to_summary(row: dict) -> ActivitySummary:
     distance_m = row.get("distance") or 0
+    # Id externe : strava_id prioritaire, fallback garmin_id (source Garmin).
+    external_id = row.get("strava_id") if row.get("strava_id") is not None else row.get("garmin_id")
+    source = (
+        "garmin" if row.get("strava_id") is None and row.get("garmin_id") is not None else "strava"
+    )
     return ActivitySummary(
-        strava_id=int(row["strava_id"]),
+        strava_id=int(external_id),
         name=row.get("name"),
         date=row.get("date") or "",
         distance_km=round(float(distance_m) / 1000, 2),
@@ -64,6 +87,7 @@ def _activity_to_summary(row: dict) -> ActivitySummary:
         min_temp=row.get("min_temp"),
         max_temp=row.get("max_temp"),
         map_polyline=row.get("map_polyline"),
+        source=source,
     )
 
 
@@ -193,12 +217,21 @@ def list_sport_types(
 @router.get("/{strava_id}", response_model=ActivityDetail)
 def get_activity(
     strava_id: int,
-    client: StravaClient = Depends(get_strava_client),  # noqa: B008
+    client: StravaClient | None = Depends(_optional_strava_client),  # noqa: B008
     ctx: AthleteContext = Depends(get_athlete_context),  # noqa: B008
 ) -> ActivityDetail:
-    """Détails complets d'une activité (streams inclus, cache 1 h)."""
+    """Détails complets d'une activité (streams inclus, cache 1 h).
+
+    L'id passé en path peut être un strava_id ou un garmin_id — la recherche
+    accepte les deux sources. Pour une activité Garmin, les streams ne sont
+    pas re-fetchés côté Strava (base locale uniquement).
+    """
     base = next(
-        (a for a in fetch_activities_from_db(ctx=ctx) if a.get("strava_id") == strava_id),
+        (
+            a
+            for a in fetch_activities_from_db(ctx=ctx)
+            if a.get("strava_id") == strava_id or a.get("garmin_id") == strava_id
+        ),
         None,
     )
     if base is None:
@@ -207,31 +240,41 @@ def get_activity(
             detail=f"Activité {strava_id} introuvable en base.",
         )
 
+    is_garmin = base.get("strava_id") is None
     cache_key = (str(ctx.db_path), strava_id)
     now = time.time()
-    with _cache_lock:
-        cached = _detail_cache.get(cache_key)
-        payload = cached[1] if cached and now - cached[0] < _DETAIL_TTL_SEC else None
 
-    if payload is None:
-        log.info("Activité %d : cache miss, fetch Strava…", strava_id)
-        try:
-            streams = client.fetch_streams_full(strava_id, _DETAIL_STREAM_KEYS) or {}
-            summary = client.fetch_activity_summary(strava_id) or {}
-        except StravaAuthError as exc:
-            log.warning("Activité %d : auth Strava KO : %s", strava_id, exc)
+    if is_garmin:
+        streams: dict = {}
+        summary: dict = {}
+    else:
+        if client is None:
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail=str(exc),
-            ) from exc
-        payload = {"streams": streams, "summary": summary}
+                detail="Strava non connecté — streams indisponibles pour cette activité.",
+            )
         with _cache_lock:
-            _detail_cache[cache_key] = (now, payload)
-    else:
-        log.debug("Activité %d : cache hit", strava_id)
+            cached = _detail_cache.get(cache_key)
+            payload = cached[1] if cached and now - cached[0] < _DETAIL_TTL_SEC else None
 
-    summary = payload.get("summary") or {}
-    streams = payload.get("streams") or {}
+        if payload is None:
+            log.info("Activité %d : cache miss, fetch Strava…", strava_id)
+            try:
+                streams = client.fetch_streams_full(strava_id, _DETAIL_STREAM_KEYS) or {}
+                summary = client.fetch_activity_summary(strava_id) or {}
+            except StravaAuthError as exc:
+                log.warning("Activité %d : auth Strava KO : %s", strava_id, exc)
+                raise HTTPException(
+                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                    detail=str(exc),
+                ) from exc
+            payload = {"streams": streams, "summary": summary}
+            with _cache_lock:
+                _detail_cache[cache_key] = (now, payload)
+        else:
+            log.debug("Activité %d : cache hit", strava_id)
+        summary = payload.get("summary") or {}
+        streams = payload.get("streams") or {}
 
     activity = _activity_to_summary({**base, "name": summary.get("name")})
 

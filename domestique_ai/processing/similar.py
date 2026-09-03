@@ -62,16 +62,18 @@ def _within_tolerance(a: float, b: float, tolerance: float, floor: float) -> boo
 
 
 def _activity_to_dict(row: tuple[Any, ...]) -> dict[str, Any]:
+    # Id externe : strava_id prioritaire, fallback garmin_id (source Garmin).
+    external_id = row[0] if row[0] is not None else row[1]
     return {
-        "strava_id": row[0],
-        "date": row[1],
-        "duration_sec": row[2],
-        "avg_heart_rate": row[3],
-        "avg_power": row[4],
-        "elevation_gain": row[5],
-        "distance": row[6],
-        "training_load": row[7],
-        "sport_type": row[8],
+        "strava_id": external_id,
+        "date": row[2],
+        "duration_sec": row[3],
+        "avg_heart_rate": row[4],
+        "avg_power": row[5],
+        "elevation_gain": row[6],
+        "distance": row[7],
+        "training_load": row[8],
+        "sport_type": row[9],
     }
 
 
@@ -111,10 +113,10 @@ def find_similar_activities(
             "ON activities(distance, elevation_gain)"
         )
         ref_row = conn.execute(
-            "SELECT strava_id, date, duration, avg_heart_rate, avg_power, "
+            "SELECT strava_id, garmin_id, date, duration, avg_heart_rate, avg_power, "
             "elevation_gain, distance, training_load, sport_type "
-            "FROM activities WHERE strava_id = ?",
-            (strava_id,),
+            "FROM activities WHERE strava_id = ? OR garmin_id = ?",
+            (strava_id, strava_id),
         ).fetchone()
         if ref_row is None:
             return {
@@ -144,10 +146,10 @@ def find_similar_activities(
         dist_lo = ref_dist * (1 - _DISTANCE_TOLERANCE * 2)
         dist_hi = ref_dist * (1 + _DISTANCE_TOLERANCE * 2)
         rows = conn.execute(
-            "SELECT strava_id, date, duration, avg_heart_rate, avg_power, "
+            "SELECT strava_id, garmin_id, date, duration, avg_heart_rate, avg_power, "
             "elevation_gain, distance, training_load, sport_type "
             "FROM activities "
-            "WHERE strava_id != ? AND distance BETWEEN ? AND ? "
+            "WHERE coalesce(strava_id, garmin_id) != ? AND distance BETWEEN ? AND ? "
             "ORDER BY date DESC",
             (strava_id, dist_lo, dist_hi),
         ).fetchall()

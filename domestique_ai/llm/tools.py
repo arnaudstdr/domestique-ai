@@ -184,13 +184,14 @@ def get_activity_details(strava_id: int, *, ctx: AthleteContext | None = None) -
     init_db(ctx.db_path)
     conn = sqlite3.connect(ctx.db_path)
     try:
+        # Id externe : strava_id ou garmin_id (source Garmin).
         cursor = conn.execute(
-            "SELECT strava_id, date, duration, avg_heart_rate, max_heart_rate, "
-            "avg_power, elevation_gain, distance, training_load, "
+            "SELECT coalesce(strava_id, garmin_id), date, duration, avg_heart_rate, "
+            "max_heart_rate, avg_power, elevation_gain, distance, training_load, "
             "hr_z1_time, hr_z2_time, hr_z3_time, hr_z4_time, hr_z5_time, "
             "avg_temp, min_temp, max_temp "
-            "FROM activities WHERE strava_id = ?",
-            (strava_id,),
+            "FROM activities WHERE strava_id = ? OR garmin_id = ?",
+            (strava_id, strava_id),
         )
         row = cursor.fetchone()
     finally:

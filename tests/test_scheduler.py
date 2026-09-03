@@ -332,7 +332,6 @@ def test_garmin_auto_sync_job_skips_silently_without_tokens(monkeypatch):
     # token_cache_present() → False via get_garmin_token_dir vide.
     monkeypatch.setenv("GARMIN_TOKEN_DIR", "")
     import tempfile
-    from domestique_ai.config import get_garmin_token_dir
 
     with tempfile.TemporaryDirectory() as td:
         monkeypatch.setattr(
