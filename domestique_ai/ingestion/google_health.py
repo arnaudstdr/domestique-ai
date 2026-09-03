@@ -275,7 +275,7 @@ class GoogleHealthClient:
         """
         start = dt.datetime.combine(start_date, dt.time.min, tzinfo=dt.UTC)
         end = dt.datetime.combine(end_date + dt.timedelta(days=1), dt.time.min, tzinfo=dt.UTC)
-        filter_str = f"start_time>{start.isoformat()},end_time<={end.isoformat()}"
+        filter_str = f"start_time>{_to_google_health_timestamp(start)},end_time<={_to_google_health_timestamp(end)}"
         data = self._request(
             "GET",
             f"/users/me/dataTypes/{data_type}/dataPoints",
@@ -332,7 +332,7 @@ class GoogleHealthClient:
         """
         start = dt.datetime.combine(start_date, dt.time.min, tzinfo=dt.UTC)
         end = dt.datetime.combine(end_date + dt.timedelta(days=1), dt.time.min, tzinfo=dt.UTC)
-        filter_str = f"start_time>{start.isoformat()},end_time<={end.isoformat()}"
+        filter_str = f"start_time>{_to_google_health_timestamp(start)},end_time<={_to_google_health_timestamp(end)}"
         data = self._request(
             "GET",
             f"/users/me/dataTypes/{DATA_TYPE_SLEEP}/dataPoints",
@@ -431,6 +431,16 @@ def _civil_date_from_iso(iso: str) -> str | None:
     except Exception:  # noqa: BLE001
         pass
     return None
+
+
+def _to_google_health_timestamp(ts: dt.datetime) -> str:
+    """Formate un datetime UTC au format attendu par les filtres Google Health.
+
+    Google Health rejette le format ``+00:00`` (erreur de syntaxe sur le ``+``).
+    On utilise le suffixe ``Z`` standard.
+    """
+    utc = ts.astimezone(dt.UTC).replace(tzinfo=None)
+    return utc.strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def _civil_date_time(date: dt.date, hour: int, minute: int, second: int) -> dict[str, Any]:
