@@ -18,6 +18,11 @@ from domestique_ai.ingestion.google_health import (
     GoogleHealthClient,
     _build_list_filter,
     _extract_active_calories,
+    _extract_hrv,
+    _extract_respiratory,
+    _extract_rhr,
+    _extract_skin_temp,
+    _extract_spo2,
     _extract_steps,
     _summarize_sleep_sessions,
     sync_google_health_morning_metrics,
@@ -88,40 +93,86 @@ def test_exchange_code_saves_tokens(client: GoogleHealthClient):
 
 
 def test_fetch_morning_data_maps_values(client: GoogleHealthClient):
+    device = {
+        "recordingMethod": "DERIVED",
+        "device": {"displayName": "Google Fitbit Air"},
+        "platform": "FITBIT",
+    }
+
     def side_effect(method, url, **kwargs):
         if DATA_TYPE_DAILY_HRV in url:
             return _mock_response(
                 {
                     "dataPoints": [
                         {
-                            "date": "2026-05-10",
-                            "value": {"averageHeartRateVariabilityMilliseconds": 62.0},
+                            "dataSource": device,
+                            "dailyHeartRateVariability": {
+                                "date": {"year": 2026, "month": 5, "day": 10},
+                                "averageHeartRateVariabilityMilliseconds": 62.0,
+                            },
                         }
                     ]
                 }
             )
         if DATA_TYPE_DAILY_RHR in url:
             return _mock_response(
-                {"dataPoints": [{"date": "2026-05-10", "value": {"beatsPerMinute": 47}}]}
+                {
+                    "dataPoints": [
+                        {
+                            "dataSource": device,
+                            "dailyRestingHeartRate": {
+                                "date": {"year": 2026, "month": 5, "day": 10},
+                                "beatsPerMinute": "47",
+                            },
+                        }
+                    ]
+                }
             )
-        if "steps" in url:
+        if DATA_TYPE_STEPS in url:
             return _mock_response(
-                {"dataPoints": [{"date": "2026-05-10", "value": {"count": 12345}}]}
+                {
+                    "rollupDataPoints": [
+                        {
+                            "civilStartTime": {"date": {"year": 2026, "month": 5, "day": 10}},
+                            "steps": {"countSum": "12345"},
+                        }
+                    ]
+                }
             )
         if DATA_TYPE_SLEEP in url:
             return _mock_response(
                 {
                     "dataPoints": [
                         {
-                            "startTime": "2026-05-10T22:00:00Z",
-                            "endTime": "2026-05-11T06:00:00Z",
-                            "value": {
+                            "dataSource": device,
+                            "sleep": {
+                                "interval": {
+                                    "startTime": "2026-05-10T22:00:00Z",
+                                    "endTime": "2026-05-11T06:00:00Z",
+                                },
+                                "type": "STAGES",
                                 "stages": [
-                                    {"stage": "deep", "seconds": 5400},
-                                    {"stage": "rem", "seconds": 7200},
-                                    {"stage": "light", "seconds": 14400},
-                                    {"stage": "awake", "seconds": 1800},
-                                ]
+                                    {
+                                        "startTime": "2026-05-10T22:00:00Z",
+                                        "endTime": "2026-05-10T23:30:00Z",
+                                        "type": "DEEP",
+                                    },
+                                    {
+                                        "startTime": "2026-05-10T23:30:00Z",
+                                        "endTime": "2026-05-11T01:30:00Z",
+                                        "type": "REM",
+                                    },
+                                    {
+                                        "startTime": "2026-05-11T01:30:00Z",
+                                        "endTime": "2026-05-11T05:30:00Z",
+                                        "type": "LIGHT",
+                                    },
+                                    {
+                                        "startTime": "2026-05-11T05:30:00Z",
+                                        "endTime": "2026-05-11T06:00:00Z",
+                                        "type": "AWAKE",
+                                    },
+                                ],
                             },
                         }
                     ]
@@ -141,12 +192,16 @@ def test_fetch_morning_data_maps_values(client: GoogleHealthClient):
     day = data["2026-05-11"]
     assert day["hrv_ms"] is None
     assert day["resting_hr"] is None
-    assert day["steps"] is None
     assert day["sleep_hours"] == 7.5
     assert day["sleep_deep_min"] == 90
     assert day["sleep_rem_min"] == 120
     assert day["sleep_light_min"] == 240
     assert day["sleep_awake_min"] == 30
+
+    day_before = data["2026-05-10"]
+    assert day_before["hrv_ms"] == 62.0
+    assert day_before["resting_hr"] == 47.0
+    assert day_before["steps"] == 12345
 
 
 def test_summarize_sleep_sessions_no_data():
@@ -167,7 +222,8 @@ def test_fetch_daily_rollup_maps_steps_and_calories(client: GoogleHealthClient):
                     "rollupDataPoints": [
                         {
                             "civilStartTime": {"date": {"year": 2026, "month": 5, "day": 10}},
-                            "value": {"steps": {"countSum": 12345}},
+                            "civilEndTime": {"date": {"year": 2026, "month": 5, "day": 11}},
+                            "steps": {"countSum": "12345"},
                         }
                     ]
                 }
@@ -178,7 +234,8 @@ def test_fetch_daily_rollup_maps_steps_and_calories(client: GoogleHealthClient):
                     "rollupDataPoints": [
                         {
                             "civilStartTime": {"date": {"year": 2026, "month": 5, "day": 10}},
-                            "value": {"activeEnergyBurned": {"energyKcalSum": 420}},
+                            "civilEndTime": {"date": {"year": 2026, "month": 5, "day": 11}},
+                            "activeEnergyBurned": {"kcalSum": 234.641666},
                         }
                     ]
                 }
@@ -195,15 +252,68 @@ def test_fetch_daily_rollup_maps_steps_and_calories(client: GoogleHealthClient):
             DATA_TYPE_ACTIVE_ENERGY_BURNED, dt.date(2026, 5, 10), dt.date(2026, 5, 10)
         )
 
-    assert steps["2026-05-10"]["value"]["steps"]["countSum"] == 12345
-    assert calories["2026-05-10"]["value"]["activeEnergyBurned"]["energyKcalSum"] == 420
+    assert steps["2026-05-10"]["steps"]["countSum"] == "12345"
+    assert calories["2026-05-10"]["activeEnergyBurned"]["kcalSum"] == 234.641666
 
 
 def test_extract_steps_and_calories_rollup_formats():
-    steps_point = {"value": {"steps": {"countSum": 12345}}}
-    calories_point = {"value": {"activeEnergyBurned": {"energyKcalSum": 420}}}
+    steps_point = {"civilStartTime": {}, "steps": {"countSum": "12345"}}
+    calories_point = {"civilStartTime": {}, "activeEnergyBurned": {"kcalSum": 234.641666}}
     assert _extract_steps(steps_point) == 12345
-    assert _extract_active_calories(calories_point) == 420
+    assert _extract_active_calories(calories_point) == 234
+
+
+def test_extractors_parse_real_api_payloads():
+    hrv_point = {
+        "dataSource": {},
+        "dailyHeartRateVariability": {
+            "date": {"year": 2026, "month": 9, "day": 3},
+            "averageHeartRateVariabilityMilliseconds": 25.8,
+        },
+    }
+    rhr_point = {
+        "dataSource": {},
+        "dailyRestingHeartRate": {"date": {}, "beatsPerMinute": "75"},
+    }
+    spo2_point = {
+        "dataSource": {},
+        "dailyOxygenSaturation": {
+            "date": {},
+            "averagePercentage": 96.2,
+        },
+    }
+    respiratory_point = {
+        "name": "users/x/dataPoints/",
+        "dataSource": {},
+        "respiratoryRateSleepSummary": {
+            "sampleTime": {
+                "physicalTime": "2026-09-03T04:37:00Z",
+                "civilTime": {"date": {"year": 2026, "month": 9, "day": 3}, "time": {}},
+            },
+            "deepSleepStats": {"breathsPerMinute": 14.0},
+            "lightSleepStats": {"breathsPerMinute": 13.2},
+        },
+    }
+    skin_temp_point = {
+        "dataSource": {},
+        "dailySleepTemperatureDerivations": {
+            "date": {},
+            "nightlyTemperatureCelsius": 33.82,
+            "baselineTemperatureCelsius": 33.38,
+        },
+    }
+
+    assert _extract_hrv(hrv_point) == 25.8
+    assert _extract_rhr(rhr_point) == 75.0
+    assert _extract_spo2(spo2_point) == 96.2
+    assert _extract_respiratory(respiratory_point) == 13.6
+    assert _extract_skin_temp(skin_temp_point) == 0.44
+
+    # Les dates civiles imbriquées sont extraites correctement.
+    from domestique_ai.ingestion.google_health import _extract_date_from_point
+
+    assert _extract_date_from_point(hrv_point) == "2026-09-03"
+    assert _extract_date_from_point(respiratory_point) == "2026-09-03"
 
 
 def test_sync_google_health_morning_metrics_writes_db(client: GoogleHealthClient, tmp_path: Path):
@@ -220,24 +330,43 @@ def test_sync_google_health_morning_metrics_writes_db(client: GoogleHealthClient
                 {
                     "dataPoints": [
                         {
-                            "date": "2026-05-10",
-                            "value": {"averageHeartRateVariabilityMilliseconds": 60.0},
+                            "dataSource": {},
+                            "dailyHeartRateVariability": {
+                                "date": {"year": 2026, "month": 5, "day": 10},
+                                "averageHeartRateVariabilityMilliseconds": 60.0,
+                            },
                         }
                     ]
                 }
             )
         if DATA_TYPE_DAILY_RHR in url:
             return _mock_response(
-                {"dataPoints": [{"date": "2026-05-10", "value": {"beatsPerMinute": 48}}]}
+                {
+                    "dataPoints": [
+                        {
+                            "dataSource": {},
+                            "dailyRestingHeartRate": {
+                                "date": {"year": 2026, "month": 5, "day": 10},
+                                "beatsPerMinute": "48",
+                            },
+                        }
+                    ]
+                }
             )
         if DATA_TYPE_SLEEP in url:
             return _mock_response(
                 {
                     "dataPoints": [
                         {
-                            "startTime": "2026-05-09T22:00:00Z",
-                            "endTime": "2026-05-10T06:00:00Z",
-                            "value": {"stages": []},
+                            "dataSource": {},
+                            "sleep": {
+                                "interval": {
+                                    "startTime": "2026-05-09T22:00:00Z",
+                                    "endTime": "2026-05-10T06:00:00Z",
+                                },
+                                "type": "STAGES",
+                                "stages": [],
+                            },
                         }
                     ]
                 }
@@ -284,8 +413,11 @@ def test_sync_respects_manual_sleep_score(client: GoogleHealthClient, tmp_path: 
                 {
                     "dataPoints": [
                         {
-                            "date": "2026-05-10",
-                            "value": {"averageHeartRateVariabilityMilliseconds": 60.0},
+                            "dataSource": {},
+                            "dailyHeartRateVariability": {
+                                "date": {"year": 2026, "month": 5, "day": 10},
+                                "averageHeartRateVariabilityMilliseconds": 60.0,
+                            },
                         }
                     ]
                 }
@@ -295,9 +427,15 @@ def test_sync_respects_manual_sleep_score(client: GoogleHealthClient, tmp_path: 
                 {
                     "dataPoints": [
                         {
-                            "startTime": "2026-05-09T22:00:00Z",
-                            "endTime": "2026-05-10T06:00:00Z",
-                            "value": {"stages": []},
+                            "dataSource": {},
+                            "sleep": {
+                                "interval": {
+                                    "startTime": "2026-05-09T22:00:00Z",
+                                    "endTime": "2026-05-10T06:00:00Z",
+                                },
+                                "type": "STAGES",
+                                "stages": [],
+                            },
                         }
                     ]
                 }

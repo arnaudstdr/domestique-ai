@@ -442,6 +442,23 @@ def _all_dates(start: dt.date, end: dt.date) -> list[str]:
     return dates
 
 
+def _point_payload(point: dict[str, Any] | None) -> dict[str, Any]:
+    """Retourne le sous-dict propre au data type d'un point.
+
+    L'API imbrique les valeurs sous une clé nommée d'après le data type
+    (ex. ``dailyHeartRateVariability``, ``sleep``), à côté de ``dataSource``
+    et ``name``. Retourne ce dict, ou ``{}`` s'il est introuvable.
+    """
+    if not point:
+        return {}
+    for key, val in point.items():
+        if key in ("dataSource", "name"):
+            continue
+        if isinstance(val, dict):
+            return val
+    return {}
+
+
 def _civil_date_obj_to_iso(obj: Any) -> str | None:
     """Convertit un objet date civil ``{year, month, day}`` en date ISO."""
     if not isinstance(obj, dict):
@@ -455,26 +472,28 @@ def _civil_date_obj_to_iso(obj: Any) -> str | None:
 def _extract_date_from_point(point: dict[str, Any] | None) -> str | None:
     if not point:
         return None
-    # Champ "date" des data types Daily : string ou objet civil.
+    payload = _point_payload(point)
+    # Data types Daily : payload["date"] (string ou objet civil).
+    date_val = payload.get("date")
+    if isinstance(date_val, str):
+        return date_val[:10]
+    iso = _civil_date_obj_to_iso(date_val)
+    if iso:
+        return iso
+    # Types Sample : payload["sampleTime"]["civilTime"]["date"].
+    sample_time = payload.get("sampleTime")
+    if isinstance(sample_time, dict):
+        civil = sample_time.get("civilTime")
+        iso = _civil_date_obj_to_iso(civil.get("date") if isinstance(civil, dict) else None)
+        if iso:
+            return iso
+    # Racine (fallback défensif).
     date_val = point.get("date")
     if isinstance(date_val, str):
         return date_val[:10]
     iso = _civil_date_obj_to_iso(date_val)
     if iso:
         return iso
-    # Format API réel : timestamps imbriqués sous "interval".
-    interval = point.get("interval") or {}
-    if isinstance(interval, dict):
-        civil_start = interval.get("civilStartTime")
-        iso = _civil_date_obj_to_iso(
-            civil_start.get("date") if isinstance(civil_start, dict) else None
-        )
-        if iso:
-            return iso
-        start = interval.get("startTime")
-        if isinstance(start, str):
-            return _civil_date_from_iso(start)
-    # Fallback racine.
     start = point.get("startTime") or point.get("start_time")
     if isinstance(start, str):
         return _civil_date_from_iso(start)
@@ -484,7 +503,8 @@ def _extract_date_from_point(point: dict[str, Any] | None) -> str | None:
 def _extract_end_date_from_point(point: dict[str, Any] | None) -> str | None:
     if not point:
         return None
-    interval = point.get("interval") or {}
+    payload = _point_payload(point)
+    interval = payload.get("interval") or {}
     if isinstance(interval, dict):
         civil_end = interval.get("civilEndTime")
         iso = _civil_date_obj_to_iso(civil_end.get("date") if isinstance(civil_end, dict) else None)
@@ -597,11 +617,12 @@ def _extract_civil_start_date_from_point(point: dict[str, Any] | None) -> str | 
 def _extract_hrv(point: dict[str, Any] | None) -> float | None:
     if not point:
         return None
-    value = point.get("value", {})
+    payload = _point_payload(point)
     # DailyHeartRateVariability.averageHeartRateVariabilityMilliseconds
-    ms = value.get("averageHeartRateVariabilityMilliseconds")
+    ms = payload.get("averageHeartRateVariabilityMilliseconds")
     if ms is None:
-        ms = value.get("average_heart_rate_variability_milliseconds")
+        value = point.get("value", {})
+        ms = value.get("averageHeartRateVariabilityMilliseconds")
     if ms is not None:
         try:
             return float(ms)
@@ -613,9 +634,12 @@ def _extract_hrv(point: dict[str, Any] | None) -> float | None:
 def _extract_rhr(point: dict[str, Any] | None) -> float | None:
     if not point:
         return None
-    value = point.get("value", {})
-    # DailyRestingHeartRate.beatsPerMinute
-    bpm = value.get("beatsPerMinute") or value.get("beats_per_minute")
+    payload = _point_payload(point)
+    # DailyRestingHeartRate.beatsPerMinute (parfois string côté API).
+    bpm = payload.get("beatsPerMinute")
+    if bpm is None:
+        value = point.get("value", {})
+        bpm = value.get("beatsPerMinute")
     if bpm is not None:
         try:
             return float(bpm)
@@ -627,10 +651,12 @@ def _extract_rhr(point: dict[str, Any] | None) -> float | None:
 def _extract_spo2(point: dict[str, Any] | None) -> float | None:
     if not point:
         return None
-    value = point.get("value", {})
-    pct = value.get("averagePercentage") or value.get("average_percentage")
+    payload = _point_payload(point)
+    # DailyOxygenSaturation.averagePercentage
+    pct = payload.get("averagePercentage")
     if pct is None:
-        pct = value.get("percentage")
+        value = point.get("value", {})
+        pct = value.get("averagePercentage") or value.get("percentage")
     if pct is not None:
         try:
             return float(pct)
@@ -642,26 +668,43 @@ def _extract_spo2(point: dict[str, Any] | None) -> float | None:
 def _extract_respiratory(point: dict[str, Any] | None) -> float | None:
     if not point:
         return None
-    value = point.get("value", {})
-    rate = value.get("breathsPerMinute") or value.get("breaths_per_minute")
+    payload = _point_payload(point)
+    # RespiratoryRateSleepSummary : breathsPerMinute global si présent.
+    rate = payload.get("breathsPerMinute")
     if rate is not None:
         try:
             return float(rate)
         except (TypeError, ValueError):
             return None
+    # Sinon moyenne des breathsPerMinute des sous-stats (deep/light/rem...).
+    rates: list[float] = []
+    for val in payload.values():
+        if isinstance(val, dict) and val.get("breathsPerMinute") is not None:
+            try:
+                rates.append(float(val["breathsPerMinute"]))
+            except (TypeError, ValueError):
+                continue
+    if rates:
+        return round(sum(rates) / len(rates), 1)
     return None
 
 
 def _extract_skin_temp(point: dict[str, Any] | None) -> float | None:
     if not point:
         return None
-    value = point.get("value", {})
-    delta = value.get("temperatureDeltaCelsius") or value.get("temperature_delta_celsius")
-    if delta is None:
-        delta = value.get("delta")
+    payload = _point_payload(point)
+    delta = payload.get("temperatureDeltaCelsius") or payload.get("temperature_delta_celsius")
     if delta is not None:
         try:
             return float(delta)
+        except (TypeError, ValueError):
+            return None
+    # DailySleepTemperatureDerivations : delta = nightly - baseline.
+    nightly = payload.get("nightlyTemperatureCelsius")
+    baseline = payload.get("baselineTemperatureCelsius")
+    if nightly is not None and baseline is not None:
+        try:
+            return round(float(nightly) - float(baseline), 2)
         except (TypeError, ValueError):
             return None
     return None
@@ -670,8 +713,16 @@ def _extract_skin_temp(point: dict[str, Any] | None) -> float | None:
 def _extract_steps(point: dict[str, Any] | None) -> int | None:
     if not point:
         return None
-    value = point.get("value", {})
-    # Format dailyRollUp : value.steps.countSum
+    # Format dailyRollUp réel : point.steps.countSum (string).
+    steps_value = point.get("steps")
+    if isinstance(steps_value, dict):
+        count = steps_value.get("countSum") or steps_value.get("count_sum")
+        if count is not None:
+            try:
+                return int(count)
+            except (TypeError, ValueError):
+                return None
+    value = point.get("value", {}) or {}
     steps_value = value.get("steps")
     if isinstance(steps_value, dict):
         count = steps_value.get("countSum") or steps_value.get("count_sum")
@@ -693,14 +744,22 @@ def _extract_steps(point: dict[str, Any] | None) -> int | None:
 def _extract_active_calories(point: dict[str, Any] | None) -> int | None:
     if not point:
         return None
-    value = point.get("value", {})
-    # Format dailyRollUp : value.activeEnergyBurned.energyKcalSum
-    energy_value = value.get("activeEnergyBurned")
+    # Format dailyRollUp réel : point.activeEnergyBurned.kcalSum.
+    energy_value = point.get("activeEnergyBurned")
     if isinstance(energy_value, dict):
-        kcal = energy_value.get("energyKcalSum") or energy_value.get("energy_kcal_sum")
+        kcal = energy_value.get("kcalSum") or energy_value.get("energyKcalSum")
         if kcal is not None:
             try:
-                return int(kcal)
+                return int(float(kcal))
+            except (TypeError, ValueError):
+                return None
+    value = point.get("value", {}) or {}
+    energy_value = value.get("activeEnergyBurned")
+    if isinstance(energy_value, dict):
+        kcal = energy_value.get("kcalSum") or energy_value.get("energyKcalSum")
+        if kcal is not None:
+            try:
+                return int(float(kcal))
             except (TypeError, ValueError):
                 return None
     # Format list brut
@@ -711,6 +770,30 @@ def _extract_active_calories(point: dict[str, Any] | None) -> int | None:
         except (TypeError, ValueError):
             return None
     return None
+
+
+def _stage_seconds(stage: dict[str, Any]) -> int:
+    """Durée d'un stade de sommeil en secondes.
+
+    L'API réelle fournit ``startTime``/``endTime`` par stade ; l'ancien format
+    mocké fournissait ``seconds``. Les deux sont supportés.
+    """
+    seconds = stage.get("seconds") or stage.get("durationSeconds")
+    if seconds:
+        try:
+            return max(0, int(seconds))
+        except (TypeError, ValueError):
+            pass
+    start = stage.get("startTime")
+    end = stage.get("endTime")
+    if isinstance(start, str) and isinstance(end, str):
+        try:
+            start_dt = dt.datetime.fromisoformat(start.replace("Z", "+00:00"))
+            end_dt = dt.datetime.fromisoformat(end.replace("Z", "+00:00"))
+            return max(0, int((end_dt - start_dt).total_seconds()))
+        except (ValueError, TypeError):
+            pass
+    return 0
 
 
 def _summarize_sleep_sessions(sessions: list[dict[str, Any]] | None) -> dict[str, Any]:
@@ -732,41 +815,49 @@ def _summarize_sleep_sessions(sessions: list[dict[str, Any]] | None) -> dict[str
     awake_sec = 0
 
     for session in sessions or []:
-        value = session.get("value", {})
-        stages = value.get("stages") or value.get("sleepStages") or []
-        for stage in stages:
-            stage_type = (
-                stage.get("stage") or stage.get("type") or stage.get("sleepStageType") or ""
-            ).upper()
-            seconds = stage.get("seconds") or stage.get("durationSeconds") or 0
-            try:
-                seconds = int(seconds)
-            except (TypeError, ValueError):
-                seconds = 0
-            if stage_type in ("DEEP", "DEEP_SLEEP"):
-                deep_sec += seconds
-            elif stage_type in ("REM", "REM_SLEEP"):
-                rem_sec += seconds
-            elif stage_type in ("LIGHT", "LIGHT_SLEEP", "ASLEEP"):
-                light_sec += seconds
-            elif stage_type in ("AWAKE", "AWAKE_SLEEP", "WAKE"):
-                awake_sec += seconds
+        payload = _point_payload(session)
+        stages = (
+            payload.get("stages")
+            or payload.get("sleepStages")
+            or (session.get("value", {}) or {}).get("stages")
+            or []
+        )
 
-        # Si les stades ne sont pas fournis, on utilise la durée totale de la session.
-        start = session.get("startTime") or session.get("start_time")
-        end = session.get("endTime") or session.get("end_time")
-        if start and end:
-            try:
-                start_dt = dt.datetime.fromisoformat(start.replace("Z", "+00:00"))
-                end_dt = dt.datetime.fromisoformat(end.replace("Z", "+00:00"))
-                session_sec = int((end_dt - start_dt).total_seconds())
-                if not stages:
-                    light_sec += max(0, session_sec - awake_sec)
-                total_sleep_sec += max(0, session_sec - awake_sec)
-            except (ValueError, TypeError):
-                pass
+        if stages:
+            s_deep = s_rem = s_light = s_awake = 0
+            for stage in stages:
+                seconds = _stage_seconds(stage)
+                stage_type = (
+                    stage.get("type") or stage.get("stage") or stage.get("sleepStageType") or ""
+                ).upper()
+                if stage_type in ("DEEP", "DEEP_SLEEP"):
+                    s_deep += seconds
+                elif stage_type in ("REM", "REM_SLEEP"):
+                    s_rem += seconds
+                elif stage_type in ("AWAKE", "AWAKE_SLEEP", "WAKE"):
+                    s_awake += seconds
+                else:
+                    # LIGHT / ASLEEP / type inconnu → sommeil léger.
+                    s_light += seconds
+            deep_sec += s_deep
+            rem_sec += s_rem
+            light_sec += s_light
+            awake_sec += s_awake
+            total_sleep_sec += s_deep + s_rem + s_light
         else:
-            total_sleep_sec += deep_sec + rem_sec + light_sec
+            # Pas de stades : durée totale de la session via l'interval.
+            interval = payload.get("interval") or {}
+            start = interval.get("startTime") or session.get("startTime")
+            end = interval.get("endTime") or session.get("endTime")
+            if isinstance(start, str) and isinstance(end, str):
+                try:
+                    start_dt = dt.datetime.fromisoformat(start.replace("Z", "+00:00"))
+                    end_dt = dt.datetime.fromisoformat(end.replace("Z", "+00:00"))
+                    session_sec = max(0, int((end_dt - start_dt).total_seconds()))
+                    total_sleep_sec += session_sec
+                    light_sec += session_sec
+                except (ValueError, TypeError):
+                    pass
 
     total_min = total_sleep_sec / 60
     if total_min > 0:
