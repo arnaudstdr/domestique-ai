@@ -25,6 +25,7 @@ def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[TestClie
     monkeypatch.delenv("STRAVA_HR_MAX", raising=False)
     init_db(db)
     from domestique_ai.api.main import app
+
     with TestClient(app) as c:
         yield c
 
@@ -70,7 +71,10 @@ def test_metrics_load_with_activities(client: TestClient, tmp_path: Path) -> Non
     body = r.json()
     assert body["current"] is not None
     assert body["current"]["zone"] in {
-        "freshness", "optimal", "overreaching", "overtraining",
+        "freshness",
+        "optimal",
+        "overreaching",
+        "overtraining",
     }
     assert len(body["history"]) > 0
 
@@ -131,7 +135,8 @@ def test_activities_filter_by_date_range(client: TestClient, tmp_path: Path) -> 
 
 
 def test_activities_filter_date_to_is_inclusive(
-    client: TestClient, tmp_path: Path,
+    client: TestClient,
+    tmp_path: Path,
 ) -> None:
     """``date_to=2026-04-30`` doit inclure les activités du 30 avril en soirée."""
     db = Path(tmp_path / "api_test.db")
@@ -142,7 +147,8 @@ def test_activities_filter_date_to_is_inclusive(
 
 
 def test_activities_filter_by_sport_types(
-    client: TestClient, tmp_path: Path,
+    client: TestClient,
+    tmp_path: Path,
 ) -> None:
     db = Path(tmp_path / "api_test.db")
     _insert_full(db, 1, "2026-04-10T08:00:00Z", sport_type="Ride")
@@ -190,7 +196,8 @@ def test_activities_filter_by_tss(client: TestClient, tmp_path: Path) -> None:
 
 
 def test_activities_filter_combinations_are_and(
-    client: TestClient, tmp_path: Path,
+    client: TestClient,
+    tmp_path: Path,
 ) -> None:
     """Tous les filtres sont combinés en ET logique."""
     db = Path(tmp_path / "api_test.db")
@@ -209,7 +216,8 @@ def test_activities_filter_invalid_date_returns_400(client: TestClient) -> None:
 
 
 def test_activities_sport_types_endpoint(
-    client: TestClient, tmp_path: Path,
+    client: TestClient,
+    tmp_path: Path,
 ) -> None:
     db = Path(tmp_path / "api_test.db")
     _insert_full(db, 1, "2026-04-10T08:00:00Z", sport_type="Ride")
@@ -236,7 +244,11 @@ def test_morning_get_empty(client: TestClient) -> None:
     assert body["history"] == []
     assert body["alerts"] == []
     assert set(body["baselines"].keys()) == {
-        "hrv_ms", "resting_hr", "sleep_hours", "sleep_score", "stress_score",
+        "hrv_ms",
+        "resting_hr",
+        "sleep_hours",
+        "sleep_score",
+        "stress_score",
     }
 
 
@@ -368,9 +380,9 @@ def test_app_routes_registered() -> None:
     """Smoke test : on s'assure que tous les routers sont bien câblés."""
     from domestique_ai.api.main import app
 
-    paths = {
-        getattr(route, "path", None) for route in app.routes
-    }
+    # ``app.openapi()`` matérialise les routes : compatible avec les routers
+    # lazy de Starlette récent (``_IncludedRouter`` sans attribut ``path``).
+    paths = set(app.openapi()["paths"])
     expected = {
         "/api/health",
         "/api/metrics/load",
@@ -399,10 +411,7 @@ def test_morning_metrics_table_initialized(client: TestClient, tmp_path: Path) -
     conn = sqlite3.connect(db)
     try:
         tables = {
-            row[0]
-            for row in conn.execute(
-                "SELECT name FROM sqlite_master WHERE type='table'"
-            )
+            row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
         }
     finally:
         conn.close()
