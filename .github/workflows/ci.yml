@@ -33,3 +33,14 @@ jobs:
 
       - name: Tests (pytest)
         run: pytest
+
+  semgrep:
+    runs-on: ubuntu-latest
+    container:
+      image: semgrep/semgrep:1.176.0
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Security (semgrep)
+        run: semgrep scan --config .semgrep.yml

@@ -1,0 +1,160 @@
+rules:
+  # --- Secrets / credentials ---
+  - id: hardcoded-password
+    pattern: |
+      $VAR = "..."
+      ...
+      $PASSWORD = $VAR
+    message: >
+      Possible hardcoded password. Use environment variables or a secrets manager.
+    languages: [python]
+    severity: WARNING
+    metadata:
+      cwe: ["CWE-798"]
+
+  # ============================================================
+  # Sources communes (mode taint) : données contrôlées par l'utilisateur.
+  # - Paramètres des handlers FastAPI (@router.get/post/... → path/query/body)
+  # - Attributs de l'objet Request Starlette
+  #   (`await` sur json/body/form évite de matcher les `response.json()`
+  #   synchrones des clients HTTP sortants type Strava)
+  # Les URLs depuis constantes / os.getenv (config serveur) ne sont PAS des
+  # sources : c'est ce qui élimine les faux positifs (healthcheck, client Strava).
+  # ============================================================
+  # --- SQL injection ---
+  - id: sql-injection-tainted-query
+    mode: taint
+    pattern-sources:
+      - patterns:
+          - pattern-either:
+              - pattern: |
+                  @$APP.$METHOD(...)
+                  def $FUNC(..., $PARAM, ...):
+                      ...
+              - pattern: |
+                  @$APP.$METHOD(...)
+                  async def $FUNC(..., $PARAM, ...):
+                      ...
+          - metavariable-regex:
+              metavariable: $METHOD
+              regex: ^(get|post|put|patch|delete)$
+          - focus-metavariable: $PARAM
+      - pattern-either:
+          - pattern: $REQ.query_params
+          - pattern: $REQ.path_params
+          - pattern: $REQ.headers
+          - pattern: $REQ.cookies
+          - pattern: await $REQ.json()
+          - pattern: await $REQ.body()
+          - pattern: await $REQ.form()
+    pattern-sanitizers:
+      - pattern: int($X)
+    pattern-sinks:
+      - patterns:
+          - pattern-either:
+              - pattern: $CURSOR.execute($QUERY, ...)
+              - pattern: $CURSOR.executemany($QUERY, ...)
+              - pattern: $CURSOR.executescript($QUERY, ...)
+          - focus-metavariable: $QUERY
+    message: >
+      User-controlled data reaches a SQL query built dynamically.
+      Use parameterized queries (? placeholders) instead of string interpolation.
+    languages: [python]
+    severity: ERROR
+    metadata:
+      cwe: ["CWE-89"]
+
+  # --- Command injection ---
+  - id: command-injection-os-system
+    pattern: os.system(...)
+    message: >
+      os.system() is vulnerable to command injection. Use subprocess with shell=False.
+    languages: [python]
+    severity: ERROR
+    metadata:
+      cwe: ["CWE-78"]
+
+  - id: command-injection-subprocess-shell
+    pattern: subprocess.call(..., shell=True, ...)
+    message: >
+      subprocess with shell=True is vulnerable to command injection.
+    languages: [python]
+    severity: ERROR
+    metadata:
+      cwe: ["CWE-78"]
+
+  # --- Unsafe deserialization ---
+  - id: unsafe-pickle
+    pattern: pickle.loads(...)
+    message: >
+      pickle.loads() can execute arbitrary code. Avoid deserializing untrusted data.
+    languages: [python]
+    severity: ERROR
+    metadata:
+      cwe: ["CWE-502"]
+
+  # --- SSRF ---
+  # Mode taint : ne se déclenche que si une donnée utilisateur atteint l'URL
+  # d'une requête HTTP sortante. Les URLs construites depuis des constantes
+  # (STRAVA_API_BASE_URL) ou des variables d'env (HEALTHCHECKS_PING_URL)
+  # ne sont plus signalées.
+  - id: ssrf-requests-get
+    mode: taint
+    pattern-sources:
+      - patterns:
+          - pattern-either:
+              - pattern: |
+                  @$APP.$METHOD(...)
+                  def $FUNC(..., $PARAM, ...):
+                      ...
+              - pattern: |
+                  @$APP.$METHOD(...)
+                  async def $FUNC(..., $PARAM, ...):
+                      ...
+          - metavariable-regex:
+              metavariable: $METHOD
+              regex: ^(get|post|put|patch|delete)$
+          - focus-metavariable: $PARAM
+      - pattern-either:
+          - pattern: $REQ.query_params
+          - pattern: $REQ.path_params
+          - pattern: $REQ.headers
+          - pattern: $REQ.cookies
+          - pattern: await $REQ.json()
+          - pattern: await $REQ.body()
+          - pattern: await $REQ.form()
+    pattern-sanitizers:
+      - pattern: int($X)
+    pattern-sinks:
+      - patterns:
+          - pattern-either:
+              - pattern: requests.get($URL, ...)
+              - pattern: requests.get(..., url=$URL, ...)
+              - pattern: requests.post($URL, ...)
+              - pattern: requests.post(..., url=$URL, ...)
+              - pattern: requests.put($URL, ...)
+              - pattern: requests.put(..., url=$URL, ...)
+              - pattern: requests.patch($URL, ...)
+              - pattern: requests.patch(..., url=$URL, ...)
+              - pattern: requests.delete($URL, ...)
+              - pattern: requests.delete(..., url=$URL, ...)
+              - pattern: requests.head($URL, ...)
+              - pattern: requests.request(..., $URL, ...)
+          - focus-metavariable: $URL
+    message: >
+      User-controlled data flows into the URL of an outgoing HTTP request (SSRF).
+      Validate the host/path against an allowlist before requesting.
+    languages: [python]
+    severity: WARNING
+    metadata:
+      cwe: ["CWE-918"]
+
+  # --- Debug / info leakage ---
+  - id: debug-true-in-config
+    pattern: DEBUG = True
+    message: >
+      DEBUG=True should not be committed in production code.
+    languages: [python]
+    severity: WARNING
+    metadata:
+      cwe: ["CWE-489"]
