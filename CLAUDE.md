@@ -181,6 +181,56 @@ Gestion des erreurs API :
 - `StravaAuthError` pour 401 / token absent.
 - 429 → backoff via `Retry-After` puis retry (déjà géré dans `fetch_activities`).
 
+### Google Health API — données bracelet (Fitbit / Pixel Watch)
+
+L'intégration lit les métriques de récupération depuis la **Google Health API**
+(successeur cloud de la Fitbit Web API). Elle alimente automatiquement la
+rubrique « Matin » : HRV, FC repos, sommeil + stades, SpO2, fréquence
+respiratoire, température cutanée, pas et calories actives.
+
+Deux scores sont recalculés localement :
+
+- **Sleep score** (0-100) : durée, efficacité, qualité (deep/REM), continuité.
+- **Readiness score** (0-100) : HRV et FC repos vs baseline 14 j + sommeil.
+
+La saisie manuelle reste possible ; un `sleep_score` saisi à la main n'est pas
+écrasé par le score calculé (`sleep_score_computed=0`).
+
+**Fichiers clés** :
+
+- `domestique_ai/ingestion/google_health.py` — client OAuth2 + API + mapping.
+- `domestique_ai/api/routers/google_health.py` — endpoints auth/callback/sync.
+- `domestique_ai/processing/morning_metrics.py` — scores calculés.
+
+**Configuration** (`.env`) :
+
+```bash
+GOOGLE_HEALTH_CLIENT_ID=...
+GOOGLE_HEALTH_CLIENT_SECRET=...
+GOOGLE_HEALTH_REDIRECT_URI=http://localhost:8501/api/google-health/callback
+DOMESTIQUE_AI_GOOGLE_HEALTH_AUTO_SYNC_MINUTES=360
+```
+
+**Setup Google Cloud** :
+
+1. Créer un projet et activer l'API **Google Health API**.
+2. Configurer l'écran de consentement OAuth (type **External**).
+3. Ajouter les scopes restreints :
+   - `googlehealth.profile.readonly`
+   - `googlehealth.settings.readonly`
+   - `googlehealth.activity_and_fitness.readonly`
+   - `googlehealth.health_metrics_and_measurements.readonly`
+   - `googlehealth.sleep.readonly`
+4. Créer des credentials OAuth 2.0 de type **Web application** avec les
+   redirect URIs autorisés (localhost + production).
+5. Lancer le flow depuis la page `/matin` ou via
+   `GET /api/google-health/auth`.
+6. Soumettre à la **review de vérification Google** pour les scopes restreints.
+   En attendant, ajouter ton compte comme test user pour développer.
+
+**Auto-sync** : un job APScheduler supplémentaire récupère les 7 derniers jours
+toutes les 6 heures par défaut. Il est indépendant du sync Strava.
+
 ### Coach LLM — `domestique_ai/llm/`
 
 Coach conversationnel via Ollama (modèle par défaut `gemma4:31b-cloud`, override `OLLAMA_MODEL`). Branché sur le dashboard dans l'onglet « Coach ».

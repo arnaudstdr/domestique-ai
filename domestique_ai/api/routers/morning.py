@@ -82,6 +82,19 @@ def post_morning(
         sleep_score=payload.sleep_score,
         stress_score=payload.stress_score,
         notes=payload.notes,
+        spo2_avg_pct=payload.spo2_avg_pct,
+        respiratory_rate_avg_bpm=payload.respiratory_rate_avg_bpm,
+        skin_temp_delta_c=payload.skin_temp_delta_c,
+        sleep_deep_min=payload.sleep_deep_min,
+        sleep_rem_min=payload.sleep_rem_min,
+        sleep_light_min=payload.sleep_light_min,
+        sleep_awake_min=payload.sleep_awake_min,
+        steps=payload.steps,
+        active_calories=payload.active_calories,
+        readiness_score=payload.readiness_score,
+        # Si l'utilisateur saisit un sleep_score manuel, on le marque comme tel
+        # pour ne pas l'écraser lors du prochain sync Google Health.
+        sleep_score_computed=0 if payload.sleep_score is not None else None,
         db_path=ctx.db_path,
     )
     return Response(status_code=status.HTTP_204_NO_CONTENT)

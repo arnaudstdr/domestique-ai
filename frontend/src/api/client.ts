@@ -11,6 +11,8 @@ import type {
   CoachSession,
   DailyBriefResponse,
   FtpProjectionResponse,
+  GoogleHealthStatusResponse,
+  GoogleHealthSyncResponse,
   InvitationCreated,
   InvitationOut,
   LoadResponse,
@@ -241,6 +243,18 @@ export const api = {
       http<void>(`/api/morning`, {
         method: "POST",
         body: JSON.stringify(entry),
+      }),
+  },
+  googleHealth: {
+    status: () => http<GoogleHealthStatusResponse>(`/api/google-health/status`),
+    auth: () => (window.location.href = `/api/google-health/auth`),
+    sync: (days = 7) =>
+      http<GoogleHealthSyncResponse>(`/api/google-health/sync?days=${days}`, {
+        method: "POST",
+      }),
+    disconnect: () =>
+      http<void>(`/api/google-health/disconnect`, {
+        method: "POST",
       }),
   },
   objective: {

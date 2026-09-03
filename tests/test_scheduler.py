@@ -17,6 +17,8 @@ def _reset_sync_state(monkeypatch):
     for key in (
         "DOMESTIQUE_AI_AUTO_SYNC_MINUTES",
         "DOMESTIQUE_AI_AUTO_SYNC_FIRST_RUN_DELAY_MIN",
+        "DOMESTIQUE_AI_GOOGLE_HEALTH_AUTO_SYNC_MINUTES",
+        "DOMESTIQUE_AI_GOOGLE_HEALTH_FIRST_RUN_DELAY_MIN",
         "HEALTHCHECKS_PING_URL",
         "HEALTHCHECKS_PING_INTERVAL_MIN",
     ):
@@ -102,6 +104,7 @@ def test_interval_negative_clamped_to_zero(monkeypatch):
 
 def test_start_scheduler_disabled_when_interval_zero(monkeypatch):
     monkeypatch.setenv("DOMESTIQUE_AI_AUTO_SYNC_MINUTES", "0")
+    monkeypatch.setenv("DOMESTIQUE_AI_GOOGLE_HEALTH_AUTO_SYNC_MINUTES", "0")
     scheduler._scheduler = None
     scheduler.start_scheduler()
     assert scheduler._scheduler is None
@@ -109,6 +112,7 @@ def test_start_scheduler_disabled_when_interval_zero(monkeypatch):
 
 def test_start_stop_scheduler_lifecycle(monkeypatch):
     monkeypatch.setenv("DOMESTIQUE_AI_AUTO_SYNC_MINUTES", "30")
+    monkeypatch.setenv("DOMESTIQUE_AI_GOOGLE_HEALTH_AUTO_SYNC_MINUTES", "0")
     # Délai de 1er run élevé pour ne pas déclencher de job pendant le test.
     monkeypatch.setenv("DOMESTIQUE_AI_AUTO_SYNC_FIRST_RUN_DELAY_MIN", "60")
     scheduler._scheduler = None
@@ -119,6 +123,31 @@ def test_start_stop_scheduler_lifecycle(monkeypatch):
         first = scheduler._scheduler
         scheduler.start_scheduler()
         assert scheduler._scheduler is first
+    finally:
+        scheduler.stop_scheduler()
+    assert scheduler._scheduler is None
+
+
+def test_google_health_interval_default(monkeypatch):
+    monkeypatch.delenv("DOMESTIQUE_AI_GOOGLE_HEALTH_AUTO_SYNC_MINUTES", raising=False)
+    assert scheduler._google_health_auto_sync_interval_minutes() == 360
+
+
+def test_google_health_interval_zero_disables(monkeypatch):
+    monkeypatch.setenv("DOMESTIQUE_AI_GOOGLE_HEALTH_AUTO_SYNC_MINUTES", "0")
+    assert scheduler._google_health_auto_sync_interval_minutes() == 0
+
+
+def test_google_health_start_scheduler_lifecycle(monkeypatch):
+    monkeypatch.setenv("DOMESTIQUE_AI_AUTO_SYNC_MINUTES", "0")
+    monkeypatch.setenv("DOMESTIQUE_AI_GOOGLE_HEALTH_AUTO_SYNC_MINUTES", "60")
+    monkeypatch.setenv("DOMESTIQUE_AI_GOOGLE_HEALTH_FIRST_RUN_DELAY_MIN", "60")
+    scheduler._scheduler = None
+    try:
+        scheduler.start_scheduler()
+        assert scheduler._scheduler is not None
+        job = scheduler._scheduler.get_job("google_health_auto_sync")
+        assert job is not None
     finally:
         scheduler.stop_scheduler()
     assert scheduler._scheduler is None
@@ -278,6 +307,7 @@ def test_scheduler_registers_only_healthcheck_when_sync_disabled(monkeypatch):
 def test_scheduler_noop_when_everything_disabled(monkeypatch):
     """Tout désactivé — aucun scheduler créé."""
     monkeypatch.setenv("DOMESTIQUE_AI_AUTO_SYNC_MINUTES", "0")
+    monkeypatch.setenv("DOMESTIQUE_AI_GOOGLE_HEALTH_AUTO_SYNC_MINUTES", "0")
     monkeypatch.delenv("HEALTHCHECKS_PING_URL", raising=False)
     scheduler._scheduler = None
     scheduler.start_scheduler()

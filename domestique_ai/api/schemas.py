@@ -218,6 +218,17 @@ class MorningEntry(BaseModel):
     sleep_score: int | None = None
     stress_score: int | None = None
     notes: str | None = None
+    spo2_avg_pct: float | None = None
+    respiratory_rate_avg_bpm: float | None = None
+    skin_temp_delta_c: float | None = None
+    sleep_deep_min: int | None = None
+    sleep_rem_min: int | None = None
+    sleep_light_min: int | None = None
+    sleep_awake_min: int | None = None
+    steps: int | None = None
+    active_calories: int | None = None
+    readiness_score: int | None = None
+    sleep_score_computed: int | None = None
 
 
 class MorningBaseline(BaseModel):
@@ -257,6 +268,32 @@ class MorningSubmit(BaseModel):
     sleep_score: int | None = None
     stress_score: int | None = None
     notes: str | None = None
+    spo2_avg_pct: float | None = None
+    respiratory_rate_avg_bpm: float | None = None
+    skin_temp_delta_c: float | None = None
+    sleep_deep_min: int | None = None
+    sleep_rem_min: int | None = None
+    sleep_light_min: int | None = None
+    sleep_awake_min: int | None = None
+    steps: int | None = None
+    active_calories: int | None = None
+    readiness_score: int | None = None
+
+
+# ---- Google Health ---------------------------------------------------------
+
+
+class GoogleHealthStatusResponse(BaseModel):
+    configured: bool
+    authenticated: bool
+    last_sync_at: str | None = None
+
+
+class GoogleHealthSyncResponse(BaseModel):
+    success: bool
+    synced_dates: list[str]
+    skipped_dates: list[str]
+    message: str
 
 
 # ---- Objective ---------------------------------------------------------------

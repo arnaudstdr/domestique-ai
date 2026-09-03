@@ -8,10 +8,13 @@ import pytest
 
 from domestique_ai.ingestion.strava import init_db
 from domestique_ai.processing.morning_metrics import (
+    calculate_readiness_score,
+    calculate_sleep_score,
     compute_baselines,
     detect_morning_alerts,
     fetch_morning_entry,
     fetch_morning_history,
+    readiness_band,
     save_morning_entry,
 )
 
@@ -32,6 +35,17 @@ def test_save_and_fetch_full_entry(db_path: Path):
         sleep_score=82,
         stress_score=25,
         notes="Bonne nuit",
+        spo2_avg_pct=98.0,
+        respiratory_rate_avg_bpm=14.0,
+        skin_temp_delta_c=-0.2,
+        sleep_deep_min=90,
+        sleep_rem_min=120,
+        sleep_light_min=240,
+        sleep_awake_min=30,
+        steps=8500,
+        active_calories=420,
+        readiness_score=72,
+        sleep_score_computed=1,
         db_path=db_path,
     )
     entry = fetch_morning_entry("2026-05-01", db_path=db_path)
@@ -43,6 +57,17 @@ def test_save_and_fetch_full_entry(db_path: Path):
         "sleep_score": 82,
         "stress_score": 25,
         "notes": "Bonne nuit",
+        "spo2_avg_pct": 98.0,
+        "respiratory_rate_avg_bpm": 14.0,
+        "skin_temp_delta_c": -0.2,
+        "sleep_deep_min": 90,
+        "sleep_rem_min": 120,
+        "sleep_light_min": 240,
+        "sleep_awake_min": 30,
+        "steps": 8500,
+        "active_calories": 420,
+        "readiness_score": 72,
+        "sleep_score_computed": 1,
     }
 
 
@@ -138,3 +163,68 @@ def test_alerts_severity_critical(db_path: Path):
         save_morning_entry(f"2026-05-0{i + 1}", hrv_ms=hrv, db_path=db_path)
     alerts = detect_morning_alerts(db_path=db_path)
     assert alerts[0]["severity"] == "critical"
+
+
+def test_calculate_sleep_score_perfect_night():
+    # 7h30 de sommeil, deep 18%, REM 23%, awake 5% → score élevé
+    score = calculate_sleep_score(
+        sleep_hours=7.5,
+        sleep_deep_min=81,
+        sleep_rem_min=104,
+        sleep_light_min=240,
+        sleep_awake_min=25,
+    )
+    assert score is not None
+    assert 80 <= score <= 100
+
+
+def test_calculate_sleep_score_no_data():
+    assert calculate_sleep_score(None, None, None, None, None) is None
+
+
+def test_calculate_sleep_score_short_sleep():
+    score = calculate_sleep_score(
+        sleep_hours=5.0,
+        sleep_deep_min=40,
+        sleep_rem_min=60,
+        sleep_light_min=140,
+        sleep_awake_min=60,
+    )
+    assert score is not None
+    assert score < 70
+
+
+def test_calculate_readiness_score_with_baseline(db_path: Path):
+    # Baseline HRV ~60, FC repos ~48
+    for i, (hrv, hr) in enumerate([(60, 48), (58, 49), (62, 47), (60, 48)]):
+        save_morning_entry(f"2026-05-0{i + 1}", hrv_ms=hrv, resting_hr=hr, db_path=db_path)
+
+    # Jour courant : HRV +10%, FC repos -2 bpm → readiness élevé
+    save_morning_entry(
+        "2026-05-05",
+        hrv_ms=66.0,
+        resting_hr=46.0,
+        sleep_hours=8.0,
+        db_path=db_path,
+    )
+    score = calculate_readiness_score(
+        hrv_ms=66.0,
+        resting_hr=46.0,
+        sleep_hours=8.0,
+        db_path=db_path,
+    )
+    assert score is not None
+    assert score > 70
+
+
+def test_calculate_readiness_score_no_data():
+    assert calculate_readiness_score(None, None, None) is None
+
+
+def test_readiness_band():
+    assert readiness_band(90) == "PEAK"
+    assert readiness_band(75) == "HIGH"
+    assert readiness_band(60) == "BALANCED"
+    assert readiness_band(40) == "LOW"
+    assert readiness_band(20) == "VERY_LOW"
+    assert readiness_band(None) is None

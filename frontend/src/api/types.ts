@@ -205,6 +205,17 @@ export interface MorningEntry {
   sleep_score: number | null;
   stress_score: number | null;
   notes: string | null;
+  spo2_avg_pct: number | null;
+  respiratory_rate_avg_bpm: number | null;
+  skin_temp_delta_c: number | null;
+  sleep_deep_min: number | null;
+  sleep_rem_min: number | null;
+  sleep_light_min: number | null;
+  sleep_awake_min: number | null;
+  steps: number | null;
+  active_calories: number | null;
+  readiness_score: number | null;
+  sleep_score_computed: number | null;
 }
 
 export interface MorningBaseline {
@@ -231,6 +242,19 @@ export interface MorningResponse {
   history: MorningEntry[];
   baselines: Record<string, MorningBaseline>;
   alerts: MorningAlert[];
+}
+
+export interface GoogleHealthStatusResponse {
+  configured: boolean;
+  authenticated: boolean;
+  last_sync_at: string | null;
+}
+
+export interface GoogleHealthSyncResponse {
+  success: boolean;
+  synced_dates: string[];
+  skipped_dates: string[];
+  message: string;
 }
 
 export interface Objective {

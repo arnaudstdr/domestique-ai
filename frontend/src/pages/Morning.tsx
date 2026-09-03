@@ -8,19 +8,54 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
-import { Save, Sunrise } from "lucide-react";
+import {
+  Activity,
+  RefreshCw,
+  Save,
+  Sunrise,
+  Unlink,
+} from "lucide-react";
 import { api, ApiError } from "../api/client";
-import type { MorningResponse } from "../api/types";
+import type {
+  MorningEntry,
+  MorningResponse,
+  GoogleHealthStatusResponse,
+} from "../api/types";
 import MetricCard from "../components/MetricCard";
 import { CHART, axisProps, tooltipStyle } from "../chartTheme";
 import { useToast } from "../hooks/useToast";
 
-const METRICS: { key: keyof MetricForm; label: string; unit: string; isInt?: boolean }[] = [
+const MANUAL_METRICS: {
+  key: keyof MetricForm;
+  label: string;
+  unit: string;
+  isInt?: boolean;
+}[] = [
   { key: "hrv_ms", label: "HRV", unit: "ms" },
   { key: "resting_hr", label: "FC repos", unit: "bpm" },
   { key: "sleep_hours", label: "Sommeil", unit: "h" },
   { key: "sleep_score", label: "Score sommeil", unit: "/100", isInt: true },
   { key: "stress_score", label: "Stress", unit: "/100", isInt: true },
+];
+
+const ADVANCED_METRICS: {
+  key: keyof MorningEntry;
+  label: string;
+  unit: string;
+}[] = [
+  { key: "readiness_score", label: "Readiness", unit: "/100" },
+  { key: "spo2_avg_pct", label: "SpO2 moyen", unit: "%" },
+  { key: "respiratory_rate_avg_bpm", label: "Freq. resp.", unit: "rpm" },
+  { key: "skin_temp_delta_c", label: "Δ temp. peau", unit: "°C" },
+  { key: "steps", label: "Pas", unit: "" },
+  { key: "active_calories", label: "Calories act.", unit: "kcal" },
+];
+
+const SLEEP_STAGES: { key: keyof MorningEntry; label: string; color: string }[] = [
+  { key: "sleep_deep_min", label: "Deep", color: "#818cf8" },
+  { key: "sleep_rem_min", label: "REM", color: "#34d399" },
+  { key: "sleep_light_min", label: "Light", color: "#fbbf24" },
+  { key: "sleep_awake_min", label: "Awake", color: "#f87171" },
 ];
 
 interface MetricForm {
@@ -44,13 +79,19 @@ export default function Morning() {
   const [date, setDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [form, setForm] = useState<MetricForm>(EMPTY);
   const [saving, setSaving] = useState(false);
+  const [ghStatus, setGhStatus] = useState<GoogleHealthStatusResponse | null>(null);
+  const [syncing, setSyncing] = useState(false);
   const { push } = useToast();
 
   async function refresh() {
     try {
-      const r = await api.morning.get(90);
-      setData(r);
-      const existing = r.history.find((e) => e.date === date);
+      const [morningData, statusData] = await Promise.all([
+        api.morning.get(90),
+        api.googleHealth.status(),
+      ]);
+      setData(morningData);
+      setGhStatus(statusData);
+      const existing = morningData.history.find((e: MorningEntry) => e.date === date);
       if (existing) {
         setForm({
           hrv_ms: existing.hrv_ms?.toString() ?? "",
@@ -94,8 +135,113 @@ export default function Morning() {
     }
   }
 
+  async function syncGoogleHealth() {
+    setSyncing(true);
+    try {
+      const result = await api.googleHealth.sync(7);
+      push(result.message, "success");
+      await refresh();
+    } catch (err) {
+      const msg = err instanceof ApiError ? err.message : String(err);
+      push(`Sync échouée : ${msg}`, "error");
+    } finally {
+      setSyncing(false);
+    }
+  }
+
+  async function disconnectGoogleHealth() {
+    try {
+      await api.googleHealth.disconnect();
+      push("Google Health déconnecté.", "success");
+      await refresh();
+    } catch (err) {
+      const msg = err instanceof ApiError ? err.message : String(err);
+      push(`Déconnexion échouée : ${msg}`, "error");
+    }
+  }
+
+  const latestEntry = data?.history[data.history.length - 1] ?? null;
+
   return (
     <div className="stagger space-y-4">
+      <div className="card space-y-3">
+        <div className="flex items-start justify-between gap-3">
+          <h2 className="flex items-center gap-2 font-display text-lg font-bold tracking-tight">
+            <Sunrise className="h-5 w-5 text-accent" strokeWidth={1.75} aria-hidden="true" />
+            Google Health
+          </h2>
+          {ghStatus?.authenticated ? (
+            <div className="flex items-center gap-2">
+              <span className="inline-flex h-2 w-2 rounded-full bg-emerald-500" />
+              <span className="text-xs text-muted">Connecté</span>
+            </div>
+          ) : ghStatus?.configured ? (
+            <div className="flex items-center gap-2">
+              <span className="inline-flex h-2 w-2 rounded-full bg-amber-500" />
+              <span className="text-xs text-muted">Non connecté</span>
+            </div>
+          ) : null}
+        </div>
+
+        {ghStatus?.configured === false && (
+          <p className="text-sm text-muted">
+            L'intégration Google Health n'est pas configurée côté serveur.
+          </p>
+        )}
+
+        <div className="flex flex-wrap gap-2">
+          {!ghStatus?.authenticated ? (
+            <button
+              onClick={() => api.googleHealth.auth()}
+              className="btn-primary inline-flex items-center gap-2"
+            >
+              <Activity className="h-4 w-4" strokeWidth={1.75} />
+              Connecter Google Health
+            </button>
+          ) : (
+            <>
+              <button
+                onClick={syncGoogleHealth}
+                disabled={syncing}
+                className="btn-primary inline-flex items-center gap-2"
+              >
+                <RefreshCw
+                  className={`h-4 w-4 ${syncing ? "animate-spin" : ""}`}
+                  strokeWidth={1.75}
+                />
+                {syncing ? "Sync…" : "Sync maintenant"}
+              </button>
+              <button
+                onClick={disconnectGoogleHealth}
+                className="btn-ghost inline-flex items-center gap-2"
+              >
+                <Unlink className="h-4 w-4" strokeWidth={1.75} />
+                Déconnecter
+              </button>
+            </>
+          )}
+        </div>
+
+        {ghStatus?.last_sync_at && (
+          <p className="text-xs text-muted">
+            Dernière sync : {new Date(ghStatus.last_sync_at).toLocaleString("fr-FR")}
+          </p>
+        )}
+      </div>
+
+      {latestEntry && latestEntry.readiness_score != null && (
+        <div className="card">
+          <div className="flex items-center justify-between">
+            <span className="text-sm text-muted">Readiness aujourd'hui</span>
+            <ReadinessBadge score={latestEntry.readiness_score} />
+          </div>
+          <div className="mt-1 font-display text-3xl font-bold">
+            {latestEntry.readiness_score}
+            <span className="text-base font-normal text-muted">/100</span>
+          </div>
+        </div>
+      )}
+
       <div className="card space-y-3">
         <h2 className="flex items-center gap-2 font-display text-lg font-bold tracking-tight">
           <Sunrise className="h-5 w-5 text-accent" strokeWidth={1.75} aria-hidden="true" />
@@ -112,7 +258,7 @@ export default function Morning() {
           />
         </label>
         <div className="grid grid-cols-2 gap-3">
-          {METRICS.map((m) => (
+          {MANUAL_METRICS.map((m) => (
             <label key={m.key} className="block">
               <span className="text-xs text-muted">
                 {m.label} <span className="text-muted/70">({m.unit})</span>
@@ -130,11 +276,7 @@ export default function Morning() {
             </label>
           ))}
         </div>
-        <button
-          onClick={submit}
-          disabled={saving}
-          className="btn-primary w-full"
-        >
+        <button onClick={submit} disabled={saving} className="btn-primary w-full">
           {saving ? (
             "Enregistrement…"
           ) : (
@@ -148,9 +290,49 @@ export default function Morning() {
 
       {data && (
         <>
+          <h3 className="label-eyebrow">Métriques avancées</h3>
+          <div className="grid grid-cols-2 gap-3">
+            {ADVANCED_METRICS.map((m) => {
+              const value = latestEntry?.[m.key];
+              if (value == null) return null;
+              return (
+                <MetricCard
+                  key={m.key}
+                  label={m.label}
+                  value={`${Number(value).toFixed(m.key === "skin_temp_delta_c" ? 2 : 0)} ${m.unit}`}
+                  hint="Google Health"
+                />
+              );
+            })}
+          </div>
+
+          {latestEntry && hasSleepStages(latestEntry) && (
+            <div className="card space-y-2">
+              <h4 className="label-eyebrow">Stades de sommeil (dernière nuit)</h4>
+              <div className="grid grid-cols-2 gap-2">
+                {SLEEP_STAGES.map((s) => {
+                  const min = latestEntry[s.key];
+                  if (min == null) return null;
+                  return (
+                    <div key={s.key} className="flex items-center justify-between rounded-lg bg-white/[0.04] px-3 py-2">
+                      <span className="flex items-center gap-2 text-sm">
+                        <span
+                          className="inline-block h-2 w-2 rounded-full"
+                          style={{ backgroundColor: s.color }}
+                        />
+                        {s.label}
+                      </span>
+                      <span className="text-sm font-medium">{formatMin(min as number)}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
           <h3 className="label-eyebrow">Tendances 90 j</h3>
           <div className="grid grid-cols-2 gap-3">
-            {METRICS.slice(0, 4).map((m) => {
+            {MANUAL_METRICS.slice(0, 4).map((m) => {
               const b = data.baselines[m.key];
               if (!b || !b.available || b.latest == null) {
                 return (
@@ -187,7 +369,7 @@ export default function Morning() {
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            {METRICS.slice(0, 4).map((m) => (
+            {MANUAL_METRICS.slice(0, 4).map((m) => (
               <MorningChart
                 key={m.key}
                 title={m.label}
@@ -202,6 +384,55 @@ export default function Morning() {
   );
 }
 
+function ReadinessBadge({ score }: { score: number }) {
+  let label = "Très faible";
+  let tone: "danger" | "warning" | "good" | "accent" = "danger";
+  if (score >= 85) {
+    label = "Pic";
+    tone = "accent";
+  } else if (score >= 70) {
+    label = "Élevé";
+    tone = "good";
+  } else if (score >= 50) {
+    label = "Équilibré";
+    tone = "good";
+  } else if (score >= 30) {
+    label = "Faible";
+    tone = "warning";
+  }
+  return (
+    <span
+      className={`rounded-full px-2 py-0.5 text-xs font-medium ${
+        tone === "danger"
+          ? "bg-red-500/10 text-red-500"
+          : tone === "warning"
+            ? "bg-amber-500/10 text-amber-500"
+            : tone === "accent"
+              ? "bg-accent/10 text-accent"
+              : "bg-emerald-500/10 text-emerald-500"
+      }`}
+    >
+      {label}
+    </span>
+  );
+}
+
+function hasSleepStages(entry: MorningEntry): boolean {
+  return (
+    entry.sleep_deep_min != null ||
+    entry.sleep_rem_min != null ||
+    entry.sleep_light_min != null ||
+    entry.sleep_awake_min != null
+  );
+}
+
+function formatMin(min: number): string {
+  const h = Math.floor(min / 60);
+  const m = min % 60;
+  if (h > 0) return `${h}h${m.toString().padStart(2, "0")}`;
+  return `${m} min`;
+}
+
 function MorningChart({
   title,
   history,
@@ -211,16 +442,16 @@ function MorningChart({
   history: Record<string, unknown>[];
   metricKey: keyof MetricForm;
 }) {
-  const data = history
+  const chartData = history
     .filter((e) => e[metricKey] != null)
     .map((e) => ({ date: e.date as string, value: e[metricKey] as number }));
-  if (data.length === 0) return null;
+  if (chartData.length === 0) return null;
   return (
     <div className="card">
       <h4 className="label-eyebrow mb-2">{title}</h4>
       <div className="h-32">
         <ResponsiveContainer width="100%" height="100%">
-          <LineChart data={data} margin={{ top: 4, right: 8, left: -16, bottom: 0 }}>
+          <LineChart data={chartData} margin={{ top: 4, right: 8, left: -16, bottom: 0 }}>
             <CartesianGrid stroke={CHART.grid} strokeDasharray="3 3" />
             <XAxis
               dataKey="date"

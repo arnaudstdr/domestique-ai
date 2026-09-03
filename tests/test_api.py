@@ -249,6 +249,12 @@ def test_morning_get_empty(client: TestClient) -> None:
         "sleep_hours",
         "sleep_score",
         "stress_score",
+        "readiness_score",
+        "spo2_avg_pct",
+        "respiratory_rate_avg_bpm",
+        "skin_temp_delta_c",
+        "steps",
+        "active_calories",
     }
 
 

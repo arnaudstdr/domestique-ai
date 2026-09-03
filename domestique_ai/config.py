@@ -306,6 +306,70 @@ def get_garmin_credentials() -> tuple[str | None, str | None]:
     )
 
 
+def get_google_health_credentials() -> tuple[str | None, str | None, str]:
+    """Identifiants OAuth2 Google Health API lus depuis l'env (.env).
+
+    Retourne ``(client_id, client_secret, redirect_uri)``. ``client_id`` et
+    ``client_secret`` sont ``None`` si non configurés — auquel cas l'intégration
+    Google Health est désactivée côté UI. Le ``redirect_uri`` doit être
+    enregistré dans les credentials Web de Google Cloud.
+    """
+    return (
+        os.getenv("GOOGLE_HEALTH_CLIENT_ID") or None,
+        os.getenv("GOOGLE_HEALTH_CLIENT_SECRET") or None,
+        os.getenv(
+            "GOOGLE_HEALTH_REDIRECT_URI",
+            f"{get_app_base_url()}/api/google-health/callback",
+        ),
+    )
+
+
+def get_google_health_tokens_path() -> Path:
+    """Chemin du fichier de stockage local des tokens Google Health.
+
+    Override possible via ``GOOGLE_HEALTH_TOKENS_PATH`` (utile pour les tests).
+    """
+    custom = os.getenv("GOOGLE_HEALTH_TOKENS_PATH")
+    if custom:
+        return Path(custom).expanduser().resolve()
+    return REPO_ROOT / "data" / ".google_health_tokens.json"
+
+
+def get_google_health_auto_sync_minutes() -> int:
+    """Période de l'auto-sync Google Health en minutes (défaut 360 = 6h).
+
+    ``0`` désactive complètement l'auto-sync.
+    """
+    raw = os.getenv("DOMESTIQUE_AI_GOOGLE_HEALTH_AUTO_SYNC_MINUTES")
+    if raw is None or raw.strip() == "":
+        return 360
+    try:
+        v = int(raw)
+    except ValueError:
+        logger.warning(
+            "DOMESTIQUE_AI_GOOGLE_HEALTH_AUTO_SYNC_MINUTES=%r invalide — fallback 360.",
+            raw,
+        )
+        return 360
+    return max(0, v)
+
+
+def get_google_health_first_run_delay_minutes() -> int:
+    """Délai avant le 1er auto-sync Google Health après démarrage (défaut 10)."""
+    raw = os.getenv("DOMESTIQUE_AI_GOOGLE_HEALTH_FIRST_RUN_DELAY_MIN")
+    if raw is None or raw.strip() == "":
+        return 10
+    try:
+        v = int(raw)
+    except ValueError:
+        logger.warning(
+            "DOMESTIQUE_AI_GOOGLE_HEALTH_FIRST_RUN_DELAY_MIN=%r invalide — fallback 10.",
+            raw,
+        )
+        return 10
+    return max(0, v)
+
+
 def get_garmin_token_dir() -> Path:
     """Répertoire où ``garth`` cache les tokens Garmin Connect.
 

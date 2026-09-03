@@ -30,6 +30,9 @@ from domestique_ai.api.routers import (
     coach as coach_router,
 )
 from domestique_ai.api.routers import (
+    google_health as google_health_router,
+)
+from domestique_ai.api.routers import (
     metrics as metrics_router,
 )
 from domestique_ai.api.routers import (
@@ -242,6 +245,7 @@ app.include_router(auth_router.router)
 app.include_router(metrics_router.router)
 app.include_router(activities_router.router)
 app.include_router(morning_router.router)
+app.include_router(google_health_router.router)
 app.include_router(objective_router.router)
 app.include_router(profile_router.router)
 app.include_router(availability_router.router)

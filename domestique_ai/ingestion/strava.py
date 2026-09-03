@@ -400,9 +400,34 @@ def init_db(db_path: Path | None = None, *, ctx: AthleteContext | None = None) -
                 sleep_hours REAL,
                 sleep_score INTEGER,
                 stress_score INTEGER,
-                notes TEXT
+                notes TEXT,
+                spo2_avg_pct REAL,
+                respiratory_rate_avg_bpm REAL,
+                skin_temp_delta_c REAL,
+                sleep_deep_min INTEGER,
+                sleep_rem_min INTEGER,
+                sleep_light_min INTEGER,
+                sleep_awake_min INTEGER,
+                steps INTEGER,
+                active_calories INTEGER,
+                readiness_score INTEGER,
+                sleep_score_computed INTEGER
             )
         """)
+        for col, ddl in (
+            ("spo2_avg_pct", "REAL"),
+            ("respiratory_rate_avg_bpm", "REAL"),
+            ("skin_temp_delta_c", "REAL"),
+            ("sleep_deep_min", "INTEGER"),
+            ("sleep_rem_min", "INTEGER"),
+            ("sleep_light_min", "INTEGER"),
+            ("sleep_awake_min", "INTEGER"),
+            ("steps", "INTEGER"),
+            ("active_calories", "INTEGER"),
+            ("readiness_score", "INTEGER"),
+            ("sleep_score_computed", "INTEGER"),
+        ):
+            _ensure_column(conn, "morning_metrics", col, ddl)
         conn.execute("""
             CREATE TABLE IF NOT EXISTS training_plans (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,

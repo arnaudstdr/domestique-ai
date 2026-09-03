@@ -217,7 +217,8 @@ def get_activity_details(strava_id: int, *, ctx: AthleteContext | None = None) -
 
 def get_morning_trends(days: int = 30, *, ctx: AthleteContext | None = None) -> dict[str, Any]:
     """
-    Tendances des métriques matinales (HRV, FC repos, sommeil, stress) avec
+    Tendances des métriques matinales (HRV, FC repos, sommeil, stress, readiness,
+    SpO2, fréquence respiratoire, température cutanée, pas, calories) avec
     baselines mobiles sur 14 jours et alertes si dérive vs baseline.
     """
     from domestique_ai.processing.morning_metrics import (
@@ -225,6 +226,7 @@ def get_morning_trends(days: int = 30, *, ctx: AthleteContext | None = None) -> 
         compute_baselines,
         detect_morning_alerts,
         fetch_morning_history,
+        readiness_band,
     )
 
     ctx = ctx or context_from_env()
@@ -246,11 +248,32 @@ def get_morning_trends(days: int = 30, *, ctx: AthleteContext | None = None) -> 
                 "delta_pct": round(b["delta_pct"], 1),
                 "sample_size": b["sample_size"],
             }
+
+    latest = history[-1]
+    advanced_latest = {
+        "readiness_score": latest.get("readiness_score"),
+        "readiness_band": readiness_band(latest.get("readiness_score")),
+        "spo2_avg_pct": latest.get("spo2_avg_pct"),
+        "respiratory_rate_avg_bpm": latest.get("respiratory_rate_avg_bpm"),
+        "skin_temp_delta_c": latest.get("skin_temp_delta_c"),
+        "steps": latest.get("steps"),
+        "active_calories": latest.get("active_calories"),
+        "sleep_stages_min": {
+            "deep": latest.get("sleep_deep_min"),
+            "rem": latest.get("sleep_rem_min"),
+            "light": latest.get("sleep_light_min"),
+            "awake": latest.get("sleep_awake_min"),
+        },
+        "sleep_score_computed": latest.get("sleep_score_computed"),
+    }
+
     return {
         "available": True,
         "days": days,
         "entries_count": len(history),
+        "latest_date": latest.get("date"),
         "baselines": baselines,
+        "latest_advanced": advanced_latest,
         "alerts": detect_morning_alerts(db_path=ctx.db_path),
     }
 
@@ -619,9 +642,10 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "get_morning_trends",
-            "description": "Tendances HRV, FC repos, sommeil, stress saisies "
-            "manuellement chaque matin. Renvoie baselines 14 j "
-            "et alertes si dérive (HRV ↓, FC repos ↑, etc.).",
+            "description": "Tendances des métriques matinales : HRV, FC repos, "
+            "sommeil, stress, readiness score, SpO2, fréquence respiratoire, "
+            "température cutanée, pas et calories. Renvoie baselines 14 j, "
+            "dernières valeurs avancées et alertes si dérive.",
             "parameters": {
                 "type": "object",
                 "properties": {
