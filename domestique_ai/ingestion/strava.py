@@ -342,7 +342,16 @@ class StravaClient:
             },
             timeout=30,
         )
-        response.raise_for_status()
+        if response.status_code >= 400:
+            # Le corps contient la raison exacte (code déjà utilisé/expiré,
+            # secret erroné, redirect_uri mismatch…).
+            try:
+                detail = response.json()
+            except ValueError:
+                detail = response.text
+            raise StravaAuthError(
+                f"Échange du code OAuth échoué (HTTP {response.status_code}) : {detail}"
+            )
         return response.json()
 
 
