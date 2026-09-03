@@ -84,25 +84,31 @@ def get_google_health_callback(
     code: str | None = None,
     state: str | None = None,
     error: str | None = None,
-    ctx: AthleteContext = Depends(get_athlete_context),  # noqa: B008
 ) -> RedirectResponse:
-    """Callback OAuth2 Google Health : échange le code et redirige vers le front."""
+    """Callback OAuth2 Google Health : échange le code et redirige vers le front.
+
+    Ce endpoint est appelé par Google (redirection navigateur) et est donc
+    exempté du Bearer auth. On reconstruit le client à partir du compte
+    bootstrap (single-user pour l'instant) et on valide le state stocké
+    localement.
+    """
+    from domestique_ai.athlete_context import context_for_athlete
+    from domestique_ai.platform_db import get_or_create_bootstrap_coach
+
     if error:
         log.warning("OAuth Google Health refusé : %s", error)
         return _redirect_front("google-health=denied")
     if not code:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Paramètre 'code' manquant.",
-        )
+        log.warning("Callback Google Health : paramètre 'code' manquant.")
+        return _redirect_front("google-health=error")
 
+    bootstrap = get_or_create_bootstrap_coach()
+    ctx = context_for_athlete(bootstrap)
     client = _build_client(ctx)
     stored_state = client.tokens.get("oauth_state")
     if stored_state and state != stored_state:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="State OAuth invalide.",
-        )
+        log.warning("Callback Google Health : state OAuth invalide.")
+        return _redirect_front("google-health=error")
 
     try:
         client.exchange_code(code)
