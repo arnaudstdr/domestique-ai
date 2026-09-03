@@ -262,6 +262,10 @@ class GoogleHealthClient:
     # API helpers
     # -----------------------------------------------------------------------
 
+    def get_identity(self) -> dict[str, Any]:
+        """Identité Health de l'utilisateur (inclut ``legacyUserId`` si Fitbit lié)."""
+        return self._request("GET", "/users/me/identity")
+
     def fetch_data_points(
         self,
         data_type: str,
@@ -280,11 +284,27 @@ class GoogleHealthClient:
             params={"filter": filter_str},
         )
         points = data.get("dataPoints", [])
+        log.info(
+            "Google Health %s : filtre=%r, %d point(s) reçu(s)",
+            data_type,
+            filter_str,
+            len(points),
+        )
+        if points:
+            log.info(
+                "Google Health %s premier point brut : %s", data_type, json.dumps(points[0])[:600]
+            )
         result: dict[str, dict[str, Any]] = {}
         for point in points:
             date_str = _extract_date_from_point(point)
             if date_str:
                 result[date_str] = point
+            else:
+                log.warning(
+                    "Google Health %s : date non extractible du point %s",
+                    data_type,
+                    json.dumps(point)[:300],
+                )
         return result
 
     def fetch_daily_rollup(
@@ -311,6 +331,17 @@ class GoogleHealthClient:
             json_payload=payload,
         )
         points = data.get("rollupDataPoints", [])
+        log.info(
+            "Google Health %s rollup : %d point(s) reçu(s)",
+            data_type,
+            len(points),
+        )
+        if points:
+            log.info(
+                "Google Health %s premier rollup brut : %s",
+                data_type,
+                json.dumps(points[0])[:600],
+            )
         result: dict[str, dict[str, Any]] = {}
         for point in points:
             date_str = _extract_civil_start_date_from_point(point)
@@ -335,11 +366,26 @@ class GoogleHealthClient:
             params={"filter": filter_str},
         )
         points = data.get("dataPoints", [])
+        log.info(
+            "Google Health sleep : filtre=%r, %d session(s) reçue(s)",
+            filter_str,
+            len(points),
+        )
+        if points:
+            log.info(
+                "Google Health sleep première session brute : %s",
+                json.dumps(points[0])[:600],
+            )
         result: dict[str, list[dict[str, Any]]] = {}
         for point in points:
             date_str = _extract_end_date_from_point(point)
             if date_str:
                 result.setdefault(date_str, []).append(point)
+            else:
+                log.warning(
+                    "Google Health sleep : date de fin non extractible du point %s",
+                    json.dumps(point)[:300],
+                )
         return result
 
     # -----------------------------------------------------------------------
@@ -396,15 +442,41 @@ def _all_dates(start: dt.date, end: dt.date) -> list[str]:
     return dates
 
 
+def _civil_date_obj_to_iso(obj: Any) -> str | None:
+    """Convertit un objet date civil ``{year, month, day}`` en date ISO."""
+    if not isinstance(obj, dict):
+        return None
+    try:
+        return dt.date(obj["year"], obj["month"], obj["day"]).isoformat()
+    except (KeyError, TypeError, ValueError):
+        return None
+
+
 def _extract_date_from_point(point: dict[str, Any] | None) -> str | None:
     if not point:
         return None
-    # Les daily rollups ont généralement un champ "date" au format YYYY-MM-DD.
-    if "date" in point:
-        return point["date"]
-    # Fallback sur startTime civil.
+    # Champ "date" des data types Daily : string ou objet civil.
+    date_val = point.get("date")
+    if isinstance(date_val, str):
+        return date_val[:10]
+    iso = _civil_date_obj_to_iso(date_val)
+    if iso:
+        return iso
+    # Format API réel : timestamps imbriqués sous "interval".
+    interval = point.get("interval") or {}
+    if isinstance(interval, dict):
+        civil_start = interval.get("civilStartTime")
+        iso = _civil_date_obj_to_iso(
+            civil_start.get("date") if isinstance(civil_start, dict) else None
+        )
+        if iso:
+            return iso
+        start = interval.get("startTime")
+        if isinstance(start, str):
+            return _civil_date_from_iso(start)
+    # Fallback racine.
     start = point.get("startTime") or point.get("start_time")
-    if start:
+    if isinstance(start, str):
         return _civil_date_from_iso(start)
     return None
 
@@ -412,8 +484,17 @@ def _extract_date_from_point(point: dict[str, Any] | None) -> str | None:
 def _extract_end_date_from_point(point: dict[str, Any] | None) -> str | None:
     if not point:
         return None
+    interval = point.get("interval") or {}
+    if isinstance(interval, dict):
+        civil_end = interval.get("civilEndTime")
+        iso = _civil_date_obj_to_iso(civil_end.get("date") if isinstance(civil_end, dict) else None)
+        if iso:
+            return iso
+        end = interval.get("endTime")
+        if isinstance(end, str):
+            return _civil_date_from_iso(end)
     end = point.get("endTime") or point.get("end_time")
-    if end:
+    if isinstance(end, str):
         return _civil_date_from_iso(end)
     return None
 
@@ -728,6 +809,23 @@ def sync_google_health_morning_metrics(
         end_date = dt.date.today()
     if start_date is None:
         start_date = end_date - dt.timedelta(days=7)
+
+    # Diagnostic : un legacyUserId présent confirme que les données Fitbit
+    # sont bien rattachées au compte Google Health.
+    try:
+        identity = client.get_identity()
+        legacy_id = identity.get("legacyUserId") or identity.get("legacy_user_id")
+        if legacy_id:
+            log.info("Google Health : compte Fitbit lié (legacyUserId=%s).", legacy_id)
+        else:
+            log.warning(
+                "Google Health : pas de legacyUserId dans l'identité — les données "
+                "Fitbit ne sont probablement pas migrées vers ce compte Google. "
+                "Identité reçue : %s",
+                json.dumps(identity)[:300],
+            )
+    except Exception:  # noqa: BLE001
+        log.warning("Google Health : lecture de l'identité échouée (best-effort).", exc_info=True)
 
     data_by_date = client.fetch_morning_data(start_date, end_date)
 
