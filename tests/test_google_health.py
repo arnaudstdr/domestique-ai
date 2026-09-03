@@ -9,10 +9,14 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from domestique_ai.ingestion.google_health import (
+    DATA_TYPE_ACTIVE_ENERGY_BURNED,
     DATA_TYPE_DAILY_HRV,
     DATA_TYPE_DAILY_RHR,
     DATA_TYPE_SLEEP,
+    DATA_TYPE_STEPS,
     GoogleHealthClient,
+    _extract_active_calories,
+    _extract_steps,
     _summarize_sleep_sessions,
     sync_google_health_morning_metrics,
 )
@@ -151,6 +155,53 @@ def test_summarize_sleep_sessions_no_data():
         "sleep_light_min": None,
         "sleep_awake_min": None,
     }
+
+
+def test_fetch_daily_rollup_maps_steps_and_calories(client: GoogleHealthClient):
+    def side_effect(method, url, **kwargs):
+        if DATA_TYPE_STEPS in url:
+            return _mock_response(
+                {
+                    "rollupDataPoints": [
+                        {
+                            "civilStartTime": {"date": {"year": 2026, "month": 5, "day": 10}},
+                            "value": {"steps": {"countSum": 12345}},
+                        }
+                    ]
+                }
+            )
+        if DATA_TYPE_ACTIVE_ENERGY_BURNED in url:
+            return _mock_response(
+                {
+                    "rollupDataPoints": [
+                        {
+                            "civilStartTime": {"date": {"year": 2026, "month": 5, "day": 10}},
+                            "value": {"activeEnergyBurned": {"energyKcalSum": 420}},
+                        }
+                    ]
+                }
+            )
+        return _mock_response({"rollupDataPoints": []})
+
+    import datetime as dt
+
+    with patch("requests.request", side_effect=side_effect):
+        steps = client.fetch_daily_rollup(
+            DATA_TYPE_STEPS, dt.date(2026, 5, 10), dt.date(2026, 5, 10)
+        )
+        calories = client.fetch_daily_rollup(
+            DATA_TYPE_ACTIVE_ENERGY_BURNED, dt.date(2026, 5, 10), dt.date(2026, 5, 10)
+        )
+
+    assert steps["2026-05-10"]["value"]["steps"]["countSum"] == 12345
+    assert calories["2026-05-10"]["value"]["activeEnergyBurned"]["energyKcalSum"] == 420
+
+
+def test_extract_steps_and_calories_rollup_formats():
+    steps_point = {"value": {"steps": {"countSum": 12345}}}
+    calories_point = {"value": {"activeEnergyBurned": {"energyKcalSum": 420}}}
+    assert _extract_steps(steps_point) == 12345
+    assert _extract_active_calories(calories_point) == 420
 
 
 def test_sync_google_health_morning_metrics_writes_db(client: GoogleHealthClient, tmp_path: Path):

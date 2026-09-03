@@ -54,7 +54,7 @@ DATA_TYPE_DAILY_SPO2 = "daily-oxygen-saturation"
 DATA_TYPE_RESPIRATORY_SLEEP = "respiratory-rate-sleep-summary"
 DATA_TYPE_SKIN_TEMP = "daily-sleep-temperature-derivations"
 DATA_TYPE_STEPS = "steps"
-DATA_TYPE_ACTIVE_CALORIES = "active-calories"
+DATA_TYPE_ACTIVE_ENERGY_BURNED = "active-energy-burned"
 
 
 class GoogleHealthAuthError(Exception):
@@ -262,29 +262,60 @@ class GoogleHealthClient:
     # API helpers
     # -----------------------------------------------------------------------
 
-    def fetch_daily_rollups(
+    def fetch_data_points(
         self,
         data_type: str,
         start_date: dt.date,
         end_date: dt.date,
     ) -> dict[str, dict[str, Any]]:
-        """Récupère les rollups journaliers d'un dataType sur une plage de dates.
+        """Récupère les points de données bruts (méthode ``list``).
 
-        Retourne un dict ``{date_iso: data_point}`` où ``data_point`` est le
-        point de données brut tel que renvoyé par l'API.
+        Utilisé pour les data types Daily et les sessions. Retourne un dict
+        ``{date_iso: data_point}`` où ``date_iso`` est extrait du point.
         """
         start = dt.datetime.combine(start_date, dt.time.min, tzinfo=dt.UTC)
         end = dt.datetime.combine(end_date + dt.timedelta(days=1), dt.time.min, tzinfo=dt.UTC)
         filter_str = f"start_time>{start.isoformat()},end_time<={end.isoformat()}"
         data = self._request(
             "GET",
-            f"/users/me/dataTypes/{data_type}/dailyRollups",
+            f"/users/me/dataTypes/{data_type}/dataPoints",
             params={"filter": filter_str},
         )
         points = data.get("dataPoints", [])
         result: dict[str, dict[str, Any]] = {}
         for point in points:
             date_str = _extract_date_from_point(point)
+            if date_str:
+                result[date_str] = point
+        return result
+
+    def fetch_daily_rollup(
+        self,
+        data_type: str,
+        start_date: dt.date,
+        end_date: dt.date,
+    ) -> dict[str, dict[str, Any]]:
+        """Récupère les rollups journaliers (méthode ``dailyRollUp``).
+
+        Utilisé pour les data types Interval (steps, active-energy-burned).
+        Retourne un dict ``{date_iso: rollup_point}``.
+        """
+        payload = {
+            "range": {
+                "start": _civil_date_time(start_date, 0, 0, 0),
+                "end": _civil_date_time(end_date + dt.timedelta(days=1), 0, 0, 0),
+            },
+            "windowSizeDays": 1,
+        }
+        data = self._request(
+            "POST",
+            f"/users/me/dataTypes/{data_type}/dataPoints:dailyRollUp",
+            json_payload=payload,
+        )
+        points = data.get("rollupDataPoints", [])
+        result: dict[str, dict[str, Any]] = {}
+        for point in points:
+            date_str = _extract_civil_start_date_from_point(point)
             if date_str:
                 result[date_str] = point
         return result
@@ -329,15 +360,17 @@ class GoogleHealthClient:
         Retourne un dict ``{date_iso: {"hrv_ms": ..., "sleep_hours": ..., ...}}``.
         Les valeurs absentes sont ``None``.
         """
-        hrv_by_date = self.fetch_daily_rollups(DATA_TYPE_DAILY_HRV, start_date, end_date)
-        rhr_by_date = self.fetch_daily_rollups(DATA_TYPE_DAILY_RHR, start_date, end_date)
-        spo2_by_date = self.fetch_daily_rollups(DATA_TYPE_DAILY_SPO2, start_date, end_date)
-        respiratory_by_date = self.fetch_daily_rollups(
+        hrv_by_date = self.fetch_data_points(DATA_TYPE_DAILY_HRV, start_date, end_date)
+        rhr_by_date = self.fetch_data_points(DATA_TYPE_DAILY_RHR, start_date, end_date)
+        spo2_by_date = self.fetch_data_points(DATA_TYPE_DAILY_SPO2, start_date, end_date)
+        respiratory_by_date = self.fetch_data_points(
             DATA_TYPE_RESPIRATORY_SLEEP, start_date, end_date
         )
-        skin_temp_by_date = self.fetch_daily_rollups(DATA_TYPE_SKIN_TEMP, start_date, end_date)
-        steps_by_date = self.fetch_daily_rollups(DATA_TYPE_STEPS, start_date, end_date)
-        calories_by_date = self.fetch_daily_rollups(DATA_TYPE_ACTIVE_CALORIES, start_date, end_date)
+        skin_temp_by_date = self.fetch_data_points(DATA_TYPE_SKIN_TEMP, start_date, end_date)
+        steps_by_date = self.fetch_daily_rollup(DATA_TYPE_STEPS, start_date, end_date)
+        calories_by_date = self.fetch_daily_rollup(
+            DATA_TYPE_ACTIVE_ENERGY_BURNED, start_date, end_date
+        )
         sleep_sessions_by_date = self.fetch_sleep_sessions(start_date, end_date)
 
         result: dict[str, dict[str, Any]] = {}
@@ -397,6 +430,37 @@ def _civil_date_from_iso(iso: str) -> str | None:
             return iso[:10]
     except Exception:  # noqa: BLE001
         pass
+    return None
+
+
+def _civil_date_time(date: dt.date, hour: int, minute: int, second: int) -> dict[str, Any]:
+    """Construit un objet CivilDateTime pour les requêtes dailyRollUp."""
+    return {
+        "date": {
+            "year": date.year,
+            "month": date.month,
+            "day": date.day,
+        },
+        "time": {
+            "hours": hour,
+            "minutes": minute,
+            "seconds": second,
+            "nanos": 0,
+        },
+    }
+
+
+def _extract_civil_start_date_from_point(point: dict[str, Any] | None) -> str | None:
+    """Extrait la date de civilStartTime d'un rollup point."""
+    if not point:
+        return None
+    civil = point.get("civilStartTime") or point.get("civil_start_time")
+    if civil:
+        date_obj = civil.get("date") or civil
+        try:
+            return dt.date(date_obj["year"], date_obj["month"], date_obj["day"]).isoformat()
+        except (KeyError, TypeError, ValueError):
+            pass
     return None
 
 
@@ -482,6 +546,16 @@ def _extract_steps(point: dict[str, Any] | None) -> int | None:
     if not point:
         return None
     value = point.get("value", {})
+    # Format dailyRollUp : value.steps.countSum
+    steps_value = value.get("steps")
+    if isinstance(steps_value, dict):
+        count = steps_value.get("countSum") or steps_value.get("count_sum")
+        if count is not None:
+            try:
+                return int(count)
+            except (TypeError, ValueError):
+                return None
+    # Format list brut : value.count / value.steps
     steps = value.get("count") or value.get("steps")
     if steps is not None:
         try:
@@ -495,6 +569,16 @@ def _extract_active_calories(point: dict[str, Any] | None) -> int | None:
     if not point:
         return None
     value = point.get("value", {})
+    # Format dailyRollUp : value.activeEnergyBurned.energyKcalSum
+    energy_value = value.get("activeEnergyBurned")
+    if isinstance(energy_value, dict):
+        kcal = energy_value.get("energyKcalSum") or energy_value.get("energy_kcal_sum")
+        if kcal is not None:
+            try:
+                return int(kcal)
+            except (TypeError, ValueError):
+                return None
+    # Format list brut
     kcal = value.get("kcal") or value.get("calories") or value.get("energyKcal")
     if kcal is not None:
         try:
