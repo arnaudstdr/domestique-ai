@@ -30,6 +30,9 @@ from domestique_ai.api.routers import (
     coach as coach_router,
 )
 from domestique_ai.api.routers import (
+    garmin as garmin_router,
+)
+from domestique_ai.api.routers import (
     google_health as google_health_router,
 )
 from domestique_ai.api.routers import (
@@ -250,6 +253,7 @@ app.include_router(objective_router.router)
 app.include_router(profile_router.router)
 app.include_router(availability_router.router)
 app.include_router(strava_router.router)
+app.include_router(garmin_router.router)
 app.include_router(coach_router.router)
 app.include_router(plan_router.router)
 app.include_router(roster_router.router)

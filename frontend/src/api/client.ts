@@ -35,6 +35,7 @@ import type {
   StravaConnection,
   SyncResult,
   SyncStatus,
+  GarminStatus,
   TodayWorkoutResponse,
   TrendPeriod,
   TrendsResponse,
@@ -295,6 +296,11 @@ export const api = {
       http<SyncResult>(`/api/strava/backfill-temperature`, { method: "POST" }),
     backfillPolylines: () =>
       http<SyncResult>(`/api/strava/backfill-polylines`, { method: "POST" }),
+  },
+  garmin: {
+    status: () => http<GarminStatus>(`/api/garmin/status`),
+    sync: () => http<SyncStatus>(`/api/garmin/sync`, { method: "POST" }),
+    syncStatus: () => http<SyncStatus>(`/api/garmin/sync-status`),
   },
   coach: {
     sessions: () => http<CoachSession[]>(`/api/coach/sessions`),

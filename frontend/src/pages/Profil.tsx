@@ -13,6 +13,7 @@ import { api, ApiError, clearApiToken } from "../api/client";
 import type {
   Availability,
   DayAvailability,
+  GarminStatus,
   MeResponse,
   Objective,
   Profile,
@@ -70,6 +71,7 @@ export default function Profil() {
         </p>
       </header>
       <StravaSection />
+      <GarminSection />
       <ProfileSection />
       <ObjectiveSection />
       <AvailabilitySection />
@@ -152,6 +154,98 @@ function StravaSection() {
             </p>
           )}
         </div>
+      )}
+    </section>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// 0-bis. Sync Garmin Connect
+// ---------------------------------------------------------------------------
+
+function GarminSection() {
+  const [status, setStatus] = useState<GarminStatus | null>(null);
+  const [syncing, setSyncing] = useState(false);
+  const { push } = useToast();
+
+  useEffect(() => {
+    api.garmin.status().then(setStatus).catch(() => setStatus(null));
+  }, []);
+
+  async function sync() {
+    setSyncing(true);
+    try {
+      const res = await api.garmin.sync();
+      push(
+        res.status === "syncing"
+          ? "Synchronisation Garmin lancée."
+          : `Sync Garmin : ${res.inserted ?? 0} activité(s) importée(s).`,
+        "success",
+      );
+    } catch (err) {
+      const msg = err instanceof ApiError ? err.message : String(err);
+      push(`Garmin : ${msg}`, "error");
+    } finally {
+      setSyncing(false);
+      api.garmin
+        .status()
+        .then(setStatus)
+        .catch(() => undefined);
+    }
+  }
+
+  const connected = status?.connected ?? false;
+
+  return (
+    <section className="card space-y-3">
+      <h3 className="flex items-center gap-2 text-sm font-medium text-gray-200">
+        <Link2 className="h-4 w-4 text-accent" strokeWidth={1.75} aria-hidden="true" />
+        Garmin Connect
+      </h3>
+      <p className="text-xs text-muted">
+        Importe tes activités depuis Garmin Connect (compteur Edge / montre).
+        Alternative à Strava — mêmes métriques, même pipeline.
+      </p>
+      {status === null ? (
+        <p className="text-xs text-muted">Vérification…</p>
+      ) : !status.credentials ? (
+        <p className="text-xs text-muted">
+          Configurer <code>GARMIN_EMAIL</code> et <code>GARMIN_PASSWORD</code> dans
+          le <code>.env</code> pour activer.
+        </p>
+      ) : !status.tokens ? (
+        <p className="text-xs text-muted">
+          Connexion à initialiser une fois sur le serveur :{" "}
+          <code>python -m domestique_ai.export.garmin_connect</code> (login + code
+          MFA).
+        </p>
+      ) : (
+        <>
+          <p className="text-sm text-accent">
+            Garmin Connect connecté — auto-sync toutes les 30 min.
+          </p>
+          <button
+            type="button"
+            onClick={sync}
+            disabled={syncing || status.sync.status === "syncing"}
+            className="btn-primary w-full"
+          >
+            {syncing || status.sync.status === "syncing"
+              ? "Synchronisation…"
+              : "Synchroniser maintenant"}
+          </button>
+          {status.sync.status === "error" && status.sync.error && (
+            <p className="text-xs text-red-400" role="alert">
+              {status.sync.error}
+            </p>
+          )}
+          {!connected && (
+            <p className="text-xs text-muted">
+              Credentials présents mais tokens absents/invalides — re-seed
+              nécessaire.
+            </p>
+          )}
+        </>
       )}
     </section>
   );

@@ -399,6 +399,13 @@ def init_db(db_path: Path | None = None, *, ctx: AthleteContext | None = None) -
         for temp_col in ("avg_temp", "min_temp", "max_temp"):
             _ensure_column(conn, "activities", temp_col, "REAL")
         _ensure_column(conn, "activities", "map_polyline", "TEXT")
+        # Source Garmin Connect (ingestion concurrente de Strava) : les lignes
+        # Garmin ont strava_id NULL et garmin_id renseigné.
+        _ensure_column(conn, "activities", "garmin_id", "INTEGER")
+        conn.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_activities_garmin_id "
+            "ON activities(garmin_id) WHERE garmin_id IS NOT NULL"
+        )
         conn.execute("""
             CREATE TABLE IF NOT EXISTS conversations (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,

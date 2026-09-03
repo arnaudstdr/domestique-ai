@@ -105,6 +105,7 @@ def test_interval_negative_clamped_to_zero(monkeypatch):
 def test_start_scheduler_disabled_when_interval_zero(monkeypatch):
     monkeypatch.setenv("DOMESTIQUE_AI_AUTO_SYNC_MINUTES", "0")
     monkeypatch.setenv("DOMESTIQUE_AI_GOOGLE_HEALTH_AUTO_SYNC_MINUTES", "0")
+    monkeypatch.setenv("DOMESTIQUE_AI_GARMIN_AUTO_SYNC_MINUTES", "0")
     scheduler._scheduler = None
     scheduler.start_scheduler()
     assert scheduler._scheduler is None
@@ -308,7 +309,33 @@ def test_scheduler_noop_when_everything_disabled(monkeypatch):
     """Tout désactivé — aucun scheduler créé."""
     monkeypatch.setenv("DOMESTIQUE_AI_AUTO_SYNC_MINUTES", "0")
     monkeypatch.setenv("DOMESTIQUE_AI_GOOGLE_HEALTH_AUTO_SYNC_MINUTES", "0")
+    monkeypatch.setenv("DOMESTIQUE_AI_GARMIN_AUTO_SYNC_MINUTES", "0")
     monkeypatch.delenv("HEALTHCHECKS_PING_URL", raising=False)
     scheduler._scheduler = None
     scheduler.start_scheduler()
     assert scheduler._scheduler is None
+
+
+def test_garmin_interval_default(monkeypatch):
+    monkeypatch.delenv("DOMESTIQUE_AI_GARMIN_AUTO_SYNC_MINUTES", raising=False)
+    assert scheduler._garmin_auto_sync_interval_minutes() == 30
+
+
+def test_garmin_interval_zero_disables(monkeypatch):
+    monkeypatch.setenv("DOMESTIQUE_AI_GARMIN_AUTO_SYNC_MINUTES", "0")
+    assert scheduler._garmin_auto_sync_interval_minutes() == 0
+
+
+def test_garmin_auto_sync_job_skips_silently_without_tokens(monkeypatch):
+    """Sans cache token Garmin, le job ne fait rien et ne lève pas."""
+    monkeypatch.setattr(scheduler, "trigger_garmin_sync", lambda ctx, key: True)
+    # token_cache_present() → False via get_garmin_token_dir vide.
+    monkeypatch.setenv("GARMIN_TOKEN_DIR", "")
+    import tempfile
+    from domestique_ai.config import get_garmin_token_dir
+
+    with tempfile.TemporaryDirectory() as td:
+        monkeypatch.setattr(
+            "domestique_ai.config.get_garmin_token_dir", lambda: __import__("pathlib").Path(td)
+        )
+        scheduler._garmin_auto_sync_job()  # ne doit ni lever ni syncer

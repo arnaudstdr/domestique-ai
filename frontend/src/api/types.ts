@@ -279,6 +279,13 @@ export interface SyncStatus {
   finished_at: string | null;
 }
 
+export interface GarminStatus {
+  credentials: boolean;
+  tokens: boolean;
+  connected: boolean;
+  sync: SyncStatus;
+}
+
 export interface SyncResult {
   status: string;
   updated: number | null;
