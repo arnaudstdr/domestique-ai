@@ -280,14 +280,18 @@ def _print_report(report: dict) -> None:
     if report["dry_run"]:
         print("Dry-run : rien n'a été modifié. Relancez avec --apply pour exécuter.")
     else:
-        print(f"Exécuté : {report['deleted']} lignes supprimées, "
-              f"{report['merged']} lignes Garmin enrichies depuis leur jumeau Strava.")
+        print(
+            f"Exécuté : {report['deleted']} lignes supprimées, "
+            f"{report['merged']} lignes Garmin enrichies depuis leur jumeau Strava."
+        )
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--db", help="Base à dédupliquer (défaut : config.get_db_path())")
-    parser.add_argument("--apply", action="store_true", help="Exécute la suppression (sinon dry-run)")
+    parser.add_argument(
+        "--apply", action="store_true", help="Exécute la suppression (sinon dry-run)"
+    )
     args = parser.parse_args(argv)
 
     db = Path(args.db) if args.db else get_db_path()

@@ -101,10 +101,7 @@ def init_db(db_path: Path | None = None, *, ctx: AthleteContext | None = None) -
         # Normalisation des sport_type hérités d'un mappage Garmin antérieur
         # (typeKey "road_biking" non mappé → fallback "RoadBiking"). Idempotent,
         # no-op une fois la base corrigée — pas de flag sync_meta nécessaire.
-        conn.execute(
-            "UPDATE activities SET sport_type = 'Ride' "
-            "WHERE sport_type = 'RoadBiking'"
-        )
+        conn.execute("UPDATE activities SET sport_type = 'Ride' WHERE sport_type = 'RoadBiking'")
         conn.execute("""
             CREATE TABLE IF NOT EXISTS conversations (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,

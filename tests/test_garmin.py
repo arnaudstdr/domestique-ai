@@ -400,12 +400,8 @@ def test_init_db_normalizes_legacy_road_biking(tmp_path):
     init_db(db)
     conn = sqlite3.connect(db)
     try:
-        conn.execute(
-            "INSERT INTO activities (garmin_id, sport_type) VALUES (1, 'RoadBiking')"
-        )
-        conn.execute(
-            "INSERT INTO activities (garmin_id, sport_type) VALUES (2, 'VirtualRide')"
-        )
+        conn.execute("INSERT INTO activities (garmin_id, sport_type) VALUES (1, 'RoadBiking')")
+        conn.execute("INSERT INTO activities (garmin_id, sport_type) VALUES (2, 'VirtualRide')")
         conn.commit()
     finally:
         conn.close()
@@ -415,9 +411,7 @@ def test_init_db_normalizes_legacy_road_biking(tmp_path):
 
     conn = sqlite3.connect(db)
     try:
-        rows = conn.execute(
-            "SELECT sport_type FROM activities ORDER BY garmin_id"
-        ).fetchall()
+        rows = conn.execute("SELECT sport_type FROM activities ORDER BY garmin_id").fetchall()
     finally:
         conn.close()
     assert [r[0] for r in rows] == ["Ride", "VirtualRide"]
