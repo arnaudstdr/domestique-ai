@@ -1,9 +1,10 @@
 """Ingestion Garmin Connect (API non officielle via ``garminconnect``).
 
-Remplace ou complète l'ingestion Strava : le compteur Edge / la montre Garmin
-synchronisent vers Garmin Connect, et ce module rapatrie les activités dans la
-même table ``activities`` — toute la pipeline aval (TSS, CTL/ATL/TSB, zones HR,
-tendances, coach LLM) fonctionne sans changement.
+Source d'ingestion des activités depuis 09/2026 (remplace Strava, dont l'API
+exige un abonnement payant) : le compteur Edge / la montre Garmin synchronisent
+vers Garmin Connect, et ce module rapatrie les activités dans la même table
+``activities`` — toute la pipeline aval (TSS, CTL/ATL/TSB, zones HR, tendances,
+coach LLM) fonctionne sans changement.
 
 Conventions conservées :
 - **Idempotence** sur ``garmin_id`` (index unique partiel, migration douce dans
@@ -12,7 +13,7 @@ Conventions conservées :
   Garmin connue (moins 1 j de marge), ``start_date=0``/ancien force le re-fetch.
 - **Zones HR + température** calculées depuis les streams de
   ``get_activity_details`` quand HRrepos/HRmax sont configurés — mêmes helpers
-  que Strava (``calculate_hr_zones``, ``summarize_temp_stream``).
+  que l'ex-ingestion Strava (``calculate_hr_zones``, ``summarize_temp_stream``).
 
 ⚠️ Endpoints non officiels : peuvent changer sans préavis. Le parsing des
 détails est défensif (orientation par descripteur ou par mesure) et logge le
@@ -30,21 +31,21 @@ from typing import Any
 from domestique_ai.api.logging import get_logger
 from domestique_ai.athlete_context import AthleteContext
 from domestique_ai.config import get_db_path, get_hr_max, get_hr_rest
-from domestique_ai.ingestion.strava import (
+from domestique_ai.ingestion.db import init_db, summarize_temp_stream
+from domestique_ai.processing.analyzer import (
     HR_ZONE_KEYS,
     calculate_hr_zones,
-    init_db,
-    summarize_temp_stream,
+    compute_training_load,
 )
-from domestique_ai.processing.analyzer import compute_training_load
 
 log = get_logger("garmin_ingest")
 
 # Fenêtre par défaut du premier sync (historique complet) : 3 ans.
 _DEFAULT_HISTORY_DAYS = 1095
 
-# Mapping typeKey Garmin → sport_type à la Strava. Les buckets indoor/outdoor
-# du comparateur d'activités (similar.py) s'appuient sur ces noms.
+# Mapping typeKey Garmin → sport_type (nomenclature historique type Strava).
+# Les buckets indoor/outdoor du comparateur d'activités (similar.py)
+# s'appuient sur ces noms.
 _SPORT_MAP: dict[str, str] = {
     "cycling": "Ride",
     "virtual_ride": "VirtualRide",
@@ -76,7 +77,7 @@ class GarminIngestError(RuntimeError):
 
 
 def map_sport_type(type_key: str | None) -> str | None:
-    """Convertit un ``typeKey`` Garmin en sport_type à la Strava."""
+    """Convertit un ``typeKey`` Garmin en sport_type (nomenclature type Strava)."""
     if not type_key:
         return None
     mapped = _SPORT_MAP.get(type_key)
@@ -107,8 +108,9 @@ def _parse_gmt(timestamp: str | None) -> dt.datetime | None:
 def extract_activity_data(raw: dict[str, Any] | None) -> dict[str, Any] | None:
     """Résume une activité Garmin (liste ``get_activities*``) au format interne.
 
-    Même shape que ``StravaClient.extract_activity_data`` : id, date (ISO UTC),
-    duration (s), avg/max HR, avg_power, elevation, distance (m), sport_type.
+    Même shape que l'ex-``StravaClient.extract_activity_data`` (Strava) : id,
+    date (ISO UTC), duration (s), avg/max HR, avg_power, elevation, distance
+    (m), sport_type.
     """
     if not raw:
         return None
@@ -249,7 +251,7 @@ def save_garmin_activity(
 ) -> bool:
     """Sauvegarde une activité Garmin. ``True`` si insérée, ``False`` si doublon.
 
-    Miroir de ``save_activity`` (Strava) : TSS calculé si absent (hr-TSS
+    Miroir de l'ex-``save_activity`` (Strava) : TSS calculé si absent (hr-TSS
     prioritaire), zones HR et température écrites si fournies, idempotence sur
     ``garmin_id``.
     """

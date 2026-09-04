@@ -1,9 +1,9 @@
 """Endpoints de synchronisation Garmin Connect (en tâche de fond).
 
-Miroir du router Strava : sync manuel ``POST /api/garmin/sync`` et auto-sync
-(scheduler) partagent le même verrou par athlète — pas de chevauchement.
-L'authentification passe par le cache token Garmin partagé avec le module
-d'export (seed interactif MFA : ``python -m domestique_ai.export.garmin_connect``).
+Sync manuel ``POST /api/garmin/sync`` et auto-sync (scheduler) partagent le
+même verrou par athlète — pas de chevauchement. L'authentification passe par
+le cache token Garmin partagé avec le module d'export (seed interactif MFA :
+``python -m domestique_ai.export.garmin_connect``).
 """
 
 from __future__ import annotations

@@ -17,6 +17,7 @@ from collections.abc import Callable
 from typing import Any
 
 from domestique_ai.athlete_context import AthleteContext, context_from_env
+from domestique_ai.ingestion.db import init_db
 from domestique_ai.processing.analyzer import (
     HR_ZONE_KEYS,
     calculate_ctl_atl_tsb,
@@ -169,38 +170,36 @@ def get_objective(*, ctx: AthleteContext | None = None) -> dict[str, Any]:
     return {"available": True, "objective": obj.to_dict()}
 
 
-def get_activity_details(strava_id: int, *, ctx: AthleteContext | None = None) -> dict[str, Any]:
-    """Détail complet d'une activité identifiée par strava_id.
+def get_activity_details(external_id: int, *, ctx: AthleteContext | None = None) -> dict[str, Any]:
+    """Détail complet d'une activité identifiée par son id externe.
 
     Inclut la température (``avg_temp`` / ``min_temp`` / ``max_temp`` en °C)
-    quand le stream Strava était disponible. Utile pour expliquer une dérive
-    HR par la chaleur ou justifier un effort ressenti élevé.
+    quand le stream était disponible à l'ingestion. Utile pour expliquer une
+    dérive HR par la chaleur ou justifier un effort ressenti élevé.
     """
     import sqlite3
-
-    from domestique_ai.ingestion.strava import init_db
 
     ctx = ctx or context_from_env()
     init_db(ctx.db_path)
     conn = sqlite3.connect(ctx.db_path)
     try:
-        # Id externe : strava_id ou garmin_id (source Garmin).
+        # Id externe : strava_id (legacy) ou garmin_id.
         cursor = conn.execute(
             "SELECT coalesce(strava_id, garmin_id), date, duration, avg_heart_rate, "
             "max_heart_rate, avg_power, elevation_gain, distance, training_load, "
             "hr_z1_time, hr_z2_time, hr_z3_time, hr_z4_time, hr_z5_time, "
             "avg_temp, min_temp, max_temp "
             "FROM activities WHERE strava_id = ? OR garmin_id = ?",
-            (strava_id, strava_id),
+            (external_id, external_id),
         )
         row = cursor.fetchone()
     finally:
         conn.close()
     if not row:
-        return {"available": False, "strava_id": strava_id}
+        return {"available": False, "external_id": external_id}
     return {
         "available": True,
-        "strava_id": row[0],
+        "external_id": row[0],
         "date": row[1],
         "duration_sec": row[2],
         "avg_heart_rate": row[3],
@@ -626,16 +625,17 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "get_activity_details",
-            "description": "Détail complet d'une activité par son strava_id.",
+            "description": "Détail complet d'une activité par son id externe.",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "strava_id": {
+                    "external_id": {
                         "type": "integer",
-                        "description": "Identifiant Strava de l'activité.",
+                        "description": "Identifiant externe de l'activité "
+                        "(celui affiché dans l'app).",
                     },
                 },
-                "required": ["strava_id"],
+                "required": ["external_id"],
             },
         },
     },
@@ -799,9 +799,9 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "strava_id": {
+                    "external_id": {
                         "type": "integer",
-                        "description": "Identifiant Strava de l'activité de référence.",
+                        "description": "Identifiant externe de l'activité de référence.",
                     },
                     "limit": {
                         "type": "integer",
@@ -810,7 +810,7 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
                         "maximum": 100,
                     },
                 },
-                "required": ["strava_id"],
+                "required": ["external_id"],
             },
         },
     },
@@ -834,7 +834,7 @@ TOOLS: dict[str, Callable[..., dict[str, Any]]] = {
 
 
 def find_similar_activities(
-    strava_id: int, limit: int = 10, *, ctx: AthleteContext | None = None
+    external_id: int, limit: int = 10, *, ctx: AthleteContext | None = None
 ) -> dict[str, Any]:
     """Recherche les activités au profil similaire (même boucle).
 
@@ -847,7 +847,7 @@ def find_similar_activities(
     )
 
     ctx = ctx or context_from_env()
-    return _impl(strava_id, limit=limit, db_path=ctx.db_path)
+    return _impl(external_id, limit=limit, db_path=ctx.db_path)
 
 
 TOOLS["find_similar_activities"] = find_similar_activities

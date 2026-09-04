@@ -5,9 +5,10 @@ from __future__ import annotations
 import datetime as dt
 from typing import Literal
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 
 from domestique_ai.api.deps import get_athlete_context
+from domestique_ai.api.logging import get_logger
 from domestique_ai.api.schemas import (
     Alert,
     FtpProjectionResponse,
@@ -17,6 +18,7 @@ from domestique_ai.api.schemas import (
     OvertrainingIndicators,
     OvertrainingResponse,
     RideVolumeResponse,
+    SyncResult,
     TrendsResponse,
     VolumePeriod,
 )
@@ -24,12 +26,14 @@ from domestique_ai.athlete_context import AthleteContext
 from domestique_ai.processing.analyzer import (
     calculate_ctl_atl_tsb,
     fetch_activities_from_db,
+    recalculate_training_loads,
 )
 from domestique_ai.processing.morning_metrics import detect_morning_alerts
 from domestique_ai.processing.overtraining import detect_overtraining_signals
 from domestique_ai.processing.trends import get_ftp_projection, get_trends
 
 router = APIRouter(prefix="/api/metrics", tags=["metrics"])
+log = get_logger("metrics")
 
 
 def _zone_from_tsb(tsb: float) -> tuple[str, str]:
@@ -194,6 +198,28 @@ def get_long_term_trends(
     """
     raw = get_trends(period=period, ctx=ctx)
     return TrendsResponse(**raw)
+
+
+@router.post("/recalculate", response_model=SyncResult)
+def post_recalculate(
+    ctx: AthleteContext = Depends(get_athlete_context),  # noqa: B008
+) -> SyncResult:
+    """Recalcule la charge d'entraînement (hr-TSS / TSS puissance) de l'athlète.
+
+    À relancer après une modification du profil HR ou FTP : les scores déjà
+    persistés ne sont pas recalculés automatiquement.
+    """
+    log.info("Recalcul charge : démarrage…")
+    try:
+        updated = recalculate_training_loads(ctx=ctx)
+    except Exception as exc:  # noqa: BLE001
+        log.exception("Recalcul charge : exception")
+        raise HTTPException(
+            status_code=500,
+            detail=str(exc),
+        ) from exc
+    log.info("Recalcul charge : %d ligne(s) mises à jour.", updated)
+    return SyncResult(status="done", updated=updated)
 
 
 @router.get("/ftp-projection", response_model=FtpProjectionResponse)

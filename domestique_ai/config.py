@@ -33,12 +33,9 @@ def get_db_path() -> Path:
     custom = os.getenv("DOMESTIQUE_AI_DB_PATH")
     if custom:
         return Path(custom).expanduser().resolve()
+    # Nom historique (ingestion Strava supprimée en 09/2026) — conservé pour
+    # ne pas perdre les données existantes.
     return REPO_ROOT / "data" / "strava_activities.db"
-
-
-def get_tokens_path() -> Path:
-    """Chemin du fichier de stockage local des tokens Strava (jamais commité)."""
-    return REPO_ROOT / "data" / ".strava_tokens.json"
 
 
 def get_platform_db_path() -> Path:
@@ -249,25 +246,12 @@ def get_lthr_pct() -> float:
     return value
 
 
-def get_strava_credentials() -> tuple[str | None, str | None, str]:
-    """Retourne (client_id, client_secret, redirect_uri) depuis .env.
-
-    En multi-tenant, ``STRAVA_REDIRECT_URI`` doit pointer sur le callback web
-    ``<host>/api/strava/callback`` (et être autorisé dans l'app Strava).
-    """
-    return (
-        os.getenv("STRAVA_CLIENT_ID"),
-        os.getenv("STRAVA_CLIENT_SECRET"),
-        os.getenv("STRAVA_REDIRECT_URI", "http://localhost/exchange_token"),
-    )
-
-
 def get_app_base_url() -> str:
     """Base URL publique de l'app, pour la redirection post-OAuth.
 
     Override via DOMESTIQUE_AI_APP_BASE_URL. Défaut ``""`` → redirection
-    relative same-origin (``/?strava=connected``), suffisant quand le backend
-    sert le frontend. Sans slash final.
+    relative same-origin, suffisant quand le backend sert le frontend.
+    Sans slash final.
     """
     return os.getenv("DOMESTIQUE_AI_APP_BASE_URL", "").rstrip("/")
 

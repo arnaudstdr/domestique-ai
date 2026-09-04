@@ -317,7 +317,7 @@ def test_extractors_parse_real_api_payloads():
 
 
 def test_sync_google_health_morning_metrics_writes_db(client: GoogleHealthClient, tmp_path: Path):
-    from domestique_ai.ingestion.strava import init_db
+    from domestique_ai.ingestion.db import init_db
 
     db_path = tmp_path / "test.db"
     init_db(db_path)
@@ -393,7 +393,7 @@ def test_sync_google_health_morning_metrics_writes_db(client: GoogleHealthClient
 
 
 def test_sync_respects_manual_sleep_score(client: GoogleHealthClient, tmp_path: Path):
-    from domestique_ai.ingestion.strava import init_db
+    from domestique_ai.ingestion.db import init_db
     from domestique_ai.processing.morning_metrics import save_morning_entry
 
     db_path = tmp_path / "test.db"

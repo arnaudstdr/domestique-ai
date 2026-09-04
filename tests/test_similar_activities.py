@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from domestique_ai.ingestion.strava import init_db, save_activity
+from domestique_ai.ingestion.db import init_db
 from domestique_ai.processing.similar import find_similar_activities
 
 
@@ -31,21 +31,27 @@ def _save(
     training_load: float | None = 80.0,
     avg_heart_rate: float | None = 145.0,
 ) -> None:
-    save_activity(
-        {
-            "id": strava_id,
-            "date": date,
-            "duration": duration_sec,
-            "avg_heart_rate": avg_heart_rate,
-            "max_heart_rate": None,
-            "avg_power": avg_power,
-            "elevation_gain": elevation_m,
-            "distance": distance_m,
-            "sport_type": sport_type,
-            "training_load": training_load,
-        },
-        db_path=db_path,
-    )
+    conn = sqlite3.connect(db_path)
+    try:
+        conn.execute(
+            "INSERT INTO activities (strava_id, date, duration, avg_heart_rate, "
+            "avg_power, elevation_gain, distance, training_load, sport_type) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                strava_id,
+                date,
+                duration_sec,
+                avg_heart_rate,
+                avg_power,
+                elevation_m,
+                distance_m,
+                training_load,
+                sport_type,
+            ),
+        )
+        conn.commit()
+    finally:
+        conn.close()
 
 
 # ---------- Cas d'erreur -----------------------------------------------------
@@ -108,7 +114,7 @@ def test_matches_within_5pct_distance_tolerance(db_path: Path, monkeypatch):
         elevation_m=500,
     )
     result = find_similar_activities(1, db_path=db_path)
-    ids = [m["strava_id"] for m in result["matches"]]
+    ids = [m["external_id"] for m in result["matches"]]
     assert 2 in ids
     assert 3 not in ids
 
@@ -133,7 +139,7 @@ def test_matches_within_10pct_elevation_tolerance(db_path: Path, monkeypatch):
         elevation_m=600,
     )
     result = find_similar_activities(1, db_path=db_path)
-    ids = [m["strava_id"] for m in result["matches"]]
+    ids = [m["external_id"] for m in result["matches"]]
     assert 2 in ids
     assert 3 not in ids
 
@@ -154,7 +160,7 @@ def test_does_not_match_indoor_with_outdoor(db_path: Path, monkeypatch):
         sport_type="VirtualRide",
     )
     result = find_similar_activities(1, db_path=db_path)
-    assert all(m["strava_id"] != 2 for m in result["matches"])
+    assert all(m["external_id"] != 2 for m in result["matches"])
 
 
 def test_matches_within_same_outdoor_bucket(db_path: Path, monkeypatch):
@@ -178,7 +184,7 @@ def test_matches_within_same_outdoor_bucket(db_path: Path, monkeypatch):
         sport_type="MountainBikeRide",
     )
     result = find_similar_activities(1, db_path=db_path)
-    ids = [m["strava_id"] for m in result["matches"]]
+    ids = [m["external_id"] for m in result["matches"]]
     assert 2 in ids
     assert 3 in ids
 
@@ -202,7 +208,7 @@ def test_matches_within_indoor_bucket(db_path: Path, monkeypatch):
         sport_type="VirtualRide",
     )
     result = find_similar_activities(1, db_path=db_path)
-    assert any(m["strava_id"] == 2 for m in result["matches"])
+    assert any(m["external_id"] == 2 for m in result["matches"])
 
 
 def test_other_sport_does_not_match(db_path: Path, monkeypatch):
@@ -218,7 +224,7 @@ def test_other_sport_does_not_match(db_path: Path, monkeypatch):
         sport_type="Run",
     )
     result = find_similar_activities(1, db_path=db_path)
-    assert all(m["strava_id"] != 2 for m in result["matches"])
+    assert all(m["external_id"] != 2 for m in result["matches"])
 
 
 # ---------- Computed fields --------------------------------------------------
@@ -247,7 +253,7 @@ def test_delta_pct_computed_relative_to_reference(db_path: Path, monkeypatch):
         duration_sec=6480,
     )
     result = find_similar_activities(1, db_path=db_path)
-    match = next(m for m in result["matches"] if m["strava_id"] == 2)
+    match = next(m for m in result["matches"] if m["external_id"] == 2)
     assert match["tss_delta_pct"] == pytest.approx(10.0, abs=0.1)
     assert match["power_delta_pct"] == pytest.approx(5.0, abs=0.1)
     assert match["duration_delta_pct"] == pytest.approx(-10.0, abs=0.1)
@@ -265,7 +271,7 @@ def test_delta_pct_returns_none_when_reference_has_no_power(db_path: Path, monke
         avg_power=200.0,
     )
     result = find_similar_activities(1, db_path=db_path)
-    match = next(m for m in result["matches"] if m["strava_id"] == 2)
+    match = next(m for m in result["matches"] if m["external_id"] == 2)
     assert match["power_delta_pct"] is None
 
 

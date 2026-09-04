@@ -25,8 +25,8 @@ import { useToast } from "../hooks/useToast";
 import { useViewing } from "../hooks/useViewing";
 
 const ANALYSIS_PROMPT = (sid: number) =>
-  `Analyse l'activité Strava avec strava_id=${sid}. ` +
-  `Étape 1 : appelle \`get_activity_details(strava_id=${sid})\` pour récupérer ` +
+  `Analyse l'activité avec external_id=${sid}. ` +
+  `Étape 1 : appelle \`get_activity_details(external_id=${sid})\` pour récupérer ` +
   `les chiffres (durée, distance, FC, charge, zones HR) ainsi que la date. ` +
   `Étape 2 : appelle \`get_training_load_state\` (CTL/ATL/TSB du jour) et ` +
   `\`get_objective\` pour le contexte. ` +
@@ -95,7 +95,7 @@ export default function ActivityDetail() {
     setAnalysis(EMPTY_ANALYSIS);
     try {
       await streamCoachAnalyze(
-        ANALYSIS_PROMPT(detail.activity.strava_id),
+        ANALYSIS_PROMPT(detail.activity.external_id),
         (event) => {
           if (event.type === "thinking") {
             analysisRef.current = {

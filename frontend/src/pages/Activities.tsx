@@ -156,7 +156,7 @@ export default function Activities() {
 
       <ul className="space-y-2">
         {data?.items.map((a) => (
-          <li key={a.strava_id}>
+          <li key={a.external_id}>
             <ActivityCard activity={a} />
           </li>
         ))}

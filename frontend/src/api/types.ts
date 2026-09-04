@@ -55,7 +55,7 @@ export interface RideVolumeResponse {
 export type SportBucket = "indoor" | "outdoor" | "other";
 
 export interface SimilarActivityMatch {
-  strava_id: number;
+  external_id: number;
   date: string;
   duration_sec: number | null;
   avg_heart_rate: number | null;
@@ -69,7 +69,7 @@ export interface SimilarActivityMatch {
 }
 
 export interface SimilarActivitiesReference {
-  strava_id: number;
+  external_id: number;
   date: string;
   distance_km: number;
   elevation_m: number;
@@ -139,7 +139,7 @@ export interface FtpProjectionResponse {
 }
 
 export interface ActivitySummary {
-  strava_id: number;
+  external_id: number;
   name: string | null;
   date: string;
   distance_km: number;
@@ -439,20 +439,11 @@ export interface AcceptInviteResponse {
   role: string;
 }
 
-export interface StravaConnection {
-  connected: boolean;
-}
-
-export interface StravaAuthorize {
-  authorize_url: string;
-}
-
 // ---- Roster coach (liste d'athlètes + invitations) --------------------------
 
 export interface AthleteSummary {
   public_id: string;
   display_name: string | null;
-  strava_connected: boolean;
   last_activity_date: string | null;
   n_activities: number;
 }

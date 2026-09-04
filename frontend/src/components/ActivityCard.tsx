@@ -25,7 +25,7 @@ function formatDate(iso: string): string {
 export default function ActivityCard({ activity }: Props) {
   return (
     <Link
-      to={`/activites/${activity.strava_id}`}
+      to={`/activites/${activity.external_id}`}
       className="card flex items-start gap-3 transition-colors hover:bg-cardHover"
     >
       <div className="min-w-0 flex-1">

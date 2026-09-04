@@ -93,7 +93,7 @@ def send_pushover(
 
 
 def notify_sync_completed(inserted: int, *, user: dict | None = None) -> bool:
-    """Notifie l'utilisateur quand une sync Strava a importé des activités.
+    """Notifie l'utilisateur quand une sync a importé des activités.
 
     No-op si ``inserted <= 0`` (on ne spamme pas sur les sync à vide). Si
     ``user`` est fourni (multi-athlète), le nom est préfixé au message.
@@ -105,10 +105,10 @@ def notify_sync_completed(inserted: int, *, user: dict | None = None) -> bool:
         if user and user.get("display_name"):
             prefix = f"{user['display_name']} : "
         if inserted == 1:
-            title = "Nouvelle activité Strava"
+            title = "Nouvelle activité"
             message = f"{prefix}Une nouvelle activité a été ingérée."
         else:
-            title = "Nouvelles activités Strava"
+            title = "Nouvelles activités"
             message = f"{prefix}{inserted} nouvelles activités ont été ingérées."
         return send_pushover(title, message)
     except Exception:  # noqa: BLE001 — notif ne doit jamais casser l'appelant

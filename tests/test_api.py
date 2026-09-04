@@ -1,7 +1,7 @@
 """Tests d'intégration des endpoints FastAPI.
 
 Utilise un override de `DOMESTIQUE_AI_DB_PATH` pour isoler chaque test sur
-une base SQLite tmp. Aucun appel réseau (Strava / Ollama mockés).
+une base SQLite tmp. Aucun appel réseau (Ollama mocké).
 """
 
 from __future__ import annotations
@@ -13,7 +13,7 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-from domestique_ai.ingestion.strava import init_db, save_activity
+from domestique_ai.ingestion.db import init_db
 
 
 @pytest.fixture()
@@ -31,21 +31,7 @@ def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[TestClie
 
 
 def _insert_activity(db: Path, strava_id: int, date: str, training_load: float) -> None:
-    save_activity(
-        {
-            "id": strava_id,
-            "date": date,
-            "duration": 3600,
-            "avg_heart_rate": 145,
-            "max_heart_rate": 170,
-            "avg_power": 200,
-            "elevation_gain": 300,
-            "distance": 30000,
-            "training_load": training_load,
-            "sport_type": "Ride",
-        },
-        db_path=db,
-    )
+    _insert_full(db, strava_id, date, training_load=training_load)
 
 
 def test_health(client: TestClient) -> None:
@@ -91,7 +77,7 @@ def test_activities_list_pagination(client: TestClient, tmp_path: Path) -> None:
     assert body["page_size"] == 3
     assert len(body["items"]) == 3
     # Tri DESC par date — l'activité 104 doit être en premier.
-    assert body["items"][0]["strava_id"] == 104
+    assert body["items"][0]["external_id"] == 104
 
 
 def _insert_full(
@@ -105,21 +91,28 @@ def _insert_full(
     training_load: float = 50.0,
     sport_type: str = "Ride",
 ) -> None:
-    save_activity(
-        {
-            "id": strava_id,
-            "date": date,
-            "duration": duration_sec,
-            "avg_heart_rate": 145,
-            "max_heart_rate": 170,
-            "avg_power": 200,
-            "elevation_gain": elevation_m,
-            "distance": distance_m,
-            "training_load": training_load,
-            "sport_type": sport_type,
-        },
-        db_path=db,
-    )
+    conn = sqlite3.connect(db)
+    try:
+        conn.execute(
+            "INSERT INTO activities (strava_id, date, duration, avg_heart_rate, "
+            "max_heart_rate, avg_power, elevation_gain, distance, training_load, "
+            "sport_type) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                strava_id,
+                date,
+                duration_sec,
+                145,
+                170,
+                200,
+                elevation_m,
+                distance_m,
+                training_load,
+                sport_type,
+            ),
+        )
+        conn.commit()
+    finally:
+        conn.close()
 
 
 def test_activities_filter_by_date_range(client: TestClient, tmp_path: Path) -> None:
@@ -131,7 +124,7 @@ def test_activities_filter_by_date_range(client: TestClient, tmp_path: Path) -> 
     r = client.get("/api/activities?date_from=2026-04-15&date_to=2026-04-25")
     assert r.status_code == 200
     items = r.json()["items"]
-    assert [i["strava_id"] for i in items] == [2]
+    assert [i["external_id"] for i in items] == [2]
 
 
 def test_activities_filter_date_to_is_inclusive(
@@ -156,7 +149,7 @@ def test_activities_filter_by_sport_types(
     _insert_full(db, 3, "2026-04-12T08:00:00Z", sport_type="Walk")
     r = client.get("/api/activities?sport_types=Ride&sport_types=Walk")
     assert r.status_code == 200
-    ids = sorted(i["strava_id"] for i in r.json()["items"])
+    ids = sorted(i["external_id"] for i in r.json()["items"])
     assert ids == [1, 3]
 
 
@@ -167,7 +160,7 @@ def test_activities_filter_by_distance(client: TestClient, tmp_path: Path) -> No
     _insert_full(db, 3, "2026-04-12T08:00:00Z", distance_m=100000)  # 100 km
     r = client.get("/api/activities?distance_min_km=30&distance_max_km=80")
     assert r.status_code == 200
-    ids = sorted(i["strava_id"] for i in r.json()["items"])
+    ids = sorted(i["external_id"] for i in r.json()["items"])
     assert ids == [2]
 
 
@@ -176,7 +169,7 @@ def test_activities_filter_by_elevation(client: TestClient, tmp_path: Path) -> N
     _insert_full(db, 1, "2026-04-10T08:00:00Z", elevation_m=100)
     _insert_full(db, 2, "2026-04-11T08:00:00Z", elevation_m=800)
     r = client.get("/api/activities?elevation_min_m=500")
-    assert [i["strava_id"] for i in r.json()["items"]] == [2]
+    assert [i["external_id"] for i in r.json()["items"]] == [2]
 
 
 def test_activities_filter_by_duration(client: TestClient, tmp_path: Path) -> None:
@@ -184,7 +177,7 @@ def test_activities_filter_by_duration(client: TestClient, tmp_path: Path) -> No
     _insert_full(db, 1, "2026-04-10T08:00:00Z", duration_sec=1800)  # 30 min
     _insert_full(db, 2, "2026-04-11T08:00:00Z", duration_sec=7200)  # 2 h
     r = client.get("/api/activities?duration_min_sec=3600")
-    assert [i["strava_id"] for i in r.json()["items"]] == [2]
+    assert [i["external_id"] for i in r.json()["items"]] == [2]
 
 
 def test_activities_filter_by_tss(client: TestClient, tmp_path: Path) -> None:
@@ -192,7 +185,7 @@ def test_activities_filter_by_tss(client: TestClient, tmp_path: Path) -> None:
     _insert_full(db, 1, "2026-04-10T08:00:00Z", training_load=30.0)
     _insert_full(db, 2, "2026-04-11T08:00:00Z", training_load=120.0)
     r = client.get("/api/activities?tss_min=50&tss_max=200")
-    assert [i["strava_id"] for i in r.json()["items"]] == [2]
+    assert [i["external_id"] for i in r.json()["items"]] == [2]
 
 
 def test_activities_filter_combinations_are_and(
@@ -207,7 +200,7 @@ def test_activities_filter_combinations_are_and(
     r = client.get(
         "/api/activities?sport_types=Ride&distance_min_km=50",
     )
-    assert [i["strava_id"] for i in r.json()["items"]] == [1]
+    assert [i["external_id"] for i in r.json()["items"]] == [1]
 
 
 def test_activities_filter_invalid_date_returns_400(client: TestClient) -> None:
@@ -218,8 +211,8 @@ def test_activities_filter_invalid_date_returns_400(client: TestClient) -> None:
 def test_activities_list_includes_garmin_rows(client: TestClient, tmp_path: Path) -> None:
     """Régression : les lignes Garmin (strava_id NULL) ne font plus planter la liste.
 
-    Le champ ``strava_id`` de l'API porte l'id externe (garmin_id) et ``source``
-    distingue la provenance.
+    Le champ ``external_id`` de l'API porte l'id externe (garmin_id) et
+    ``source`` distingue la provenance.
     """
     db = Path(tmp_path / "api_test.db")
     from domestique_ai.ingestion.garmin import save_garmin_activity
@@ -240,12 +233,12 @@ def test_activities_list_includes_garmin_rows(client: TestClient, tmp_path: Path
     assert r.status_code == 200
     items = r.json()["items"]
     assert len(items) == 1
-    assert items[0]["strava_id"] == 18435401234
+    assert items[0]["external_id"] == 18435401234
     assert items[0]["source"] == "garmin"
 
 
 def test_activities_detail_accepts_garmin_id(client: TestClient, tmp_path: Path) -> None:
-    """Le détail d'une activité Garmin est servi sans appel Strava."""
+    """Le détail d'une activité Garmin est servi sans appel API distante."""
     db = Path(tmp_path / "api_test.db")
     from domestique_ai.ingestion.garmin import save_garmin_activity
 
@@ -256,7 +249,7 @@ def test_activities_detail_accepts_garmin_id(client: TestClient, tmp_path: Path)
     r = client.get("/api/activities/555")
     assert r.status_code == 200
     body = r.json()
-    assert body["activity"]["strava_id"] == 555
+    assert body["activity"]["external_id"] == 555
     assert body["activity"]["source"] == "garmin"
 
 
@@ -337,22 +330,21 @@ def test_objective_put_then_get(client: TestClient) -> None:
     assert got["distance_km"] == 150.0
 
 
-def test_strava_sync_status_idle(client: TestClient) -> None:
-    r = client.get("/api/strava/sync-status")
+def test_garmin_sync_status_idle(client: TestClient) -> None:
+    r = client.get("/api/garmin/sync-status")
     assert r.status_code == 200
     assert r.json()["status"] in {"idle", "syncing", "done", "error"}
 
 
-def test_strava_recalculate_empty_db(client: TestClient) -> None:
-    r = client.post("/api/strava/recalculate")
+def test_metrics_recalculate_empty_db(client: TestClient) -> None:
+    r = client.post("/api/metrics/recalculate")
     assert r.status_code == 200
     assert r.json()["status"] == "done"
 
 
 def test_activity_detail_not_found(client: TestClient) -> None:
-    # Sans credentials Strava, l'endpoint doit échouer avec 503 au moment du Depends.
     r = client.get("/api/activities/999999")
-    assert r.status_code in {404, 503}
+    assert r.status_code == 404
 
 
 def test_coach_sessions_empty(client: TestClient) -> None:
@@ -439,13 +431,13 @@ def test_app_routes_registered() -> None:
         "/api/metrics/load",
         "/api/metrics/overtraining",
         "/api/activities",
-        "/api/activities/{strava_id}",
+        "/api/activities/{external_id}",
         "/api/morning",
         "/api/objective",
-        "/api/strava/sync",
-        "/api/strava/sync-status",
-        "/api/strava/recalculate",
-        "/api/strava/backfill-hr-zones",
+        "/api/garmin/sync",
+        "/api/garmin/sync-status",
+        "/api/metrics/recalculate",
+        "/api/garmin/status",
         "/api/coach/sessions",
         "/api/coach/chat",
         "/api/plan",

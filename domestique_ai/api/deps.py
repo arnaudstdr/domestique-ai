@@ -1,15 +1,14 @@
-"""Dépendances FastAPI partagées (client Strava, utilisateur courant, etc.)."""
+"""Dépendances FastAPI partagées (utilisateur courant, contexte athlète, etc.)."""
 
 from __future__ import annotations
 
 from typing import Any
 
-from fastapi import Depends, HTTPException, Request, status
+from fastapi import HTTPException, Request, status
 
 from domestique_ai.api.logging import get_logger
 from domestique_ai.athlete_context import AthleteContext, context_for_athlete
-from domestique_ai.config import get_api_token, get_strava_credentials
-from domestique_ai.ingestion.strava import StravaAuthError, StravaClient
+from domestique_ai.config import get_api_token
 
 log = get_logger("deps")
 
@@ -74,28 +73,3 @@ def get_athlete_context(request: Request) -> AthleteContext:
             detail="Consultation en lecture seule.",
         )
     return context_for_athlete(target)
-
-
-def get_strava_client(
-    ctx: AthleteContext = Depends(get_athlete_context),  # noqa: B008
-) -> StravaClient:
-    """Construit un `StravaClient` à partir des tokens de l'athlète courant.
-
-    Lève une 503 si les credentials d'app ne sont pas configurés ou si l'athlète
-    n'a pas (encore) connecté son Strava (tokens absents — avant l'onboarding 1c).
-    """
-    client_id, client_secret, _ = get_strava_credentials()
-    if not (client_id and client_secret):
-        log.warning("Strava client demandé mais credentials absents.")
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=("STRAVA_CLIENT_ID / STRAVA_CLIENT_SECRET absents de l'environnement."),
-        )
-    try:
-        return StravaClient.from_tokens_file(client_id, client_secret, ctx=ctx)
-    except StravaAuthError as exc:
-        log.warning("Strava client : auth/token KO : %s", exc)
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=str(exc),
-        ) from exc

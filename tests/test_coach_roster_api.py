@@ -28,7 +28,6 @@ from domestique_ai.api.routers import morning as morning_router
 from domestique_ai.api.routers import objective as objective_router
 from domestique_ai.api.routers import plan as plan_router
 from domestique_ai.api.routers import profile as profile_router
-from domestique_ai.api.routers import strava as strava_router
 
 _LEGACY = "legacy-roster-token"
 
@@ -44,7 +43,6 @@ def _make_app() -> FastAPI:
         objective_router,
         profile_router,
         availability_router,
-        strava_router,
         coach_router,
         plan_router,
     ):
@@ -115,7 +113,6 @@ def test_list_athletes_returns_coach_roster(env):
     assert set(by_pid) == {a_pid, b_pid}
     assert by_pid[a_pid]["n_activities"] == 2
     assert by_pid[a_pid]["last_activity_date"] == today
-    assert by_pid[a_pid]["strava_connected"] is False
     # B n'a aucune activité ni DB seedée → zéros.
     assert by_pid[b_pid]["n_activities"] == 0
     assert by_pid[b_pid]["last_activity_date"] is None

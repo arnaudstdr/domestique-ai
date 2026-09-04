@@ -7,7 +7,7 @@ import sqlite3
 
 import pytest
 
-from domestique_ai.ingestion.strava import init_db
+from domestique_ai.ingestion.db import init_db
 from domestique_ai.processing.trends import (
     _bucket_load_curve,
     _months_in_range,

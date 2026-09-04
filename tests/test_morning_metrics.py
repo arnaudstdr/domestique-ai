@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from domestique_ai.ingestion.strava import init_db
+from domestique_ai.ingestion.db import init_db
 from domestique_ai.processing.morning_metrics import (
     calculate_readiness_score,
     calculate_sleep_score,

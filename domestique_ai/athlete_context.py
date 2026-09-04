@@ -1,10 +1,10 @@
 """Contexte athlète injectable — découple le moteur de la config globale (.env).
 
-``AthleteContext`` regroupe la config *par athlète* (chemin DB, tokens Strava,
-profil HR/FTP, chemins YAML). Le moteur (``ingestion/``, ``processing/``) le
-reçoit explicitement au lieu de lire les getters globaux de
-``domestique_ai.config`` — ce qui permettra à un même backend de traiter
-plusieurs athlètes isolés (cf. ``COACH_APP_DESIGN.md``).
+``AthleteContext`` regroupe la config *par athlète* (chemin DB, profil HR/FTP,
+chemins YAML). Le moteur (``ingestion/``, ``processing/``) le reçoit
+explicitement au lieu de lire les getters globaux de ``domestique_ai.config`` —
+ce qui permettra à un même backend de traiter plusieurs athlètes isolés
+(cf. ``COACH_APP_DESIGN.md``).
 
 ``context_from_env()`` reproduit exactement le comportement mono-utilisateur
 actuel en déléguant aux getters de ``config`` : toute la couche
@@ -17,11 +17,9 @@ point d'entrée (requête, sync), jamais mémoïsé, sinon une édition de profi
 runtime (``PUT /profile`` → ``invalidate_profile_cache()``) ne serait plus prise
 en compte.
 
-La config *applicative partagée* (credentials Strava/Garmin, modèle Ollama,
-token API, intervalles scheduler) n'est volontairement **pas** dans le contexte :
-elle ne varie pas d'un athlète à l'autre. Le ``tokens_path`` (token du *compte*
-utilisateur) est en revanche par athlète, alors que le ``client_id/secret`` (app)
-ne l'est pas.
+La config *applicative partagée* (credentials Garmin, modèle Ollama, token API,
+intervalles scheduler) n'est volontairement **pas** dans le contexte : elle ne
+varie pas d'un athlète à l'autre.
 """
 
 from __future__ import annotations
@@ -39,7 +37,6 @@ from domestique_ai.config import (
     get_objective_path,
     get_profile_path,
     get_sex,
-    get_tokens_path,
 )
 
 
@@ -48,7 +45,6 @@ class AthleteContext:
     """Config par athlète — snapshot immuable threadé dans le moteur."""
 
     db_path: Path
-    tokens_path: Path
     profile_path: Path
     objective_path: Path
     availability_path: Path
@@ -67,7 +63,6 @@ def context_from_env() -> AthleteContext:
     """
     return AthleteContext(
         db_path=get_db_path(),
-        tokens_path=get_tokens_path(),
         profile_path=get_profile_path(),
         objective_path=get_objective_path(),
         availability_path=get_availability_path(),
@@ -104,7 +99,6 @@ def context_for_athlete(user: dict) -> AthleteContext:
 
     return AthleteContext(
         db_path=root / "strava_activities.db",
-        tokens_path=root / ".strava_tokens.json",
         profile_path=profile_path,
         objective_path=root / "objective.yaml",
         availability_path=root / "availability.yaml",

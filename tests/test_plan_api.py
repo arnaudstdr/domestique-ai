@@ -15,7 +15,7 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-from domestique_ai.ingestion.strava import init_db
+from domestique_ai.ingestion.db import init_db
 
 
 @pytest.fixture()

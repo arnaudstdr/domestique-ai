@@ -65,12 +65,11 @@ export default function Profil() {
           Profil
         </h2>
         <p className="text-xs text-muted">
-          Trois sections pilotent l'app : tes paramètres physiologiques, ton
+          Ces sections pilotent l'app : tes paramètres physiologiques, ton
           objectif courant et ta disponibilité hebdomadaire. Chacune se
           sauvegarde indépendamment.
         </p>
       </header>
-      <StravaSection />
       <GarminSection />
       <ProfileSection />
       <ObjectiveSection />
@@ -81,86 +80,7 @@ export default function Profil() {
 }
 
 // ---------------------------------------------------------------------------
-// 0. Connexion Strava
-// ---------------------------------------------------------------------------
-
-function StravaSection() {
-  const [connected, setConnected] = useState<boolean | null>(null);
-  const [connecting, setConnecting] = useState(false);
-  const { push } = useToast();
-
-  useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const strava = params.get("strava");
-    if (strava === "connected") {
-      push("Strava connecté. La première synchro est lancée.", "success");
-    } else if (strava === "error") {
-      push("Échec de la connexion Strava.", "error");
-    }
-    if (strava) window.history.replaceState({}, "", "/profil");
-    api.strava
-      .connection()
-      .then((c) => setConnected(c.connected))
-      .catch(() => setConnected(false));
-  }, []);
-
-  async function connect() {
-    setConnecting(true);
-    try {
-      const { authorize_url } = await api.strava.authorize();
-      window.location.assign(authorize_url);
-    } catch (err) {
-      const msg = err instanceof ApiError ? err.message : String(err);
-      push(`Strava : ${msg}`, "error");
-      setConnecting(false);
-    }
-  }
-
-  return (
-    <section className="card space-y-3">
-      <h3 className="flex items-center gap-2 text-sm font-medium text-gray-200">
-        <Link2 className="h-4 w-4 text-accent" strokeWidth={1.75} aria-hidden="true" />
-        Strava
-      </h3>
-      <p className="text-xs text-muted">
-        Connecte ton compte Strava pour importer tes activités et alimenter tes
-        métriques.
-      </p>
-      {connected === null ? (
-        <p className="text-xs text-muted">Vérification…</p>
-      ) : (
-        <div className="space-y-2">
-          {connected && (
-            <p className="text-sm text-accent">
-              Compte Strava connecté — la synchro tourne automatiquement.
-            </p>
-          )}
-          <button
-            type="button"
-            onClick={connect}
-            disabled={connecting}
-            className={connected ? "btn-ghost w-full" : "btn-primary w-full"}
-          >
-            {connecting
-              ? "Redirection…"
-              : connected
-                ? "Reconnecter (ré-autoriser Strava)"
-                : "Connecter Strava"}
-          </button>
-          {connected && (
-            <p className="text-xs text-muted">
-              Utile après une révocation d'accès ou un scope manquant : ré-autorise
-              et la synchro repart.
-            </p>
-          )}
-        </div>
-      )}
-    </section>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// 0-bis. Sync Garmin Connect
+// 0. Sync Garmin Connect
 // ---------------------------------------------------------------------------
 
 function GarminSection() {
@@ -203,8 +123,8 @@ function GarminSection() {
         Garmin Connect
       </h3>
       <p className="text-xs text-muted">
-        Importe tes activités depuis Garmin Connect (compteur Edge / montre).
-        Alternative à Strava — mêmes métriques, même pipeline.
+        Importe tes activités depuis Garmin Connect (compteur Edge / montre) —
+        mêmes métriques, même pipeline.
       </p>
       {status === null ? (
         <p className="text-xs text-muted">Vérification…</p>

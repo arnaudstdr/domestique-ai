@@ -21,12 +21,12 @@ from domestique_ai.api.routers import activities as activities_router
 from domestique_ai.api.routers import auth as auth_router
 from domestique_ai.api.routers import availability as availability_router
 from domestique_ai.api.routers import coach as coach_router
+from domestique_ai.api.routers import garmin as garmin_router
 from domestique_ai.api.routers import metrics as metrics_router
 from domestique_ai.api.routers import morning as morning_router
 from domestique_ai.api.routers import objective as objective_router
 from domestique_ai.api.routers import plan as plan_router
 from domestique_ai.api.routers import profile as profile_router
-from domestique_ai.api.routers import strava as strava_router
 from domestique_ai.llm.plan_storage import save_plan
 
 _LEGACY = "legacy-mt-token"
@@ -44,7 +44,7 @@ def _make_app() -> FastAPI:
         objective_router,
         profile_router,
         availability_router,
-        strava_router,
+        garmin_router,
         coach_router,
         plan_router,
     ):
@@ -143,27 +143,29 @@ def test_no_env_ftp_leak_to_athlete(env, monkeypatch):
     assert proj["current_ftp"] == 250.0  # défaut en dur, pas la valeur env (999)
 
 
-def test_athlete_without_tokens_503_on_detail(env):
+def test_athlete_detail_served_from_local_db(env):
     c, root = env["client"], env["root"]
     sess, pid = _new_athlete(c)
     _seed_activity(
         root, pid, strava_id=42, training_load=50.0, date_iso=dt.date.today().isoformat()
     )
     assert c.get("/api/activities", headers=_bearer(sess)).status_code == 200
-    # Le détail exige un client Strava : athlète sans tokens (avant 1c) → 503.
-    assert c.get("/api/activities/42", headers=_bearer(sess)).status_code == 503
+    # Le détail est servi depuis la base locale (aucun client externe requis).
+    r = c.get("/api/activities/42", headers=_bearer(sess))
+    assert r.status_code == 200
+    assert r.json()["activity"]["external_id"] == 42
 
 
-def test_strava_status_reachable_and_isolated(env):
+def test_garmin_status_reachable_and_isolated(env):
     c = env["client"]
     a_sess, _ = _new_athlete(c)
     b_sess, _ = _new_athlete(c)
-    # strava est dégaté (plus de 403) et scopé par athlète.
-    assert c.get("/api/strava/sync-status", headers=_bearer(a_sess)).status_code == 200
-    # A lance un sync (sans tokens Strava → finira en erreur) ; B reste idle.
-    assert c.post("/api/strava/sync", headers=_bearer(a_sess)).status_code == 200
-    a_status = c.get("/api/strava/sync-status", headers=_bearer(a_sess)).json()["status"]
-    b_status = c.get("/api/strava/sync-status", headers=_bearer(b_sess)).json()["status"]
+    # Garmin est dégaté et scopé par athlète.
+    assert c.get("/api/garmin/sync-status", headers=_bearer(a_sess)).status_code == 200
+    # A lance un sync (sans cache token Garmin → finira en erreur) ; B reste idle.
+    assert c.post("/api/garmin/sync", headers=_bearer(a_sess)).status_code == 200
+    a_status = c.get("/api/garmin/sync-status", headers=_bearer(a_sess)).json()["status"]
+    b_status = c.get("/api/garmin/sync-status", headers=_bearer(b_sess)).json()["status"]
     assert a_status != "idle"
     assert b_status == "idle"
 

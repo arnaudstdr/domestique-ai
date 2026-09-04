@@ -114,31 +114,6 @@ def test_list_users_all_and_filtered_by_role():
     assert [u["id"] for u in coaches] == [coach["id"]]
 
 
-def test_oauth_state_create_then_consume_returns_user():
-    user = pdb.create_user(role="athlete", display_name="Alice")
-    _row, state = pdb.create_oauth_state(user["id"], expires_at=_future())
-    resolved = pdb.consume_oauth_state(state)
-    assert resolved is not None and resolved["id"] == user["id"]
-
-
-def test_oauth_state_is_single_use():
-    user = pdb.create_user(role="athlete")
-    _row, state = pdb.create_oauth_state(user["id"])
-    assert pdb.consume_oauth_state(state) is not None
-    assert pdb.consume_oauth_state(state) is None  # rejoué → refusé
-
-
-def test_oauth_state_expired_returns_none():
-    user = pdb.create_user(role="athlete")
-    _row, state = pdb.create_oauth_state(user["id"], expires_at=_past())
-    assert pdb.consume_oauth_state(state) is None
-
-
-def test_oauth_state_unknown_returns_none():
-    assert pdb.consume_oauth_state("nope") is None
-    assert pdb.consume_oauth_state("") is None
-
-
 def test_session_resolve_valid_invalid_revoked_expired():
     user = pdb.create_user(role="athlete")
 

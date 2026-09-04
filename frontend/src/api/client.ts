@@ -31,8 +31,6 @@ import type {
   ReconnectLink,
   RideVolumeResponse,
   SimilarActivitiesResponse,
-  StravaAuthorize,
-  StravaConnection,
   SyncResult,
   SyncStatus,
   GarminStatus,
@@ -197,6 +195,8 @@ export const api = {
       http<TrendsResponse>(`/api/metrics/trends?period=${period}`),
     ftpProjection: () =>
       http<FtpProjectionResponse>(`/api/metrics/ftp-projection`),
+    recalculate: () =>
+      http<SyncResult>(`/api/metrics/recalculate`, { method: "POST" }),
   },
   activities: {
     list: (
@@ -282,20 +282,6 @@ export const api = {
         method: "PUT",
         body: JSON.stringify(av),
       }),
-  },
-  strava: {
-    sync: () => http<SyncStatus>(`/api/strava/sync`, { method: "POST" }),
-    syncStatus: () => http<SyncStatus>(`/api/strava/sync-status`),
-    connection: () => http<StravaConnection>(`/api/strava/connection`),
-    authorize: () => http<StravaAuthorize>(`/api/strava/authorize`),
-    recalculate: () =>
-      http<SyncResult>(`/api/strava/recalculate`, { method: "POST" }),
-    backfillHrZones: () =>
-      http<SyncResult>(`/api/strava/backfill-hr-zones`, { method: "POST" }),
-    backfillTemperature: () =>
-      http<SyncResult>(`/api/strava/backfill-temperature`, { method: "POST" }),
-    backfillPolylines: () =>
-      http<SyncResult>(`/api/strava/backfill-polylines`, { method: "POST" }),
   },
   garmin: {
     status: () => http<GarminStatus>(`/api/garmin/status`),

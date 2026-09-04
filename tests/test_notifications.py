@@ -197,7 +197,7 @@ def test_notify_sync_completed_singular(monkeypatch):
 
     monkeypatch.setattr(notifications.requests, "post", fake_post)
     notifications.notify_sync_completed(1)
-    assert captured["data"]["title"] == "Nouvelle activité Strava"
+    assert captured["data"]["title"] == "Nouvelle activité"
     assert "Une nouvelle activité" in captured["data"]["message"]
 
 
@@ -215,7 +215,7 @@ def test_notify_sync_completed_plural(monkeypatch):
 
     monkeypatch.setattr(notifications.requests, "post", fake_post)
     notifications.notify_sync_completed(3)
-    assert captured["data"]["title"] == "Nouvelles activités Strava"
+    assert captured["data"]["title"] == "Nouvelles activités"
     assert "3 nouvelles activités" in captured["data"]["message"]
 
 

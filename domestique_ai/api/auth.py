@@ -3,7 +3,7 @@
 L'app est mono-utilisateur mais exposée sur le tailnet et potentiellement
 sur le LAN (cf. `docker-compose.yml` ``network_mode: host``). Sans auth
 applicative, n'importe quel appareil du même réseau peut lire les
-activités, déclencher un sync Strava ou pousser un plan vers Garmin.
+activités, déclencher un sync Garmin ou pousser un plan vers Garmin.
 
 Comportement :
 - Si ``DOMESTIQUE_AI_API_TOKEN`` est vide ou absent : middleware désactivé
@@ -69,12 +69,11 @@ class BearerAuthMiddleware:
 
     _LOG = get_logger("auth")
     # Routes joignables sans session : accept-invite (entrée des comptes) et le
-    # callback OAuth Strava (redirection navigateur, validée par son `state`).
+    # callback OAuth Google Health (redirection navigateur, validée par son `state`).
     _EXEMPT_API_PATHS = {
         "/api/health",
         "/api/auth/accept-invite",
         "/api/auth/reconnect",
-        "/api/strava/callback",
         "/api/google-health/callback",
     }
 

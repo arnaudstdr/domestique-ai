@@ -16,6 +16,7 @@ from typing import Any
 
 from domestique_ai.athlete_context import AthleteContext
 from domestique_ai.config import get_db_path
+from domestique_ai.ingestion.db import init_db
 from domestique_ai.processing.plan_builder import Workout, build_training_plan
 
 
@@ -24,8 +25,6 @@ class PlanGenerationError(RuntimeError):
 
 
 def _connect(db_path: Path | None = None) -> sqlite3.Connection:
-    from domestique_ai.ingestion.strava import init_db
-
     path = Path(db_path) if db_path else get_db_path()
     init_db(path)
     return sqlite3.connect(path)

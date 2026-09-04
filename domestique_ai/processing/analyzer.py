@@ -24,13 +24,14 @@ from domestique_ai.config import (
     get_lthr_pct,
     get_sex,
 )
+from domestique_ai.ingestion.db import init_db
 
 # Bornes hautes des zones Z1..Z4 en %HRR (Karvonen). Z5 = reste, jusqu'à 1.0.
 _HR_ZONE_BOUNDS = (0.60, 0.70, 0.80, 0.90)
 HR_ZONE_KEYS = ("z1", "z2", "z3", "z4", "z5")
-# Au-delà, on considère qu'il y a eu une pause Strava et on ne comptabilise pas
-# le delta dans la zone (sinon une auto-pause de 90 s gonflerait artificiellement
-# la zone du dernier sample actif).
+# Au-delà, on considère qu'il y a eu une pause d'enregistrement et on ne
+# comptabilise pas le delta dans la zone (sinon une auto-pause de 90 s
+# gonflerait artificiellement la zone du dernier sample actif).
 _HR_ZONE_PAUSE_GAP_SEC = 5.0
 
 
@@ -41,9 +42,6 @@ def fetch_activities_from_db(
     path = Path(db_path) if db_path else (ctx.db_path if ctx else get_db_path())
     if not path.exists():
         return []
-    # Import local pour éviter les cycles avec ingestion.strava.
-    from domestique_ai.ingestion.strava import init_db
-
     init_db(path)
     conn = sqlite3.connect(path)
     try:
@@ -94,8 +92,6 @@ def fetch_weight_history(
     path = Path(db_path) if db_path else (ctx.db_path if ctx else get_db_path())
     if not path.exists():
         return []
-    from domestique_ai.ingestion.strava import init_db
-
     init_db(path)
     conn = sqlite3.connect(path)
     try:
@@ -186,8 +182,8 @@ def calculate_hr_zones(
     Ventile une activité dans 5 zones %HRR (Karvonen) à partir des streams HR.
 
     hr_stream : fréquence cardiaque seconde par seconde (bpm).
-    time_stream : timestamps relatifs en secondes (gère les pauses Strava
-                  via la différence entre samples consécutifs).
+    time_stream : timestamps relatifs en secondes (gère les pauses
+                  d'enregistrement via la différence entre samples consécutifs).
     Renvoie le temps passé dans chaque zone, en secondes : {"z1": ..., "z5": ...}.
     Les samples HR à 0 ou None sont ignorés (capteur pas encore actif).
     """

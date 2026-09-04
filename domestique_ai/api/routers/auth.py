@@ -16,6 +16,7 @@ from pydantic import BaseModel, Field
 from domestique_ai.api.deps import get_current_user, require_coach
 from domestique_ai.api.logging import get_logger
 from domestique_ai.athlete_context import context_for_athlete
+from domestique_ai.ingestion.db import init_db
 from domestique_ai.platform_db import (
     InvitationError,
     accept_invitation,
@@ -42,7 +43,6 @@ def _provision_athlete_space(user: dict) -> None:
     if user.get("is_bootstrap"):
         return
     from domestique_ai.athlete_context import context_for_athlete
-    from domestique_ai.ingestion.strava import init_db
 
     ctx = context_for_athlete(user)
     try:
@@ -99,7 +99,6 @@ class ReconnectRequest(BaseModel):
 class AthleteSummary(BaseModel):
     public_id: str
     display_name: str | None = None
-    strava_connected: bool
     last_activity_date: str | None = None
     n_activities: int = 0
 
@@ -187,7 +186,6 @@ def list_athletes(coach: dict = Depends(require_coach)) -> list[AthleteSummary]:
             AthleteSummary(
                 public_id=athlete["public_id"],
                 display_name=athlete.get("display_name"),
-                strava_connected=ctx.tokens_path.exists(),
                 last_activity_date=last_date,
                 n_activities=n_activities,
             )

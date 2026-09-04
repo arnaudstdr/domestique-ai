@@ -7,7 +7,7 @@ import sqlite3
 
 import pytest
 
-from domestique_ai.ingestion.strava import init_db
+from domestique_ai.ingestion.db import init_db
 from domestique_ai.llm.tools import (
     TOOL_SCHEMAS,
     dispatch,
@@ -221,14 +221,14 @@ def test_get_objective_present(tmp_path, monkeypatch):
 
 
 def test_get_activity_details_known_id(seeded_db):
-    details = get_activity_details(strava_id=2)
+    details = get_activity_details(external_id=2)
     assert details["available"] is True
     assert details["distance_km"] == 60.0
     assert details["hr_zones_sec"]["z2"] == 2700
 
 
 def test_get_activity_details_unknown_id(seeded_db):
-    details = get_activity_details(strava_id=999)
+    details = get_activity_details(external_id=999)
     assert details["available"] is False
 
 

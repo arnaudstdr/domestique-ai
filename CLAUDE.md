@@ -16,10 +16,10 @@ pytest
 # Lancer un seul test
 pytest tests/test_analyzer.py::test_calculate_hr_tss_anchored_to_100_at_threshold
 pytest -k "hr_tss"               # filtre par expression
-pytest tests/test_strava.py -x   # stoppe au premier échec
+pytest tests/test_garmin.py -x   # stoppe au premier échec
 
-# Flow OAuth Strava (interactif, à exécuter une fois pour générer data/.strava_tokens.json)
-python -m domestique_ai.ingestion.strava_oauth_flow
+# 1re connexion Garmin Connect (interactif, MFA inclus — seed data/.garmin_tokens)
+python -m domestique_ai.export.garmin_connect
 
 # Backend API FastAPI (production / runtime principal)
 uvicorn domestique_ai.api.main:app --reload --port 8501
@@ -37,7 +37,7 @@ uvicorn domestique_ai.api.main:app --port 8501   # → http://localhost:8501
 L'UI est une **PWA FastAPI + React** (Streamlit a été retiré) :
 
 - `domestique_ai/api/` : FastAPI, un routeur par domaine (metrics, activities,
-  morning, objective, strava, coach, plan). Pydantic v2 pour la sérialisation.
+  morning, objective, garmin, coach, plan). Pydantic v2 pour la sérialisation.
 - `frontend/` : React 18 + Vite + TypeScript + Tailwind + recharts + react-leaflet.
   Service worker manuel dans `public/sw.js` (NetworkFirst sur `/api/`).
 - Le port runtime est **8501**. En dev, Vite écoute sur 5173 et proxy `/api`
@@ -58,17 +58,17 @@ Pipeline en 4 couches, chacune isolée dans son sous-package :
 ```text
 config.py  ──►  ingestion/  ──►  processing/  ──►  app/  (UI)
    │                │                │              │
-   └─ .env / chemins └─ Strava + DB  └─ TSS, CTL/ATL/TSB
+   └─ .env / chemins └─ Garmin + DB  └─ TSS, CTL/ATL/TSB
                               │
                               └────►  llm/  (isolé, pas branché à l'UI — voir TODO)
 ```
 
 Points structurants à connaître avant de toucher au code :
 
-- **Source de vérité** : SQLite local (`data/strava_activities.db` par défaut, override via `DOMESTIQUE_AI_DB_PATH`). Une seule table `activities` avec `strava_id` UNIQUE — toute la pipeline est idempotente sur cette clé.
-- **Migrations douces** : `init_db()` + `_ensure_column()` dans `ingestion/strava.py`. Pour ajouter une colonne, étendre le `CREATE TABLE` ET ajouter un appel `_ensure_column()` (sinon les bases existantes ne migreront pas).
-- **Cycle d'imports** : `processing/analyzer.py` importe `ingestion.strava.init_db` **localement dans la fonction** (pas en haut de fichier) pour casser un cycle. Conserver ce pattern si du code partagé apparaît.
-- **Toute la config passe par `domestique_ai.config`** : ne jamais lire `os.getenv` ailleurs. Les getters renvoient `None` quand l'env est absent — les modules en aval gèrent le fallback.
+- **Source de vérité** : SQLite local (`data/strava_activities.db` par défaut — nom historique, override via `DOMESTIQUE_AI_DB_PATH`). Une seule table `activities` : les lignes récentes ont `garmin_id` renseigné (index unique partiel), les lignes historiques ont `strava_id` UNIQUE (ingestion Strava supprimée en 09/2026 — Strava exige un abonnement payant pour son API depuis le 1ᵉʳ juillet 2026). Au niveau API/DB, l'id exposé est `external_id` = `coalesce(strava_id, garmin_id)` — toute la pipeline est idempotente sur ces clés.
+- **Migrations douces** : `init_db()` + `_ensure_column()` dans `ingestion/db.py`. Pour ajouter une colonne, étendre le `CREATE TABLE` ET ajouter un appel `_ensure_column()` (sinon les bases existantes ne migreront pas).
+- **Pas de cycle d'imports** : `ingestion/db.py` (schéma + helpers de persistance) ne dépend ni du processing ni d'une source d'ingestion — les modules aval (`analyzer`, LLM, routers) peuvent l'importer au top-level. Ne pas remettre du code dépendant d'une source dedans.
+- **Toute la config passe par `domestique_ai.config`** : ne jamais lire `os.getenv` ailleurs. Les getters renvoient `None` quand l'env est absent — les modules en aval gèrent le fallback. Les variables `STRAVA_FTP`/`STRAVA_HR_*`/`STRAVA_LTHR_PCT`/`STRAVA_SEX` sont des **paramètres du profil athlète** (nommage historique) — elles ne concernent pas l'API Strava et restent utilisées.
 
 ### Calcul de la charge — le cœur métier
 
@@ -82,8 +82,7 @@ Points structurants à connaître avant de toucher au code :
 
 Conséquences pratiques :
 
-- Modifier le profil HR (`STRAVA_HR_REST`/`STRAVA_HR_MAX`) **ne recalcule pas** automatiquement les scores. C'est `recalculate_training_loads()` (bouton « 🔁 Recalculer la charge » du dashboard) qui rejoue tout.
-- Compléter un champ rétroactivement (`max_heart_rate` typiquement) passe par `backfill_activity_fields()` — il refetch tout l'historique Strava et n'écrit que si la valeur change.
+- Modifier le profil HR (`STRAVA_HR_REST`/`STRAVA_HR_MAX`) **ne recalcule pas** automatiquement les scores. C'est `recalculate_training_loads()` (endpoint `POST /api/metrics/recalculate`, bouton « Recalculer » du dashboard) qui rejoue tout.
 - CTL/ATL/TSB sont des EMA (constantes 42j / 7j) calculées sur la grille de **toutes les dates** entre la première et la dernière activité (les jours sans activité comptent comme TSS=0). Voir `calculate_ctl_atl_tsb()`.
 
 ### Tendances longues + projection FTP (`processing/trends.py`)
@@ -104,41 +103,47 @@ Agrégats saisonniers exposés via `GET /api/metrics/trends?period={3m|6m|1y|all
 Chaque activité est ventilée en 5 zones %HRR (Karvonen) — colonnes `hr_z1_time` … `hr_z5_time` (secondes) :
 
 - Z1 : <60% HRR (récup) · Z2 : 60-70% (endurance) · Z3 : 70-80% (tempo) · Z4 : 80-90% (seuil) · Z5 : ≥90% (VO2max).
-- Bornes en dur dans `processing/analyzer._HR_ZONE_BOUNDS`. La fonction `calculate_hr_zones(hr_stream, time_stream, hr_rest, hr_max)` consomme les streams Strava `heartrate` + `time`.
-- Les pauses Strava (saut > 5 s entre deux samples) ne sont pas comptabilisées (constante `_HR_ZONE_PAUSE_GAP_SEC`).
-- Convention DB : `NULL` = non calculé (sera traité par le backfill) ; `0.0` = calculé mais aucune seconde dans cette zone.
+- Bornes en dur dans `processing/analyzer._HR_ZONE_BOUNDS`. La fonction `calculate_hr_zones(hr_stream, time_stream, hr_rest, hr_max)` consomme les séries `heartrate` + `time` extraites des streams d'ingestion.
+- Les pauses d'enregistrement (saut > 5 s entre deux samples) ne sont pas comptabilisées (constante `_HR_ZONE_PAUSE_GAP_SEC`).
+- Convention DB : `NULL` = non calculé ; `0.0` = calculé mais aucune seconde dans cette zone.
 
-À l'ingestion (`sync_activities`), si `STRAVA_HR_REST` + `STRAVA_HR_MAX` sont configurés, un appel `GET /activities/{id}/streams` est fait par activité avec `avg_heart_rate` non null. Pour rattraper l'historique : bouton « 📥 Backfill zones HR » du dashboard ou `backfill_hr_zones(client)` — idempotent (filtre `hr_z1_time IS NULL`), 1 requête Strava par activité, attention aux rate limits (100 req / 15 min, 1000 / jour).
+À l'ingestion (`sync_activities_garmin`), si `STRAVA_HR_REST` + `STRAVA_HR_MAX` sont configurés, un appel `get_activity_details` est fait par activité avec `avg_heart_rate` non null, et les séries HR/temps sont extraites par `parse_details_streams()` (parsing défensif, deux orientations de payload gérées). Les activités dont les détails sont indisponibles restent à `NULL` et ne sont pas rattrapées automatiquement.
 
 ### Température météo (avg/min/max par activité)
 
-Colonnes `avg_temp` / `min_temp` / `max_temp` (REAL nullable, °C) calculées à partir du stream Strava `temp` lors de la sync. La réduction est faite par `summarize_temp_stream()` (filtre les valeurs aberrantes hors `-50 °C < t < 60 °C`, garde les zéros légitimes).
+Colonnes `avg_temp` / `min_temp` / `max_temp` (REAL nullable, °C) calculées à partir du stream de température renvoyé par `get_activity_details` Garmin. La réduction est faite par `summarize_temp_stream()` (dans `ingestion/db.py` ; filtre les valeurs aberrantes hors `-50 °C < t < 60 °C`, garde les zéros légitimes).
 
-- **À l'ingestion** : récupération batchée avec HR (clés `heartrate,time,temp` en un seul appel `fetch_streams_full`) — pas de surcoût API par rapport à l'ingestion HR seule. Si HR n'est pas configuré, les streams ne sont pas téléchargés à la sync.
-- **Backfill** : bouton « 🌡️ Backfill temp. » du Dashboard ou `backfill_temperature(client)` — idempotent (filtre `avg_temp IS NULL`), 1 requête Strava par activité, mêmes rate limits que le backfill HR. Les activités sans capteur température (home trainer typique) restent à NULL après backfill.
-- **Convention DB** : `NULL` = stream pas encore lu OU activité sans capteur ; pour distinguer les deux, regarder si le backfill a déjà été lancé pour cette activité (`avg_heart_rate IS NOT NULL` est un proxy raisonnable pour « activité outdoor avec capteurs »).
+- **À l'ingestion** : récupérée en même temps que les zones HR (même appel de détails) — pas de surcoût réseau par rapport à l'ingestion HR seule. Si HR n'est pas configuré, les détails ne sont pas téléchargés à la sync.
+- **Convention DB** : `NULL` = détails pas encore lus OU activité sans capteur température (home trainer typiquement) ; pour distinguer les deux, `avg_heart_rate IS NOT NULL` est un proxy raisonnable pour « activité avec capteurs ».
 - **Exposition** : `ActivitySummary` et le tool LLM `get_activity_details` retournent `avg_temp_c` / `min_temp_c` / `max_temp_c` quand disponibles, ce qui permet au coach d'expliquer une dérive HR par la chaleur.
 
-### Auto-sync Strava (scheduler APScheduler)
+### Ingestion Garmin Connect (source d'activités)
 
-Un `BackgroundScheduler` APScheduler tourne dans le process FastAPI et déclenche `sync_activities()` à intervalle régulier — par défaut **toutes les 30 minutes**. Démarré au `lifespan` startup, arrêté proprement au shutdown.
+Les activités sont ingérées depuis l'**API non officielle Garmin Connect** (module `garminconnect`) via `ingestion/garmin.py`. Le compteur Edge / la montre synchronisent vers Garmin Connect, et `sync_activities_garmin()` rapatrie les activités dans la même table `activities` — toute la pipeline aval (TSS, CTL/ATL/TSB, zones HR, tendances, coach LLM) fonctionne sans changement.
 
-- **Configuration** :
-  - `DOMESTIQUE_AI_AUTO_SYNC_MINUTES` : période en minutes (défaut 30). `0` désactive complètement l'auto-sync.
-  - `DOMESTIQUE_AI_AUTO_SYNC_FIRST_RUN_DELAY_MIN` : délai avant le 1er run (défaut 2 min — laisse l'API se stabiliser).
-- **Anti-chevauchement** : sync manuel (`POST /api/strava/sync`) et auto-sync passent tous les deux par `_claim_sync()` dans `routers/strava.py`. Tant qu'une sync est en cours (`status == "syncing"`), tout claim concurrent retourne `False` (skip silencieux loggé côté scheduler). `coalesce=True, max_instances=1` côté APScheduler en plus, ceinture + bretelles.
-- **Logs et erreurs** : `_auto_sync_job` enveloppe `trigger_sync_blocking` dans un `try/except` global — un job APScheduler qui lève marque le job comme erroné et peut arrêter le scheduler, ce qu'on ne veut surtout pas. Toute exception inattendue est loggée mais n'interrompt pas la cadence.
-- **Rate limit** : 30 min × 24 = 48 sync/jour. À vide ≈ 1-2 req Strava chacune, soit ~100 req/jour dans le pire cas — large sous le quota (1000/jour, 100/15 min).
-- **Sync incrémentale** : `sync_activities()` dérive automatiquement `after` depuis `MAX(date)` de la table `activities` (moins 1 h de marge). Sans ça, chaque sync re-paginait tout l'historique Strava (~5-15 appels HTTP, jusqu'à 6 min sur Pi 5 quand la base est conséquente). Un appel explicite `sync_activities(client, after=0)` force le re-fetch complet si besoin.
+- **Connexion** : seed interactif une fois (`python -m domestique_ai.export.garmin_connect`, MFA inclus) — le cache token `data/.garmin_tokens` est **global** (compte du propriétaire bootstrap). Credentials `GARMIN_EMAIL`/`GARMIN_PASSWORD` dans le `.env`.
+- **Endpoints** : `POST /api/garmin/sync` (sync manuel en tâche de fond), `GET /api/garmin/sync-status`, `GET /api/garmin/status` (état de connexion).
+- **Sync incrémentale** : la fenêtre par défaut démarre 1 j avant la dernière activité Garmin connue (ou 3 ans d'historique au 1er sync). Mapping `typeKey` Garmin → `sport_type` (nomenclature historique type Strava, `_SPORT_MAP`) pour conserver les buckets indoor/outdoor du comparateur.
+- **Parsing défensif** : les payloads de détails (`get_activity_details`) changent d'orientation — `parse_details_streams()` gère les deux (une entrée par métrique vs une entrée par échantillon) et logge le payload brut en cas d'échec pour adaptation rapide.
+- **⚠️ Endpoints non officiels** : peuvent changer sans préavis.
+
+### Auto-sync Garmin (scheduler APScheduler)
+
+Un `BackgroundScheduler` APScheduler tourne dans le process FastAPI et déclenche le sync Garmin à intervalle régulier — par défaut **toutes les 30 minutes**. Démarré au `lifespan` startup, arrêté proprement au shutdown.
+
+- **Configuration** : `DOMESTIQUE_AI_GARMIN_AUTO_SYNC_MINUTES` : période en minutes (défaut 30). `0` désactive complètement l'auto-sync.
+- **Anti-chevauchement** : sync manuel (`POST /api/garmin/sync`) et auto-sync passent tous les deux par `_claim_sync()` dans `routers/garmin.py`. Tant qu'une sync est en cours (`status == "syncing"`), tout claim concurrent retourne `False` (skip silencieux loggé côté scheduler). `coalesce=True, max_instances=1` côté APScheduler en plus, ceinture + bretelles.
+- **Logs et erreurs** : le job enveloppe `trigger_sync_blocking` dans un `try/except` global — un job APScheduler qui lève marque le job comme erroné et peut arrêter le scheduler, ce qu'on ne veut surtout pas. Toute exception inattendue est loggée mais n'interrompt pas la cadence.
+- **Ciblage** : le cache token Garmin étant global, le job ne sync que le propriétaire (bootstrap) — les autres athlètes ne sont volontairement pas syncés.
 
 ### Notifications push (Pushover) — palier 4 du coach proactif
 
 `domestique_ai/notifications.py` expose deux fonctions best-effort :
 
 - `send_pushover(title, message, priority=None)` : POST sur `api.pushover.net`. No-op silencieux si `PUSHOVER_USER_KEY` ou `PUSHOVER_APP_TOKEN` manque. Toute exception (réseau, 4xx) est loggée en warning et retournée comme `False`.
-- `notify_sync_completed(inserted)` : appelée à la fin de `_run_sync` dans le router strava si `inserted > 0`. No-op sur sync à vide (anti-spam). Pluriel/singulier géré.
+- `notify_sync_completed(inserted)` : appelée à la fin de `_run_sync` dans le router garmin si `inserted > 0`. No-op sur sync à vide (anti-spam). Pluriel/singulier géré.
 
-Le hook dans `_run_sync` (router strava) enveloppe l'appel dans un `try/except` : une notif qui échoue ne doit jamais altérer l'état du sync ni masquer le log de succès.
+Le hook dans `_run_sync` (router garmin) enveloppe l'appel dans un `try/except` : une notif qui échoue ne doit jamais altérer l'état du sync ni masquer le log de succès.
 
 **Configuration** :
 - `PUSHOVER_USER_KEY` + `PUSHOVER_APP_TOKEN` : obligatoires pour activer.
@@ -164,22 +169,7 @@ Le hook dans `_run_sync` (router strava) enveloppe l'appel dans un `try/except` 
 - `HEALTHCHECKS_PING_URL` : obligatoire pour activer. Sinon job désactivé silencieusement.
 - `HEALTHCHECKS_PING_INTERVAL_MIN` : optionnel (défaut 5). Doit correspondre à la "Period" configurée côté Healthchecks.io.
 
-Le job ping est indépendant du job sync — on peut activer l'un sans l'autre (ex. `DOMESTIQUE_AI_AUTO_SYNC_MINUTES=0` + URL Healthchecks définie → seul le heartbeat tourne).
-
-### OAuth Strava
-
-`StravaClient.from_tokens_file()` est le point d'entrée standard côté code. Il :
-
-- lit `data/.strava_tokens.json` (jamais commité),
-- déclenche un refresh automatique si `expires_at <= now + 60s`,
-- repersiste les tokens.
-
-Le flow interactif initial (`strava_oauth_flow.py`) n'est lancé qu'une fois — ensuite, le refresh token suffit à la vie de l'app.
-
-Gestion des erreurs API :
-
-- `StravaAuthError` pour 401 / token absent.
-- 429 → backoff via `Retry-After` puis retry (déjà géré dans `fetch_activities`).
+Le job ping est indépendant du job sync — on peut activer l'un sans l'autre (ex. `DOMESTIQUE_AI_GARMIN_AUTO_SYNC_MINUTES=0` + URL Healthchecks définie → seul le heartbeat tourne).
 
 ### Google Health API — données bracelet (Fitbit / Pixel Watch)
 
@@ -229,7 +219,7 @@ DOMESTIQUE_AI_GOOGLE_HEALTH_AUTO_SYNC_MINUTES=360
    En attendant, ajouter ton compte comme test user pour développer.
 
 **Auto-sync** : un job APScheduler supplémentaire récupère les 7 derniers jours
-toutes les 6 heures par défaut. Il est indépendant du sync Strava.
+toutes les 6 heures par défaut. Il est indépendant du sync Garmin.
 
 ### Coach LLM — `domestique_ai/llm/`
 
@@ -298,7 +288,7 @@ Chaque correction émet une chaîne descriptive dans `adjustments`, ce qui perme
 
 ### Comparateur d'activités (`processing/similar.py`)
 
-`GET /api/activities/{strava_id}/similar` retourne les activités passées au profil similaire. Heuristique simple, sans appel Strava ni GPS de départ.
+`GET /api/activities/{external_id}/similar` retourne les activités passées au profil similaire. Heuristique simple, sans appel API distante ni GPS de départ.
 
 **Signature** : `(sport_bucket, distance, elevation_gain)`.
 
@@ -309,13 +299,13 @@ Chaque correction émet une chaîne descriptive dans `adjustments`, ce qui perme
 
 Pré-filtre SQL sur l'index `idx_activities_distance_elev` (créé à la 1re requête) pour borner le scan, puis filtrage fin Python. Sur la DB courante (~quelques milliers de lignes), latence < 200 ms.
 
-Retour : `{available, reference, matches: [{strava_id, date, duration_sec, training_load, tss_delta_pct, power_delta_pct, ...}], criteria}`. Les `*_delta_pct` sont calculés relativement à la référence (positif = candidate plus grand).
+Retour : `{available, reference, matches: [{external_id, date, duration_sec, training_load, tss_delta_pct, power_delta_pct, ...}], criteria}`. Les `*_delta_pct` sont calculés relativement à la référence (positif = candidate plus grand).
 
-**Exposition coach LLM** : tool `find_similar_activities(strava_id, limit=10)`, déclaré dans `tools.py`. Permet au coach de répondre à « ce col, je l'ai monté combien de fois ? » sans inventer de chiffres.
+**Exposition coach LLM** : tool `find_similar_activities(external_id, limit=10)`, déclaré dans `tools.py`. Permet au coach de répondre à « ce col, je l'ai monté combien de fois ? » sans inventer de chiffres.
 
 **Tests** : 16 tests dans `tests/test_similar_activities.py` couvrent tolérances, exclusion indoor/outdoor, delta_pct, tri, limit, plancher distance.
 
-Si l'usage révèle des faux positifs (deux profils différents au même bucket), on ajoutera `start_lat` / `start_lng` à `activities` (migration douce + backfill `fetch_activity_summary`) pour affiner via Haversine.
+Si l'usage révèle des faux positifs (deux profils différents au même bucket), on ajoutera `start_lat` / `start_lng` à `activities` (migration douce + backfill depuis les détails Garmin) pour affiner via Haversine.
 
 ### Export iCalendar (`export/ics.py`)
 

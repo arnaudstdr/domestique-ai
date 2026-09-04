@@ -117,7 +117,7 @@ class FtpProjectionResponse(BaseModel):
 
 
 class ActivitySummary(BaseModel):
-    strava_id: int
+    external_id: int
     name: str | None = None
     date: str
     distance_km: float
@@ -133,8 +133,9 @@ class ActivitySummary(BaseModel):
     min_temp: float | None = None
     max_temp: float | None = None
     map_polyline: str | None = None
-    # Source d'ingestion : "strava" (défaut, legacy) ou "garmin". Le champ
-    # ``strava_id`` porte l'id externe de la source (garmin_id si source Garmin).
+    # Source d'ingestion : "strava" (lignes historiques, ingestion supprimée
+    # en 09/2026) ou "garmin". Le champ ``external_id`` porte l'id externe de
+    # la source (strava_id legacy ou garmin_id).
     source: str = "strava"
 
 
@@ -166,7 +167,7 @@ class ActivityDetail(BaseModel):
 class SimilarActivityMatch(BaseModel):
     """Une activité similaire à l'activité de référence."""
 
-    strava_id: int
+    external_id: int
     date: str
     duration_sec: int | None = None
     avg_heart_rate: float | None = None
@@ -180,7 +181,7 @@ class SimilarActivityMatch(BaseModel):
 
 
 class SimilarActivitiesReference(BaseModel):
-    strava_id: int
+    external_id: int
     date: str
     distance_km: float
     elevation_m: float
@@ -196,7 +197,7 @@ class SimilarActivitiesCriteria(BaseModel):
 
 
 class SimilarActivitiesResponse(BaseModel):
-    """Réponse de ``GET /api/activities/{strava_id}/similar``.
+    """Réponse de ``GET /api/activities/{external_id}/similar``.
 
     Si l'activité n'est pas exploitable (introuvable, trop courte), on renvoie
     ``available=False`` + ``reason``. Sinon ``matches`` peut être vide quand
@@ -347,7 +348,7 @@ class AvailabilitySchema(BaseModel):
     preferences: AvailabilityPreferencesSchema | None = None
 
 
-# ---- Strava sync -------------------------------------------------------------
+# ---- Sync --------------------------------------------------------------------
 
 
 class SyncStatus(BaseModel):

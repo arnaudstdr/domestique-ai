@@ -16,12 +16,10 @@ from pathlib import Path
 from typing import Any
 
 from domestique_ai.config import get_db_path
+from domestique_ai.ingestion.db import init_db
 
 
 def _connect(db_path: Path | None = None) -> sqlite3.Connection:
-    # Import local pour éviter les cycles avec ingestion.strava.
-    from domestique_ai.ingestion.strava import init_db
-
     path = Path(db_path) if db_path else get_db_path()
     init_db(path)
     return sqlite3.connect(path)

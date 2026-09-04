@@ -8,8 +8,8 @@ interface Props {
 }
 
 /**
- * Décode un polyline Google (Strava `summary_polyline`) en liste de [lat, lng].
- * Algorithme classique : delta-encodage + base64-like (offset 63).
+ * Décode un polyline Google encodé (format `summary_polyline`) en liste de
+ * [lat, lng]. Algorithme classique : delta-encodage + base64-like (offset 63).
  */
 function decodePolyline(encoded: string): [number, number][] {
   const coords: [number, number][] = [];

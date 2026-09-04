@@ -54,8 +54,8 @@ export default function AcceptInvite() {
         </div>
 
         <p className="text-sm text-gray-300">
-          Choisis ton nom d'affichage, puis crée ton compte. Tu pourras connecter
-          ton Strava juste après depuis ton profil.
+          Choisis ton nom d'affichage, puis crée ton compte. Ton coach
+          synchronisera tes activités depuis son espace.
         </p>
 
         <label className="block">

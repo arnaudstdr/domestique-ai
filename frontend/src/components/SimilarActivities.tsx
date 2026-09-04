@@ -140,12 +140,12 @@ export default function SimilarActivities({ data }: Props) {
           <tbody>
             {data.matches.map((m) => (
               <tr
-                key={m.strava_id}
+                key={m.external_id}
                 className="border-t border-white/5"
               >
                 <td className="py-1.5">
                   <Link
-                    to={`/activites/${m.strava_id}`}
+                    to={`/activites/${m.external_id}`}
                     className="text-accent hover:underline"
                   >
                     {formatDate(m.date)}

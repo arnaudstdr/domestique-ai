@@ -6,7 +6,7 @@ Une activité est jugée similaire quand elle relève du **même bucket de sport
 moins de quelques pourcents de ceux de l'activité de référence.
 
 Cette heuristique simple (sans GPS de départ) suffit à retrouver une boucle
-hebdomadaire qu'un cycliste répète, sans dépendre de l'API Strava ni d'un
+hebdomadaire qu'un cycliste répète, sans dépendre d'une API distante ni d'un
 calcul de proximité GPS coûteux. Si l'usage révèle trop de faux positifs (par
 exemple deux sorties différentes au même profil), on ajoutera ``start_lat`` /
 ``start_lng`` lors d'une phase 2.
@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import Any
 
 from domestique_ai.config import get_db_path
+from domestique_ai.ingestion.db import init_db
 
 # Tolérances : ±5 % sur la distance, ±10 % sur le dénivelé. Distance est plus
 # fiable que dénivelé (GPS s'éclate sur le dénivelé lors d'arbres, tunnels).
@@ -62,10 +63,10 @@ def _within_tolerance(a: float, b: float, tolerance: float, floor: float) -> boo
 
 
 def _activity_to_dict(row: tuple[Any, ...]) -> dict[str, Any]:
-    # Id externe : strava_id prioritaire, fallback garmin_id (source Garmin).
+    # Id externe : strava_id (legacy) prioritaire, fallback garmin_id.
     external_id = row[0] if row[0] is not None else row[1]
     return {
-        "strava_id": external_id,
+        "external_id": external_id,
         "date": row[2],
         "duration_sec": row[3],
         "avg_heart_rate": row[4],
@@ -78,15 +79,16 @@ def _activity_to_dict(row: tuple[Any, ...]) -> dict[str, Any]:
 
 
 def find_similar_activities(
-    strava_id: int,
+    external_id: int,
     *,
     limit: int = 20,
     db_path: Path | None = None,
 ) -> dict[str, Any]:
-    """Retourne les activités similaires à ``strava_id``, triées date desc.
+    """Retourne les activités similaires à ``external_id``, triées date desc.
 
     Args:
-        strava_id : identifiant Strava de l'activité de référence.
+        external_id : identifiant externe de l'activité de référence
+            (strava_id historique ou garmin_id).
         limit : nombre maximum d'activités similaires retournées (≥ 1).
         db_path : chemin DB optionnel (utile pour les tests).
 
@@ -99,8 +101,6 @@ def find_similar_activities(
           ``"matches": [...]`` (potentiellement vide) et
           ``"criteria"`` (tolérances appliquées, utile pour le debug).
     """
-    from domestique_ai.ingestion.strava import init_db
-
     limit = max(1, min(int(limit), 100))
     path = Path(db_path) if db_path else get_db_path()
     init_db(path)
@@ -116,12 +116,12 @@ def find_similar_activities(
             "SELECT strava_id, garmin_id, date, duration, avg_heart_rate, avg_power, "
             "elevation_gain, distance, training_load, sport_type "
             "FROM activities WHERE strava_id = ? OR garmin_id = ?",
-            (strava_id, strava_id),
+            (external_id, external_id),
         ).fetchone()
         if ref_row is None:
             return {
                 "available": False,
-                "reason": f"Activité {strava_id} introuvable en base.",
+                "reason": f"Activité {external_id} introuvable en base.",
             }
         reference = _activity_to_dict(ref_row)
         if not reference["distance"] or reference["distance"] < _DISTANCE_FLOOR_M:
@@ -151,7 +151,7 @@ def find_similar_activities(
             "FROM activities "
             "WHERE coalesce(strava_id, garmin_id) != ? AND distance BETWEEN ? AND ? "
             "ORDER BY date DESC",
-            (strava_id, dist_lo, dist_hi),
+            (external_id, dist_lo, dist_hi),
         ).fetchall()
     finally:
         conn.close()
@@ -178,7 +178,7 @@ def find_similar_activities(
             continue
         matches.append(
             {
-                "strava_id": candidate["strava_id"],
+                "external_id": candidate["external_id"],
                 "date": candidate["date"],
                 "duration_sec": candidate["duration_sec"],
                 "avg_heart_rate": candidate["avg_heart_rate"],
@@ -201,7 +201,7 @@ def find_similar_activities(
     return {
         "available": True,
         "reference": {
-            "strava_id": reference["strava_id"],
+            "external_id": reference["external_id"],
             "date": reference["date"],
             "distance_km": round(ref_dist / 1000, 2),
             "elevation_m": ref_elev,

@@ -115,14 +115,14 @@ over — week by week.
 
 ### 📲 Installable PWA
 React 18 + Vite + Tailwind, offline-aware service worker (NetworkFirst on `/api/`).
-Interactive GPS maps (react-leaflet), live charts (recharts), `.GPX` / `.FIT` export,
+Interactive GPS maps (react-leaflet), live charts (recharts), `.ICS` / `.FIT` export,
 and a one-click **push to Garmin Connect** (also streamed over SSE).
 
 </td>
 <td width="50%" valign="top">
 
 ### 🔁 An idempotent, resilient pipeline
-Incremental Strava sync derived from `MAX(date)`, soft schema migrations,
+Incremental Garmin Connect sync derived from `MAX(date)`, soft schema migrations,
 a background scheduler with anti-overlap claims, **Pushover** notifications and a
 **Healthchecks.io dead-man's-switch** so a crash on the Pi notifies *you*.
 
@@ -139,8 +139,8 @@ a background scheduler with anti-overlap claims, **Pushover** notifications and 
 | **Backend** | FastAPI · Pydantic v2 · APScheduler · `sse-starlette` | Async, typed, one router per domain (12 of them) |
 | **Frontend** | React 18 · Vite · TypeScript · Tailwind · recharts · react-leaflet | Installable PWA, manual service worker |
 | **LLM** | Ollama (local) · agentic tool-calling loop | Privacy, zero API cost, no hallucinated metrics |
-| **Data** | SQLite (single source of truth) | Idempotent on `strava_id`, soft migrations |
-| **Integrations** | Strava OAuth2 · Garmin Connect · Pushover · Healthchecks.io | Real third-party APIs, real failure handling |
+| **Data** | SQLite (single source of truth) | Idempotent on external activity ids, soft migrations |
+| **Integrations** | Garmin Connect · Google Health · Pushover · Healthchecks.io | Real third-party APIs, real failure handling |
 | **Quality** | pytest (500+ tests) · Ruff · GitHub Actions CI | Tested, linted, green on every push |
 | **Deploy** | Docker · Raspberry Pi 5 · Tailscale Funnel | Self-hosted, reachable anywhere |
 
@@ -152,7 +152,7 @@ A 4-layer pipeline, each isolated in its own sub-package:
 config.py  ──►  ingestion/  ──►  processing/  ──►  api/ + frontend/  (PWA)
    │                │                │                    │
    │                │                │                    └─ FastAPI + React
-   └─ .env / paths  └─ Strava + DB   └─ TSS, CTL/ATL/TSB   ▲
+   └─ .env / paths  └─ Garmin + DB   └─ TSS, CTL/ATL/TSB   ▲
                               │                            │
                               └──────────►  llm/  (agentic coach, SSE)
 ```
@@ -160,7 +160,7 @@ config.py  ──►  ingestion/  ──►  processing/  ──►  api/ + fron
 ```text
 domestique_ai/
 ├── config.py          # data paths, FTP, HR profile, secrets — single source via .env
-├── ingestion/         # Strava OAuth2 client + SQLite persistence (refresh, streams)
+├── ingestion/         # Garmin Connect sync + SQLite persistence (schema, migrations)
 ├── processing/        # TSS / hr-TSS, CTL/ATL/TSB, HR zones, overtraining, trends, plans
 ├── llm/               # Ollama wrapper, tools, agentic coach loop, plan generator
 ├── api/               # FastAPI app — one router per domain (+ SSE streaming)
@@ -240,10 +240,10 @@ deterministic builder — the others can stay LLM-generated.
 <br/>
 
 The workload is single-user, read-heavy, and self-hosted on a Pi. SQLite means **zero
-ops, one file to back up, and trivial idempotency** via a `UNIQUE` constraint on
-`strava_id`. Schema evolution is handled with soft migrations (`_ensure_column`) so
-existing databases upgrade in place. Postgres would add operational weight for no benefit
-at this scale.
+ops, one file to back up, and trivial idempotency** via `UNIQUE` constraints on the
+external activity ids. Schema evolution is handled with soft migrations (`_ensure_column`)
+so existing databases upgrade in place. Postgres would add operational weight for no
+benefit at this scale.
 
 </details>
 
@@ -251,8 +251,8 @@ at this scale.
 
 ## Quality &amp; rigor
 
-- **500+ tests** across **38 modules** — load math, HR zones, Strava ingestion (mocked,
-  no network), GPX/ICS export, conversations, coach tools, morning metrics, overtraining,
+- **500+ tests** across **37 modules** — load math, HR zones, Garmin ingestion (mocked,
+  no network), ICS/FIT export, conversations, coach tools, morning metrics, overtraining,
   trends, plan generation and its validators.
 - **Ruff** (`E, F, I, UP, B, SIM`) and **GitHub Actions CI** green on every push.
 - Tests isolate state with `tmp_path` fixtures — **no shared DB, no flakiness**.
@@ -281,17 +281,15 @@ pip install -e ".[dev]"
 cp .env.example .env   # fill in the values
 ```
 
-### Strava OAuth (once)
+### Garmin Connect (activity ingestion + plan push)
 
-1. Create an app at <https://www.strava.com/settings/api> (note `client_id` / `client_secret`).
-2. Set `STRAVA_CLIENT_ID`, `STRAVA_CLIENT_SECRET`, and at least one of:
-   - `STRAVA_FTP` (power-based TSS), and/or
-   - `STRAVA_HR_REST` + `STRAVA_HR_MAX` (hr-TSS, takes precedence if set).
-3. Run the interactive flow:
+1. Set `GARMIN_EMAIL` / `GARMIN_PASSWORD` in `.env`.
+2. Seed the token cache once (interactive, handles MFA):
    ```bash
-   python -m domestique_ai.ingestion.strava_oauth_flow
+   python -m domestique_ai.export.garmin_connect
    ```
-4. Tokens persist in `data/.strava_tokens.json` (never committed), with automatic refresh.
+3. Activities sync every 30 minutes (auto-sync scheduler), and plans can be
+   pushed back to the calendar with one click.
 
 ### Ollama (LLM coach)
 
@@ -300,15 +298,7 @@ ollama pull gemma4:31b-cloud   # default model; override via OLLAMA_MODEL
 ollama serve                   # or point OLLAMA_HOST at a remote endpoint
 ```
 
-### Garmin Connect (optional — plan push)
-
-```bash
-# Set GARMIN_EMAIL / GARMIN_PASSWORD in .env, then seed the token cache once:
-python -m domestique_ai.export.garmin_connect
-```
-
 ### Run
-
 ```bash
 # Backend API (port 8501) — also serves the React build if present
 uvicorn domestique_ai.api.main:app --reload --port 8501
@@ -345,7 +335,7 @@ See [DEPLOY.md](DEPLOY.md) for the Pi 5 + Tailscale setup.
 - [x] Similar-activity comparison ("how many times have I climbed this?")
 - [x] iCalendar export of the training plan
 - [x] Multi-athlete roster view for coaches
-- [ ] Direct Garmin import (local FIT files, no Strava round-trip)
+- [x] Garmin Connect activity ingestion (Strava API retired after its paid-only policy)
 - [ ] Per-activity HR profile to freeze historical CTL/ATL/TSB
 
 ---

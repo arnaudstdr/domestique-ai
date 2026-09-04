@@ -9,6 +9,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from domestique_ai.athlete_context import AthleteContext
+from domestique_ai.ingestion.db import init_db
 from domestique_ai.ingestion.garmin import (
     GarminIngestError,
     extract_activity_data,
@@ -18,13 +19,11 @@ from domestique_ai.ingestion.garmin import (
     save_garmin_activity,
     sync_activities_garmin,
 )
-from domestique_ai.ingestion.strava import init_db
 
 
 def _ctx(db_path, *, ftp=250.0, hr_rest=None, hr_max=None) -> AthleteContext:
     return AthleteContext(
         db_path=db_path,
-        tokens_path=db_path.parent / ".tokens.json",
         profile_path=db_path.parent / "profile.yaml",
         objective_path=db_path.parent / "objective.yaml",
         availability_path=db_path.parent / "availability.yaml",

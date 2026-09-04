@@ -73,7 +73,7 @@ class GoogleHealthClient:
     """Client OAuth2 + API Google Health.
 
     Gère la persistance des tokens, le refresh automatique et les appels REST
-    de base. Inspiré du pattern de ``StravaClient``.
+    de base. Même pattern que le client d'ingestion d'activités.
     """
 
     def __init__(

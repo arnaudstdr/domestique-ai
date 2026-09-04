@@ -1,11 +1,8 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import {
-  Download,
-  Map,
   RefreshCcw,
   RefreshCw,
-  Thermometer,
   TriangleAlert,
 } from "lucide-react";
 import { api, ApiError } from "../api/client";
@@ -225,18 +222,18 @@ export default function Dashboard() {
             disabled={busy !== null}
             onClick={() =>
               triggerAction(
-                "Sync Strava",
-                () => api.strava.sync(),
-                () => "Sync Strava lancée en arrière-plan…",
+                "Sync Garmin",
+                () => api.garmin.sync(),
+                () => "Sync Garmin lancée en arrière-plan…",
               )
             }
           >
-            {busy === "Sync Strava" ? (
+            {busy === "Sync Garmin" ? (
               "…"
             ) : (
               <span className="inline-flex items-center justify-center gap-2">
                 <RefreshCw className="h-4 w-4" strokeWidth={1.75} aria-hidden="true" />
-                Sync Strava
+                Sync Garmin
               </span>
             )}
           </button>
@@ -246,7 +243,7 @@ export default function Dashboard() {
             onClick={() =>
               triggerAction(
                 "Recalculer charge",
-                () => api.strava.recalculate(),
+                () => api.metrics.recalculate(),
                 (r) => {
                   const updated = (r as { updated?: number }).updated ?? 0;
                   return `Recalcul : ${updated} ligne(s) mises à jour`;
@@ -257,63 +254,6 @@ export default function Dashboard() {
             <span className="inline-flex items-center justify-center gap-2">
               <RefreshCcw className="h-4 w-4" strokeWidth={1.75} aria-hidden="true" />
               Recalculer
-            </span>
-          </button>
-          <button
-            className="btn-ghost"
-            disabled={busy !== null}
-            onClick={() =>
-              triggerAction(
-                "Backfill zones HR",
-                () => api.strava.backfillHrZones(),
-                (r) => {
-                  const updated = (r as { updated?: number }).updated ?? 0;
-                  return `Backfill HR : ${updated} activité(s)`;
-                },
-              )
-            }
-          >
-            <span className="inline-flex items-center justify-center gap-2">
-              <Download className="h-4 w-4" strokeWidth={1.75} aria-hidden="true" />
-              Backfill HR
-            </span>
-          </button>
-          <button
-            className="btn-ghost"
-            disabled={busy !== null}
-            onClick={() =>
-              triggerAction(
-                "Backfill température",
-                () => api.strava.backfillTemperature(),
-                (r) => {
-                  const updated = (r as { updated?: number }).updated ?? 0;
-                  return `Backfill temp : ${updated} activité(s)`;
-                },
-              )
-            }
-          >
-            <span className="inline-flex items-center justify-center gap-2">
-              <Thermometer className="h-4 w-4" strokeWidth={1.75} aria-hidden="true" />
-              Backfill temp.
-            </span>
-          </button>
-          <button
-            className="btn-ghost"
-            disabled={busy !== null}
-            onClick={() =>
-              triggerAction(
-                "Backfill tracés",
-                () => api.strava.backfillPolylines(),
-                (r) => {
-                  const updated = (r as { updated?: number }).updated ?? 0;
-                  return `Backfill tracés : ${updated} activité(s)`;
-                },
-              )
-            }
-          >
-            <span className="inline-flex items-center justify-center gap-2">
-              <Map className="h-4 w-4" strokeWidth={1.75} aria-hidden="true" />
-              Backfill tracés
             </span>
           </button>
         </div>

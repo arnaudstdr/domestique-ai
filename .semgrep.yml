@@ -17,9 +17,10 @@ rules:
   # - Paramètres des handlers FastAPI (@router.get/post/... → path/query/body)
   # - Attributs de l'objet Request Starlette
   #   (`await` sur json/body/form évite de matcher les `response.json()`
-  #   synchrones des clients HTTP sortants type Strava)
+  #   synchrones des clients HTTP sortants type garminconnect)
   # Les URLs depuis constantes / os.getenv (config serveur) ne sont PAS des
-  # sources : c'est ce qui élimine les faux positifs (healthcheck, client Strava).
+  # sources : c'est ce qui élimine les faux positifs (healthcheck, client
+  # Garmin).
   # ============================================================
   # --- SQL injection ---
   - id: sql-injection-tainted-query
@@ -96,7 +97,7 @@ rules:
   # --- SSRF ---
   # Mode taint : ne se déclenche que si une donnée utilisateur atteint l'URL
   # d'une requête HTTP sortante. Les URLs construites depuis des constantes
-  # (STRAVA_API_BASE_URL) ou des variables d'env (HEALTHCHECKS_PING_URL)
+  # (module `requests` en dur) ou des variables d'env (HEALTHCHECKS_PING_URL)
   # ne sont plus signalées.
   - id: ssrf-requests-get
     mode: taint

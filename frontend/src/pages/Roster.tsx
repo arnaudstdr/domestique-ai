@@ -6,7 +6,6 @@ import {
   Copy,
   Eye,
   KeyRound,
-  Link2,
   Plus,
   Trash2,
   Users,
@@ -109,16 +108,6 @@ function AthletesSection() {
                   {a.display_name || "Sans nom"}
                 </p>
                 <p className="flex items-center gap-1.5 text-[11px] text-muted">
-                  <span
-                    className={`pill ${
-                      a.strava_connected
-                        ? "text-accent"
-                        : "text-muted"
-                    }`}
-                  >
-                    <Link2 className="h-3 w-3" strokeWidth={1.75} aria-hidden="true" />
-                    {a.strava_connected ? "Strava OK" : "Strava absent"}
-                  </span>
                   <span className="inline-flex items-center gap-1">
                     <Activity className="h-3 w-3" strokeWidth={1.75} aria-hidden="true" />
                     {a.n_activities} act.
@@ -241,7 +230,7 @@ function InvitationsSection() {
       </h3>
       <p className="text-xs text-muted">
         Génère un lien à usage unique. L'athlète crée son compte en l'ouvrant,
-        puis connecte son Strava.
+        et son espace de données est provisionné immédiatement.
       </p>
       <button
         type="button"

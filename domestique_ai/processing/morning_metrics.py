@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import Any
 
 from domestique_ai.config import get_db_path
+from domestique_ai.ingestion.db import init_db
 
 METRIC_COLUMNS = (
     "hrv_ms",
@@ -104,8 +105,6 @@ def save_morning_entry(
     )
     if all(v is None for v in (*metric_values, notes)):
         return False
-    from domestique_ai.ingestion.strava import init_db
-
     path = Path(db_path) if db_path else get_db_path()
     init_db(path)
     conn = sqlite3.connect(path)
@@ -167,8 +166,6 @@ def fetch_morning_entry(
     db_path: Path | None = None,
 ) -> dict[str, Any] | None:
     """Charge l'entrée d'une date donnée. None si absente."""
-    from domestique_ai.ingestion.strava import init_db
-
     path = Path(db_path) if db_path else get_db_path()
     init_db(path)
     conn = sqlite3.connect(path)
@@ -198,8 +195,6 @@ def fetch_morning_history(
     ne renvoie que les entrées dans la fenêtre glissante (par rapport à
     la dernière entrée connue).
     """
-    from domestique_ai.ingestion.strava import init_db
-
     path = Path(db_path) if db_path else get_db_path()
     init_db(path)
     conn = sqlite3.connect(path)

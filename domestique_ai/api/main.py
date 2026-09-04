@@ -56,9 +56,6 @@ from domestique_ai.api.routers import (
 from domestique_ai.api.routers import (
     roster as roster_router,
 )
-from domestique_ai.api.routers import (
-    strava as strava_router,
-)
 from domestique_ai.api.scheduler import start_scheduler, stop_scheduler
 from domestique_ai.config import REPO_ROOT, get_api_token, get_platform_db_path
 from domestique_ai.platform_db import init_platform_db
@@ -159,7 +156,7 @@ class RequestLoggingMiddleware:
     _LOG = get_logger("request")
     # Pas la peine de polluer les logs avec le polling /sync-status et les
     # tuiles de cartes statiques.
-    _SKIP_PATHS = {"/api/strava/sync-status", "/api/health"}
+    _SKIP_PATHS = {"/api/garmin/sync-status", "/api/health"}
 
     def __init__(self, app: ASGIApp) -> None:
         self.app = app
@@ -252,7 +249,6 @@ app.include_router(google_health_router.router)
 app.include_router(objective_router.router)
 app.include_router(profile_router.router)
 app.include_router(availability_router.router)
-app.include_router(strava_router.router)
 app.include_router(garmin_router.router)
 app.include_router(coach_router.router)
 app.include_router(plan_router.router)

@@ -22,7 +22,6 @@ from domestique_ai.config import (
     get_objective_path,
     get_profile_path,
     get_sex,
-    get_tokens_path,
     invalidate_profile_cache,
 )
 
@@ -48,7 +47,6 @@ def test_context_from_env_reproduces_getters_default(monkeypatch):
 
     ctx = context_from_env()
     assert ctx.db_path == get_db_path()
-    assert ctx.tokens_path == get_tokens_path()
     assert ctx.profile_path == get_profile_path()
     assert ctx.objective_path == get_objective_path()
     assert ctx.availability_path == get_availability_path()
@@ -109,7 +107,6 @@ def test_context_for_athlete_without_profile_uses_hard_defaults(tmp_path, monkey
     ctx = context_for_athlete(user)
 
     assert ctx.db_path == tmp_path / "athletes" / "alice123" / "strava_activities.db"
-    assert ctx.tokens_path == tmp_path / "athletes" / "alice123" / ".strava_tokens.json"
     assert ctx.profile_path == tmp_path / "athletes" / "alice123" / "profile.yaml"
     # Défauts en dur, pas de fuite env.
     assert ctx.ftp == 250.0
@@ -139,7 +136,6 @@ def test_athlete_context_constructible_without_env():
     # Un contexte peut être bâti à la main, sans aucune variable d'env.
     ctx = AthleteContext(
         db_path=Path("/tmp/a.db"),
-        tokens_path=Path("/tmp/.tok.json"),
         profile_path=Path("/tmp/profile.yaml"),
         objective_path=Path("/tmp/objective.yaml"),
         availability_path=Path("/tmp/availability.yaml"),

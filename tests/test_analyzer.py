@@ -8,7 +8,7 @@ import sqlite3
 import pytest
 
 from domestique_ai.athlete_context import AthleteContext
-from domestique_ai.ingestion.strava import init_db
+from domestique_ai.ingestion.db import init_db
 from domestique_ai.processing.analyzer import (
     calculate_ctl_atl_tsb,
     calculate_hr_tss,
@@ -27,7 +27,6 @@ def _ctx(
     """Construit un AthleteContext de test (chemins YAML factices, non utilisés ici)."""
     return AthleteContext(
         db_path=db_path,
-        tokens_path=db_path.parent / ".tokens.json",
         profile_path=db_path.parent / "profile.yaml",
         objective_path=db_path.parent / "objective.yaml",
         availability_path=db_path.parent / "availability.yaml",
