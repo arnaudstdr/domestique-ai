@@ -16,6 +16,7 @@ builder retombe sur sa grille par défaut Lun/Mer/Ven/Dim.
 
 from __future__ import annotations
 
+import datetime as _dt
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -58,11 +59,16 @@ class DayAvailability:
 
 @dataclass
 class Availability:
-    """Configuration hebdomadaire de l'utilisateur."""
+    """Configuration hebdomadaire de l'utilisateur.
+
+    ``exceptions`` : disponibilités exceptionnelles datées (clé ISO YYYY-MM-DD)
+    qui priment sur la grille hebdo — ex. une semaine de déplacement.
+    """
 
     days: list[DayAvailability] = field(default_factory=list)
     long_endurance_day: int | None = None
     intervals_day: int | None = None
+    exceptions: dict[str, DayAvailability] = field(default_factory=dict)
 
     def weekdays(self) -> list[int]:
         return [d.weekday for d in self.days]
@@ -72,6 +78,17 @@ class Availability:
             if d.weekday == weekday:
                 return d
         return None
+
+    def get_for_date(self, date_str: str) -> DayAvailability | None:
+        """Dispo d'une date précise : exception datée si présente, sinon grille hebdo."""
+        exc = self.exceptions.get(date_str)
+        if exc is not None:
+            return exc
+        try:
+            weekday = _dt.date.fromisoformat(date_str).weekday()
+        except ValueError:
+            return None
+        return self.get(weekday)
 
     def to_dict(self) -> dict[str, Any]:
         days_dict: dict[str, dict[str, Any]] = {}
@@ -88,6 +105,14 @@ class Availability:
             prefs["intervals_day"] = _WEEKDAY_BY_INDEX[self.intervals_day]
         if prefs:
             out["preferences"] = prefs
+        if self.exceptions:
+            out["exceptions"] = {
+                date_str: {
+                    "max_duration_min": d.max_duration_min,
+                    "context": d.context,
+                }
+                for date_str, d in sorted(self.exceptions.items())
+            }
         return out
 
 
@@ -149,6 +174,39 @@ def _parse_preferences(prefs: Any, known_weekdays: set[int]) -> tuple[int | None
     return _resolve("long_endurance_day"), _resolve("intervals_day")
 
 
+def _parse_exception_day(date_str: str, payload: Any) -> tuple[str, DayAvailability]:
+    """Parse une exception datée ``{date: {max_duration_min, context}}``."""
+    try:
+        parsed_date = _dt.date.fromisoformat(date_str)
+    except ValueError as exc:
+        raise AvailabilityError(f"Date d'exception invalide: {date_str!r} (attendu YYYY-MM-DD)") from exc
+    if not isinstance(payload, dict):
+        raise AvailabilityError(
+            f"Exception {date_str!r} invalide: doit être un dict (max_duration_min, context)"
+        )
+    raw_duration = payload.get("max_duration_min")
+    try:
+        duration = int(raw_duration)
+    except (TypeError, ValueError) as exc:
+        raise AvailabilityError(
+            f"max_duration_min invalide pour l'exception {date_str!r}: {raw_duration!r}"
+        ) from exc
+    if duration < 20:
+        raise AvailabilityError(
+            f"max_duration_min trop court pour {date_str!r}: {duration} min (min 20)"
+        )
+    context = str(payload.get("context", "")).strip().lower()
+    if context not in VALID_CONTEXTS:
+        raise AvailabilityError(
+            f"context invalide pour {date_str!r}: {context!r}. Attendu: {sorted(VALID_CONTEXTS)}"
+        )
+    return date_str, DayAvailability(
+        weekday=parsed_date.weekday(),
+        max_duration_min=duration,
+        context=context,
+    )
+
+
 def load_availability(path: Path | None = None) -> Availability | None:
     """Charge la disponibilité depuis le YAML. Retourne None si fichier absent."""
     target = path or get_availability_path()
@@ -168,10 +226,20 @@ def load_availability(path: Path | None = None) -> Availability | None:
     known = {d.weekday for d in days}
     long_endurance, intervals = _parse_preferences(raw.get("preferences"), known)
 
+    exceptions: dict[str, DayAvailability] = {}
+    exceptions_raw = raw.get("exceptions")
+    if exceptions_raw is not None:
+        if not isinstance(exceptions_raw, dict):
+            raise AvailabilityError(f"{target}: section 'exceptions' doit être un dict.")
+        exceptions = dict(
+            _parse_exception_day(date_str, payload) for date_str, payload in exceptions_raw.items()
+        )
+
     return Availability(
         days=days,
         long_endurance_day=long_endurance,
         intervals_day=intervals,
+        exceptions=exceptions,
     )
 
 

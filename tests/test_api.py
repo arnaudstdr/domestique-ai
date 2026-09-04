@@ -334,6 +334,14 @@ def test_objective_put_then_get(client: TestClient) -> None:
     assert got["distance_km"] == 150.0
 
 
+def test_objective_put_forme_type(client: TestClient) -> None:
+    payload = {"type": "forme", "date": "2026-10-18", "notes": "Reconstruire du volume"}
+    r = client.put("/api/objective", json=payload)
+    assert r.status_code == 200
+    got = client.get("/api/objective").json()
+    assert got["type"] == "forme"
+
+
 def test_garmin_sync_status_idle(client: TestClient) -> None:
     r = client.get("/api/garmin/sync-status")
     assert r.status_code == 200

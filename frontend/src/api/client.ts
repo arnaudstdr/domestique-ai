@@ -25,6 +25,7 @@ import type {
   Objective,
   OvertrainingResponse,
   PlanCreateRequest,
+  PlanDecision,
   PlanDetail,
   PlanSummary,
   PrescriptionCreate,
@@ -39,6 +40,7 @@ import type {
   TodayWorkoutResponse,
   TrendPeriod,
   TrendsResponse,
+  WeeklyReviewResult,
 } from "./types";
 
 const API_BASE = "";
@@ -318,6 +320,20 @@ export const api = {
     detail: (id: number) => http<PlanDetail>(`/api/plan/${id}`),
     remove: (id: number) =>
       http<void>(`/api/plan/${id}`, { method: "DELETE" }),
+    active: () => http<PlanDetail>(`/api/plan/active`),
+    versions: (id: number) => http<PlanSummary[]>(`/api/plan/${id}/versions`),
+    weeklyReview: () =>
+      http<WeeklyReviewResult>(`/api/plan/weekly-review`, { method: "POST" }),
+    decisions: (id: number) => http<PlanDecision[]>(`/api/plan/${id}/decisions`),
+    decision: (payload: {
+      date: string;
+      decision: "rest" | "adjusted";
+      reason?: string;
+    }) =>
+      http<PlanDecision>(`/api/plan/decision`, {
+        method: "POST",
+        body: JSON.stringify(payload),
+      }),
     exportZip: async (id: number): Promise<{ blob: Blob; filename: string }> => {
       const response = await fetch(`${API_BASE}${withAthlete(`/api/plan/${id}/export.zip`)}`, {
         headers: { ...authHeaders() },

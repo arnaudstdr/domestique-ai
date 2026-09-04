@@ -265,6 +265,7 @@ def get_today_workout(
     Le résultat est mis en cache pour la journée (clé date + objectif + TSB
     arrondi). ``refresh=true`` force la régénération.
     """
+    from domestique_ai.llm.daily_decision import evaluate_daily_decision
     from domestique_ai.processing.today import propose_workout_today
 
     result = propose_workout_today(
@@ -272,17 +273,24 @@ def get_today_workout(
         refresh=refresh,
         ctx=ctx,
     )
+    morning = evaluate_daily_decision(ctx=ctx, use_llm=False)
+    base: dict[str, Any] = {}
     if result["rest_day"]:
-        return TodayWorkoutResponse(rest_day=True, reason=result.get("reason"))
-    return TodayWorkoutResponse(
-        rest_day=False,
-        workout=WorkoutSchema(**result["workout"]),
-        tsb=result.get("tsb"),
-        tsb_zone=result.get("tsb_zone"),
-        rationale=result.get("rationale"),
-        signals=result.get("signals"),
-        source=result.get("source"),
-    )
+        base.update(rest_day=True, reason=result.get("reason"))
+    else:
+        base.update(
+            rest_day=False,
+            workout=WorkoutSchema(**result["workout"]),
+            tsb=result.get("tsb"),
+            tsb_zone=result.get("tsb_zone"),
+            rationale=result.get("rationale"),
+            signals=result.get("signals"),
+            source=result.get("source"),
+        )
+    base["morning_decision"] = morning.get("decision")
+    base["morning_reason"] = morning.get("reason")
+    base["morning_persisted"] = morning.get("persisted", False)
+    return TodayWorkoutResponse(**base)
 
 
 @router.post("/analyze")

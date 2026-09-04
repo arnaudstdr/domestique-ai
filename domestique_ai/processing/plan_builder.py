@@ -22,6 +22,7 @@ Périodisation appliquée :
 from __future__ import annotations
 
 import datetime as _dt
+import uuid
 from dataclasses import asdict, dataclass, field
 from typing import Any
 
@@ -77,6 +78,54 @@ _TSS_PER_MIN: dict[str, float] = {
     "intervals": 95 / 60,
 }
 
+# Profil par type d'objectif : les leviers que le type actionne RÉELLEMENT.
+# - taper_weeks : décharge finale en volume. course/cyclosportive déchargent
+#   2 sem avant l'épreuve, cyclo 1 (épreuve de longue distance), forme et
+#   maintenance aucun (pas d'épreuve à « taper » — on ne décharge pas pour rien).
+# - intervals_freq : fréquence de la séance d'intervalles sur le cycle de
+#   charge (1 = chaque semaine, 2 = une semaine sur deux → tempo sinon).
+# - endurance_mult : surpondération de la durée de l'endurance longue (semaines
+#   de charge). > 1 = volume avant tout, < 1 = routine allégée.
+_CYCLOSPORTIVE_FLAVOR: dict[str, float] = {
+    "taper_weeks": 2,
+    "intervals_freq": 1,
+    "endurance_mult": 1.0,
+}
+_OBJECTIVE_FLAVORS: dict[str, dict[str, float]] = {
+    "course": {"taper_weeks": 2, "intervals_freq": 1, "endurance_mult": 1.0},
+    "cyclosportive": {"taper_weeks": 2, "intervals_freq": 1, "endurance_mult": 1.0},
+    "cyclo": {"taper_weeks": 1, "intervals_freq": 2, "endurance_mult": 1.2},
+    "forme": {"taper_weeks": 0, "intervals_freq": 2, "endurance_mult": 1.15},
+    "maintenance": {"taper_weeks": 0, "intervals_freq": 1, "endurance_mult": 0.95},
+}
+
+
+def _objective_flavor(target_event_type: str | None) -> dict[str, float]:
+    """Retourne le profil de périodisation du type d'objectif (défaut: cyclosportive)."""
+    return _OBJECTIVE_FLAVORS.get(
+        target_event_type or "cyclosportive", dict(_CYCLOSPORTIVE_FLAVOR)
+    )
+
+
+def _training_emphasis(target_event_type: str | None) -> str:
+    """Consigne d'intention courte pour le générateur LLM (phase non contrainte)."""
+    return {
+        "forme": (
+            "Objectif : reconstruction de volume (retour en forme). Endurance "
+            "Z2 et sortie longue en priorité, MAIS garde une séance d'intensité "
+            "chaque semaine de charge (tempo/sweetspot), et une séance "
+            "d'intervalles/sweetspot soutenu une semaine sur deux — pour "
+            "réveiller le moteur sans le surcharger."
+        ),
+        "cyclo": (
+            "Objectif : épreuve de longue distance. Le volume passe avant tout ; "
+            "intervalles au plus une semaine sur deux."
+        ),
+        "maintenance": (
+            "Objectif : maintien. Volume régulier et modéré, sans pic ni décharge."
+        ),
+    }.get(target_event_type or "", "")
+
 
 @dataclass
 class WorkoutStep:
@@ -101,6 +150,11 @@ class Workout:
     structure: list[WorkoutStep] = field(default_factory=list)
     estimated_tss: float = 0.0
     notes: str = ""
+    uid: str = ""  # identifiant stable de séance (uuid court, rétro-compatible)
+
+    def __post_init__(self) -> None:
+        if not self.uid:
+            self.uid = _new_uid()
 
     def to_dict(self) -> dict[str, Any]:
         data = asdict(self)
@@ -120,7 +174,13 @@ class Workout:
             structure=steps,
             estimated_tss=data.get("estimated_tss", 0.0),
             notes=data.get("notes", ""),
+            uid=data.get("uid", ""),
         )
+
+
+def _new_uid() -> str:
+    """Identifiant court unique de séance (8 chars hex)."""
+    return uuid.uuid4().hex[:8]
 
 
 def _structure_for(kind: str, duration_min: int) -> list[WorkoutStep]:
@@ -211,14 +271,18 @@ def _week_factor(week_idx: int, total_weeks: int, taper_weeks: int) -> tuple[flo
     return 0.85 + 0.125 * cycle_pos, False, False
 
 
-def _ctl_progression_cap(ctl_current: float, weeks_into_plan: int) -> float:
+def _ctl_progression_cap(ctl_current: float, weeks_into_plan: int, min_ctl: float = 20.0) -> float:
     """Plafond de TSS hebdo cohérent avec une progression CTL bornée à +5/sem.
 
     CTL est une EMA 42 j. À TSB stable, augmenter CTL de Δ par semaine demande
     un TSS hebdo ≈ 7 × (CTL_actuel + Δ). On cale donc le volume hebdomadaire
-    sur (CTL_actuel + 5 × weeks_into_plan) × 7.
+    sur (max(min_ctl, CTL) + 5 × weeks_into_plan) × 7.
+
+    ``min_ctl`` : plancher de forme pour les athlètes à CTL très bas (reprise).
+    Relevable via ``DOMESTIQUE_AI_PLAN_MIN_CTL`` pour des semaines plus
+    consistantes.
     """
-    target_ctl = max(20.0, ctl_current) + 5.0 * weeks_into_plan
+    target_ctl = max(float(min_ctl), ctl_current) + 5.0 * weeks_into_plan
     return target_ctl * 7.0
 
 
@@ -373,6 +437,7 @@ def build_training_plan(
     focus: str | None = None,
     start_date: _dt.date | None = None,
     fallback_weeks: int = 4,
+    min_ctl: float = 20.0,
 ) -> list[Workout]:
     """Construit la liste des séances entre ``start_date`` et ``target_date``.
 
@@ -384,9 +449,10 @@ def build_training_plan(
     intelligemment les jours de la semaine selon les contraintes (durée max,
     indoor/outdoor). Sinon, comportement legacy basé sur les profils internes.
 
-    Les paramètres ``target_event_type`` et ``focus`` sont conservés pour
-    pilotage futur (taper plus court pour cyclo, plus d'intervalles pour
-    course, etc.) — ils n'altèrent pas la structure de base aujourd'hui.
+    Les paramètres ``focus`` est conservé pour pilotage futur (il n'altère pas
+    la structure de base aujourd'hui). ``target_event_type``, lui, pilote la
+    périodisation via ``_OBJECTIVE_FLAVORS`` : fenêtre de taper, fréquence des
+    intervalles et surpondération de l'endurance longue.
     """
     schedule = _resolve_schedule(availability, sessions_per_week)
     today = start_date or _dt.date.today()
@@ -397,7 +463,10 @@ def build_training_plan(
         days_to_event = (target_date - today).days
         total_weeks = max(1, (days_to_event + 6) // 7)
 
-    taper_weeks = min(2, total_weeks - 1) if total_weeks > 2 else 0
+    flavor = _objective_flavor(target_event_type)
+    taper_weeks = (
+        min(int(flavor["taper_weeks"]), total_weeks - 1) if total_weeks > 2 else 0
+    )
 
     # Normaliser le début sur le lundi de la semaine de ``today`` pour aligner
     # les jours de séance sur le calendrier hebdo.
@@ -407,7 +476,9 @@ def build_training_plan(
     for week_idx in range(total_weeks):
         factor, is_recovery, is_taper = _week_factor(week_idx, total_weeks, taper_weeks)
         weeks_into_plan = week_idx if not is_taper else max(0, total_weeks - taper_weeks - 1)
-        weekly_tss_cap = _ctl_progression_cap(ctl_current, weeks_into_plan)
+        weekly_tss_cap = _ctl_progression_cap(ctl_current, weeks_into_plan, min_ctl)
+        # Semaine d'intervalles ? (profil : chaque semaine ou une semaine sur deux).
+        intervals_week = (week_idx % int(flavor["intervals_freq"])) == 0
 
         sessions_this_week: list[Workout] = []
         weekly_tss = 0.0
@@ -416,14 +487,21 @@ def build_training_plan(
             if session_date < today:
                 # On saute les jours déjà passés dans la semaine en cours.
                 continue
+            # Exception datée : elle prime sur la grille hebdo (durée max, contexte).
+            if availability is not None:
+                day_exc = availability.get_for_date(session_date.isoformat())
+                if day_exc is not None:
+                    day_max_min = day_exc.max_duration_min
+                    day_context = day_exc.context
             kind = base_kind
-            # En semaine de récup ou taper, on bascule les intervalles vers tempo léger.
-            if (is_recovery or is_taper) and kind == "intervals":
+            # Récup / taper / semaine sans intervalles → tempo léger.
+            if kind == "intervals" and (is_recovery or is_taper or not intervals_week):
                 kind = "tempo"
             base_min = _BASE_DURATION_MIN[kind]
-            # Endurance progresse plus vite avec les semaines de charge.
+            # Endurance progresse plus vite avec les semaines de charge ; le type
+            # d'objectif module sa durée (volume avant tout vs routine).
             if kind == "endurance" and not (is_recovery or is_taper):
-                base_min = int(base_min + 5 * (week_idx % 4))
+                base_min = int((base_min + 5 * (week_idx % 4)) * float(flavor["endurance_mult"]))
             duration_min = max(20, int(base_min * factor))
             # Plafonnement par la dispo du jour si renseignée.
             if day_max_min is not None:

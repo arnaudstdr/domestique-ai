@@ -104,6 +104,7 @@ def test_tool_schemas_have_required_shape():
         "get_planned_workout",
         "propose_workout",
         "propose_workout_today",
+        "review_week",
         "find_similar_activities",
     }
     for schema in TOOL_SCHEMAS:
@@ -122,6 +123,17 @@ def test_propose_workout_today_dispatchable(tmp_path, monkeypatch):
     assert "rest_day" in out
     assert out["rest_day"] is False
     assert out["workout"]["kind"] in {"recovery", "endurance", "tempo", "intervals"}
+
+
+def test_review_week_dispatchable(tmp_path, monkeypatch):
+    """Le tool review_week renvoie le rapport de semaine sans erreur."""
+    monkeypatch.setenv("DOMESTIQUE_AI_DB_PATH", str(tmp_path / "review.db"))
+    init_db(tmp_path / "review.db")
+    out = dispatch("review_week", {})
+    assert "error" not in out
+    assert out["week_key"] is not None
+    assert "compliance" in out
+    assert out["active_plan_id"] is None
 
 
 def test_get_training_load_state_returns_curve(seeded_db):

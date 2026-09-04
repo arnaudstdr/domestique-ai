@@ -79,6 +79,53 @@ export default function DailyBriefCard({ data, loading }: Props) {
 
       <p className="text-base text-gray-100 leading-relaxed">{data.summary}</p>
 
+      {data.sleep_hours != null && (
+        <div className="rounded-lg border border-white/10 bg-surface/30 px-2.5 py-1.5 text-xs">
+          <span className="text-muted uppercase tracking-wide">Sommeil</span>{" "}
+          <span className="font-medium text-gray-100">
+            {data.sleep_hours.toFixed(1)} h
+          </span>
+          {data.sleep_baseline != null && data.sleep_delta_pct != null && (
+            <span
+              className={`ml-1 ${
+                data.sleep_delta_pct < -10
+                  ? "text-orange-300"
+                  : data.sleep_delta_pct < -20
+                    ? "text-red-300"
+                    : "text-muted"
+              }`}
+            >
+              (moyenne {data.sleep_baseline.toFixed(1)} h ·{" "}
+              {data.sleep_delta_pct > 0 ? "+" : ""}
+              {data.sleep_delta_pct.toFixed(0)} %)
+            </span>
+          )}
+          {data.sleep_score != null && data.sleep_score < 60 && (
+            <span className="ml-1 text-orange-300">
+              · qualité basse ({data.sleep_score}/100)
+            </span>
+          )}
+        </div>
+      )}
+
+      {data.morning_decision && data.morning_decision !== "go" && (
+        <div
+          className={`rounded-lg border px-2.5 py-2 text-xs ${
+            data.morning_decision === "rest"
+              ? "border-yellow-500/25 bg-yellow-500/[0.06] text-yellow-200/90"
+              : "border-accent/25 bg-accent/[0.06] text-gray-100"
+          }`}
+        >
+          <span className="font-semibold uppercase tracking-wide">
+            Check du matin —{" "}
+            {data.morning_decision === "rest" ? "repos complet" : "séance allégée"}
+          </span>
+          <span className="ml-1">
+            {data.morning_reason} L'ajustement est répercuté dans le plan.
+          </span>
+        </div>
+      )}
+
       <div className="grid grid-cols-3 gap-2 text-xs">
         <div>
           <div className="text-muted uppercase tracking-wide">TSB</div>

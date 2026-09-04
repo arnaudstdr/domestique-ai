@@ -101,3 +101,92 @@ def test_export_plan_zip(client: TestClient) -> None:
 def test_export_plan_zip_not_found(client: TestClient) -> None:
     r = client.get("/api/plan/99999/export.zip")
     assert r.status_code == 404
+
+
+def test_get_active_plan(client: TestClient) -> None:
+    created = client.post("/api/plan", json={"sessions_per_week": 4}).json()
+    r = client.get("/api/plan/active")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["id"] == created["id"]
+    assert body["status"] == "active"
+    assert body["start_date"] is not None
+    assert body["adapt_reason"] is None
+
+
+def test_get_active_plan_none(client: TestClient) -> None:
+    r = client.get("/api/plan/active")
+    assert r.status_code == 404
+
+
+def test_new_plan_supersedes_previous(client: TestClient) -> None:
+    first = client.post("/api/plan", json={"sessions_per_week": 4}).json()
+    second = client.post("/api/plan", json={"sessions_per_week": 3}).json()
+    # L'ancien plan devient superseded.
+    r1 = client.get(f"/api/plan/{first['id']}")
+    assert r1.json()["status"] == "superseded"
+    r2 = client.get(f"/api/plan/{second['id']}")
+    assert r2.json()["status"] == "active"
+
+
+def test_plan_versions_lineage(client: TestClient) -> None:
+    first = client.post("/api/plan", json={"sessions_per_week": 4}).json()
+    r = client.get(f"/api/plan/{first['id']}/versions")
+    assert r.status_code == 200
+    versions = r.json()
+    assert versions[0]["id"] == first["id"]
+    assert versions[0]["parent_plan_id"] is None
+
+
+def test_weekly_review_replans(client: TestClient) -> None:
+    first = client.post("/api/plan", json={"sessions_per_week": 4}).json()
+    r = client.post("/api/plan/weekly-review")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["skipped"] is False
+    assert body["replanned"] is True
+    assert body["parent_plan_id"] == first["id"]
+    assert body["new_plan_id"] != first["id"]
+    # Le nouveau plan est actif, l'ancien superseded.
+    old = client.get(f"/api/plan/{first['id']}").json()
+    assert old["status"] == "superseded"
+    new = client.get(f"/api/plan/{body['new_plan_id']}").json()
+    assert new["status"] == "active"
+    assert new["adapt_reason"]
+
+
+def test_weekly_review_skips_if_already_run(client: TestClient) -> None:
+    client.post("/api/plan", json={"sessions_per_week": 4})
+    r1 = client.post("/api/plan/weekly-review")
+    assert r1.json()["replanned"] is True
+    r2 = client.post("/api/plan/weekly-review")
+    assert r2.status_code == 200
+    assert r2.json()["skipped"] is True
+
+
+def test_manual_decision_override(client: TestClient) -> None:
+    created = client.post("/api/plan", json={"sessions_per_week": 4}).json()
+    first_date = created["workouts"][0]["date"]
+    r = client.post(
+        "/api/plan/decision",
+        json={"date": first_date, "decision": "rest", "reason": "Nuit blanche"},
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert body["decision"] == "rest"
+    assert body["decided_by"] == "user"
+    assert body["reason"] == "Nuit blanche"
+    # La décision est listée sur le plan.
+    r2 = client.get(f"/api/plan/{created['id']}/decisions")
+    assert r2.status_code == 200
+    assert len(r2.json()) == 1
+    assert r2.json()[0]["date"] == first_date
+
+
+def test_manual_decision_out_of_window(client: TestClient) -> None:
+    client.post("/api/plan", json={"sessions_per_week": 4})
+    r = client.post(
+        "/api/plan/decision",
+        json={"date": "2030-01-01", "decision": "rest"},
+    )
+    assert r.status_code == 422

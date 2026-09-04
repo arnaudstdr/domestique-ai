@@ -277,8 +277,10 @@ def test_validator_combines_multiple_rules():
     # Plafond TSS visé : réduction substantielle même si plancher atteint.
     output_tss = sum(w.estimated_tss for w in out)
     assert output_tss < input_tss / 2
-    # Au moins 2 types de corrections.
-    types = {"repos" in a or "plafond" in a for a in adjustments}
+    # Au moins 2 types de corrections (repos hebdo, plafond TSS, cadence type).
+    types = {
+        ("repos" in a or "plafond" in a or "cadence" in a) for a in adjustments
+    }
     assert types == {True}
 
 
@@ -313,6 +315,53 @@ def test_validator_respects_min_duration_of_20_min():
     plan = [_mk_workout("2026-05-25", duration_min=240, kind="endurance")]
     out, _ = validate_and_correct(plan, ctl_current=0.0)
     assert all(w.duration_min >= 20 for w in out)
+
+
+# ---------- Garde-fou 5 : cadence d'intensité par type -----------------------
+
+
+def test_validator_adds_intensity_on_all_endurance_charge_week():
+    """Une semaine de charge 100 % Z2 reçoit une séance d'intervalles (course)."""
+    plan = [
+        _mk_workout("2026-05-25", kind="endurance", duration_min=90),
+        _mk_workout("2026-05-27", kind="endurance", duration_min=90),
+        _mk_workout("2026-05-29", kind="endurance", duration_min=120),
+    ]
+    out, adjustments = validate_and_correct(
+        plan, ctl_current=60.0, target_event_type="course", total_weeks=4
+    )
+    kinds = {w.kind for w in out}
+    assert "intervals" in kinds
+    assert any("cadence" in a for a in adjustments)
+    # Le plafond reste respecté.
+    assert sum(w.estimated_tss for w in out) <= 60 * 7 + 1e-3
+
+
+def test_validator_skips_cadence_when_intervals_present():
+    """Une semaine contenant déjà des intervalles n'est pas modifiée par la cadence."""
+    plan = [
+        _mk_workout("2026-06-01", kind="intervals", duration_min=60, high_intensity_sec=1800),
+        _mk_workout("2026-06-03", kind="endurance", duration_min=90),
+        _mk_workout("2026-06-05", kind="endurance", duration_min=90),
+    ]
+    out, adj = validate_and_correct(
+        plan, ctl_current=60.0, target_event_type="course", total_weeks=4
+    )
+    assert not any("cadence" in a for a in adj)
+    assert any(w.kind == "intervals" for w in out)
+
+
+def test_validator_keeps_plan_within_cap_when_adding_intensity():
+    """La cadence d'intensité ne doit jamais faire dépasser le plafond TSS."""
+    plan = [
+        _mk_workout("2026-05-25", kind="endurance", duration_min=120),
+        _mk_workout("2026-05-27", kind="endurance", duration_min=120),
+        _mk_workout("2026-05-29", kind="endurance", duration_min=120),
+    ]
+    out, _ = validate_and_correct(
+        plan, ctl_current=10.0, target_event_type="forme", total_weeks=4
+    )
+    assert sum(w.estimated_tss for w in out) <= 20 * 7 + 1e-3
 
 
 def test_validator_resets_estimated_tss_after_duration_change():

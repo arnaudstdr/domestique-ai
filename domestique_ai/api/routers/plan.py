@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import contextlib
+import datetime as _dt
 import json
 from collections.abc import AsyncGenerator
 from typing import Any
@@ -14,8 +16,11 @@ from domestique_ai.api.deps import get_athlete_context
 from domestique_ai.api.logging import get_logger
 from domestique_ai.api.schemas import (
     PlanCreateRequest,
+    PlanDecisionCreate,
+    PlanDecisionOut,
     PlanDetail,
     PlanSummary,
+    WeeklyReviewOut,
     WorkoutSchema,
     WorkoutStepSchema,
 )
@@ -31,11 +36,14 @@ from domestique_ai.llm.plan_storage import (
     PlanGenerationError,
     build_and_save_plan,
     delete_plan,
+    list_decisions,
     list_plans,
+    list_versions,
     load_plan,
+    save_day_decision,
     save_plan,
 )
-from domestique_ai.processing.plan_builder import Workout
+from domestique_ai.processing.plan_builder import Workout, WorkoutStep
 
 router = APIRouter(prefix="/api/plan", tags=["plan"])
 log = get_logger("plan")
@@ -60,6 +68,7 @@ def _workout_to_schema(workout: Workout) -> WorkoutSchema:
         ],
         estimated_tss=workout.estimated_tss,
         notes=workout.notes,
+        uid=workout.uid,
     )
 
 
@@ -71,6 +80,34 @@ def _summary_from_row(row: dict) -> PlanSummary:
         target_event_type=row.get("target_event_type"),
         sessions_per_week=row.get("sessions_per_week"),
         weeks=row.get("weeks"),
+        status=row.get("status", "active"),
+        parent_plan_id=row.get("parent_plan_id"),
+        start_date=row.get("start_date"),
+        adapt_reason=row.get("adapt_reason"),
+    )
+
+
+def _detail_from_plan(plan_id: int, plan: list[Workout], ctx: AthleteContext) -> PlanDetail:
+    summary = next(
+        (
+            _summary_from_row(row)
+            for row in list_plans(limit=100, db_path=ctx.db_path)
+            if row["id"] == plan_id
+        ),
+        None,
+    )
+    return PlanDetail(
+        id=plan_id,
+        created_at=summary.created_at if summary else "",
+        target_date=summary.target_date if summary else None,
+        target_event_type=summary.target_event_type if summary else None,
+        sessions_per_week=summary.sessions_per_week if summary else None,
+        weeks=summary.weeks if summary else None,
+        status=summary.status if summary else "active",
+        parent_plan_id=summary.parent_plan_id if summary else None,
+        start_date=summary.start_date if summary else None,
+        adapt_reason=summary.adapt_reason if summary else None,
+        workouts=[_workout_to_schema(w) for w in plan],
     )
 
 
@@ -134,8 +171,29 @@ def post_plan(
         target_event_type=plan_ctx["target_event_type"],
         sessions_per_week=payload.sessions_per_week,
         weeks=summary.weeks if summary else None,
+        status=summary.status if summary else "active",
+        parent_plan_id=summary.parent_plan_id if summary else None,
+        start_date=summary.start_date if summary else None,
+        adapt_reason=summary.adapt_reason if summary else None,
         workouts=[_workout_to_schema(w) for w in plan],
     )
+
+
+@router.get("/active", response_model=PlanDetail)
+def get_active_plan(
+    ctx: AthleteContext = Depends(get_athlete_context),  # noqa: B008
+) -> PlanDetail:
+    """Charge le plan actif (status ``active``), sinon le plus récent."""
+    from domestique_ai.llm.plan_storage import load_active_plan
+
+    plan_meta = load_active_plan(db_path=ctx.db_path)
+    if plan_meta is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Aucun plan actif.",
+        )
+    plan_id, plan = plan_meta
+    return _detail_from_plan(plan_id, plan, ctx)
 
 
 @router.get("/{plan_id}", response_model=PlanDetail)
@@ -150,23 +208,134 @@ def get_plan(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Plan {plan_id} introuvable.",
         )
-    summary = next(
-        (
-            _summary_from_row(row)
-            for row in list_plans(limit=100, db_path=ctx.db_path)
-            if row["id"] == plan_id
-        ),
-        None,
+    return _detail_from_plan(plan_id, plan, ctx)
+
+
+@router.get("/{plan_id}/versions", response_model=list[PlanSummary])
+def get_plan_versions(
+    plan_id: int,
+    ctx: AthleteContext = Depends(get_athlete_context),  # noqa: B008
+) -> list[PlanSummary]:
+    """Ligneage du plan : lui-même + ses ancêtres (via ``parent_plan_id``)."""
+    return [_summary_from_row(v) for v in list_versions(plan_id, db_path=ctx.db_path)]
+
+
+@router.post("/weekly-review", response_model=WeeklyReviewOut)
+def post_weekly_review(
+    ctx: AthleteContext = Depends(get_athlete_context),  # noqa: B008
+) -> WeeklyReviewOut:
+    """Déclenche la revue hebdomadaire : rapport + re-plan adaptatif."""
+    from domestique_ai.llm.weekly_review import run_weekly_review
+
+    result = run_weekly_review(ctx=ctx)
+    log.info(
+        "Revue hebdo (manuel) : decision=%s replanned=%s new_plan_id=%s",
+        result.get("decision"),
+        result.get("replanned"),
+        result.get("new_plan_id"),
     )
-    return PlanDetail(
-        id=plan_id,
-        created_at=summary.created_at if summary else "",
-        target_date=summary.target_date if summary else None,
-        target_event_type=summary.target_event_type if summary else None,
-        sessions_per_week=summary.sessions_per_week if summary else None,
-        weeks=summary.weeks if summary else None,
-        workouts=[_workout_to_schema(w) for w in plan],
+    return WeeklyReviewOut(**result)
+
+
+@router.post("/decision", response_model=PlanDecisionOut)
+def post_plan_decision(
+    payload: PlanDecisionCreate,
+    ctx: AthleteContext = Depends(get_athlete_context),  # noqa: B008
+) -> PlanDecisionOut:
+    """Override manuel de la décision du jour (repos complet ou séance allégée).
+
+    La décision est appliquée au plan actif couvrant ``date`` et prime sur le
+    plan — le Plan affiche « REPOS (coach) » ou la séance modifiée.
+    """
+    from domestique_ai.llm.plan_storage import (
+        get_day_decision,
+        load_active_plan,
     )
+    from domestique_ai.llm.today_cache import invalidate as invalidate_today_cache
+
+    plan_meta = load_active_plan(db_path=ctx.db_path)
+    if plan_meta is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Aucun plan actif pour rattacher la décision.",
+        )
+    plan_id, workouts = plan_meta
+    if not workouts or not (workouts[0].date <= payload.date <= workouts[-1].date):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"Date {payload.date} hors fenêtre du plan actif.",
+        )
+    workout = None
+    if payload.workout is not None:
+        workout = Workout(
+            date=payload.workout.date,
+            name=payload.workout.name,
+            sport=payload.workout.sport,
+            kind=payload.workout.kind,
+            duration_min=payload.workout.duration_min,
+            target_zone=payload.workout.target_zone,
+            structure=[
+                WorkoutStep(
+                    phase=s.phase,  # type: ignore[arg-type]
+                    zone=s.zone,
+                    duration_sec=s.duration_sec,
+                    repeat=s.repeat,
+                )
+                for s in payload.workout.structure
+            ],
+            estimated_tss=payload.workout.estimated_tss,
+            notes=payload.workout.notes,
+        )
+    save_day_decision(
+        plan_id,
+        payload.date,
+        payload.decision,
+        workout=workout,
+        reason=payload.reason,
+        decided_by="user",
+        db_path=ctx.db_path,
+    )
+    with contextlib.suppress(Exception):
+        invalidate_today_cache(payload.date, db_path=ctx.db_path)
+    decision = get_day_decision(plan_id, payload.date, db_path=ctx.db_path)
+    if decision is None:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Échec de la persistance de la décision.",
+        )
+    return PlanDecisionOut(
+        id=decision["id"],
+        plan_id=plan_id,
+        date=payload.date,
+        decision=decision["decision"],
+        workout=_workout_to_schema(decision["workout"]) if decision.get("workout") else None,
+        reason=decision.get("reason", ""),
+        decided_by=decision.get("decided_by", "user"),
+        created_at=decision.get("created_at", ""),
+    )
+
+
+@router.get("/{plan_id}/decisions", response_model=list[PlanDecisionOut])
+def get_plan_decisions(
+    plan_id: int,
+    ctx: AthleteContext = Depends(get_athlete_context),  # noqa: B008
+) -> list[PlanDecisionOut]:
+    """Décisions du check du matin appliquées à un plan."""
+    out: list[PlanDecisionOut] = []
+    for d in list_decisions(plan_id, db_path=ctx.db_path):
+        out.append(
+            PlanDecisionOut(
+                id=d["id"],
+                plan_id=plan_id,
+                date=d["date"],
+                decision=d["decision"],
+                workout=_workout_to_schema(d["workout"]) if d.get("workout") else None,
+                reason=d.get("reason", ""),
+                decided_by=d.get("decided_by", "daily_check"),
+                created_at=d.get("created_at", ""),
+            )
+        )
+    return out
 
 
 @router.delete("/{plan_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -263,6 +432,7 @@ async def _llm_generation_stream(
         target_date=gen_ctx.target_date,
         target_event_type=gen_ctx.target_event_type,
         sessions_per_week=sessions_per_week,
+        start_date=_dt.date.fromisoformat(aggregated[0].date),
         db_path=ctx.db_path,
     )
     log.info(

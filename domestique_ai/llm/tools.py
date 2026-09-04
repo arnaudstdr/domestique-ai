@@ -804,6 +804,21 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
     {
         "type": "function",
         "function": {
+            "name": "review_week",
+            "description": "Rapport de la semaine écoulée : compliance du plan "
+            "(séances faites / manquées / repos coach, TSS planifié vs réalisé), "
+            "récupération (readiness, sommeil, HRV), alertes overtraining et "
+            "TSB courant. Lecture seule — à utiliser avant de proposer un "
+            "re-plan ou d'expliquer un ajustement hebdomadaire.",
+            "parameters": {
+                "type": "object",
+                "properties": {},
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "find_similar_activities",
             "description": "Retrouve les activités passées au profil "
             "similaire à une activité donnée (même bucket de "
@@ -843,8 +858,28 @@ TOOLS: dict[str, Callable[..., dict[str, Any]]] = {
     "get_planned_workout": get_planned_workout,
     "propose_workout_today": propose_workout_today,
     "propose_workout": propose_workout,
+    "review_week": None,  # type: ignore[dict-item] — assigné plus bas
     "find_similar_activities": None,  # type: ignore[dict-item] — assigné plus bas
 }
+
+
+def review_week(*, ctx: AthleteContext | None = None) -> dict[str, Any]:
+    """Rapport de la semaine écoulée (plan vs réalisé + récupération).
+
+    Lecture seule : compliance (fait/partiel/manqué/repos coach, TSS planifié
+    vs réalisé), tendances matin (readiness, sommeil, HRV), alertes
+    overtraining et TSB courant. Ne re-planifie pas — à combiner avec
+    ``generate_training_plan``.
+    """
+    import datetime as _dt
+
+    from domestique_ai.llm.weekly_review import collect_week_report
+
+    ctx = ctx or context_from_env()
+    return collect_week_report(_dt.date.today(), ctx)
+
+
+TOOLS["review_week"] = review_week
 
 
 def find_similar_activities(

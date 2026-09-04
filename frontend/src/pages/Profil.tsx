@@ -35,8 +35,17 @@ const OBJECTIVE_TYPES: { value: Objective["type"]; label: string }[] = [
   { value: "cyclosportive", label: "Cyclosportive" },
   { value: "course", label: "Course" },
   { value: "cyclo", label: "Cyclo (loisir)" },
+  { value: "forme", label: "Retour en forme / base" },
   { value: "maintenance", label: "Maintenance" },
 ];
+
+const OBJECTIVE_TYPE_HINTS: Record<Objective["type"], string> = {
+  cyclosportive: "Épreuve sportive : volume + intensité, décharge les 2 dernières semaines.",
+  course: "Objectif de performance : intervalles chaque semaine, décharge les 2 dernières semaines.",
+  cyclo: "Épreuve de longue distance : le volume passe avant tout, décharge courte.",
+  forme: "Retrouver un niveau sans échéance de course : volume progressif, intervalles une semaine sur deux, pas de décharge finale.",
+  maintenance: "Entretenir la forme : volume régulier et modéré, ni pic ni décharge.",
+};
 
 const EMPTY_OBJECTIVE: Objective = {
   type: "maintenance",
@@ -434,6 +443,9 @@ function ObjectiveSection() {
               </option>
             ))}
           </select>
+          <span className="mt-1 block text-[11px] leading-snug text-muted">
+            {OBJECTIVE_TYPE_HINTS[form.type]}
+          </span>
         </label>
         <label className="block">
           <span className="text-xs text-muted">Date cible</span>

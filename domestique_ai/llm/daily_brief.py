@@ -287,6 +287,28 @@ def build_daily_brief(
         "today_workout": _workout_to_brief(signals.get("workout") or {}),
         "source": source,
     }
+    # Check du matin : décision go / alléger / repos répercutée dans le plan,
+    # + données sommeil pour un coaching ciblé.
+    try:
+        from domestique_ai.llm.daily_decision import evaluate_daily_decision
+
+        morning = evaluate_daily_decision(target, ctx=ctx, use_llm=False)
+        payload["morning_decision"] = morning.get("decision")
+        payload["morning_reason"] = morning.get("reason")
+        payload["morning_persisted"] = morning.get("persisted", False)
+        sig = morning.get("signals") or {}
+        payload["sleep_hours"] = sig.get("sleep_hours")
+        payload["sleep_score"] = sig.get("sleep_score")
+        payload["sleep_baseline"] = sig.get("sleep_baseline")
+        payload["sleep_delta_pct"] = sig.get("sleep_delta_pct")
+    except Exception:  # noqa: BLE001 — best-effort, ne doit pas casser le brief
+        payload["morning_decision"] = None
+        payload["morning_reason"] = None
+        payload["morning_persisted"] = False
+        payload["sleep_hours"] = None
+        payload["sleep_score"] = None
+        payload["sleep_baseline"] = None
+        payload["sleep_delta_pct"] = None
     with _BRIEF_LOCK:
         # On purge le cache des jours antérieurs : on n'y revient jamais et ça
         # évite de grossir indéfiniment.

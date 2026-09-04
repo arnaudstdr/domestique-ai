@@ -354,6 +354,101 @@ def get_google_health_first_run_delay_minutes() -> int:
     return max(0, v)
 
 
+def get_scheduler_timezone() -> str:
+    """Fuseau appliqué aux jobs CronTrigger (check du matin, revue hebdo).
+
+    Ordre : ``DOMESTIQUE_AI_SCHEDULER_TZ`` → ``TZ`` → ``/etc/timezone`` →
+    nom IANA déduit de ``/etc/localtime`` → ``UTC``. Retourne toujours un nom
+    IANA valide (ex. ``Europe/Paris``), jamais une abréviation (``CEST``).
+    """
+    raw = os.getenv("DOMESTIQUE_AI_SCHEDULER_TZ")
+    if raw and raw.strip():
+        return raw.strip()
+    if os.getenv("TZ", "").strip():
+        return os.getenv("TZ").strip()
+    try:
+        etc_timezone = Path("/etc/timezone")
+        if etc_timezone.exists():
+            name = etc_timezone.read_text().strip()
+            if name and name != "Etc/UTC":
+                return name
+    except OSError:  # noqa: BLE001
+        pass
+    try:
+        localtime = Path("/etc/localtime").resolve()
+        parts = localtime.parts
+        if "zoneinfo" in parts:
+            idx = parts.index("zoneinfo") + 1
+            name = "/".join(parts[idx:])
+            if name and name != "UTC":
+                return name
+    except OSError:  # noqa: BLE001
+        pass
+    return "UTC"
+
+
+def get_daily_check_time() -> tuple[int, int] | None:
+    """Heure du check du matin (heure locale, ``(hour, minute)``).
+
+    Défaut : 08:00 local. ``DOMESTIQUE_AI_DAILY_CHECK_HOUR=-1`` désactive le job
+    (mode paresseux seul, décision calculée au 1er chargement du dashboard).
+    """
+    raw = os.getenv("DOMESTIQUE_AI_DAILY_CHECK_HOUR")
+    if raw is not None and raw.strip() == "-1":
+        return None
+    if raw is None or raw.strip() == "":
+        return (8, 0)
+    try:
+        hour = int(raw)
+    except ValueError:
+        logger.warning("DOMESTIQUE_AI_DAILY_CHECK_HOUR=%r invalide — fallback 8.", raw)
+        hour = 8
+    minute = 0
+    raw_min = os.getenv("DOMESTIQUE_AI_DAILY_CHECK_MINUTE")
+    if raw_min and raw_min.strip():
+        try:
+            minute = int(raw_min)
+        except ValueError:
+            minute = 0
+    if not (0 <= hour <= 23 and 0 <= minute <= 59):
+        logger.warning(
+            "DOMESTIQUE_AI_DAILY_CHECK_HOUR=%r invalide — fallback 8.",
+            raw,
+        )
+        return (8, 0)
+    return (hour, minute)
+
+
+def get_weekly_review_time() -> tuple[int, int] | None:
+    """Jour + heure de la revue hebdo (heure locale).
+
+    ``(weekday, hour)`` avec weekday 0=lundi…6=dimanche. Défaut : dimanche 18h.
+    ``0`` sur la variable (``DOMESTIQUE_AI_WEEKLY_REVIEW_DAY=0``) désactive la
+    revue automatique.
+    """
+    raw = os.getenv("DOMESTIQUE_AI_WEEKLY_REVIEW_DAY")
+    if raw is None or raw.strip() == "":
+        return (6, 18)
+    try:
+        day = int(raw)
+    except ValueError:
+        logger.warning("DOMESTIQUE_AI_WEEKLY_REVIEW_DAY=%r invalide — fallback 6.", raw)
+        return (6, 18)
+    if day < 0:
+        return None
+    if day > 6:
+        logger.warning("DOMESTIQUE_AI_WEEKLY_REVIEW_DAY=%r invalide — fallback 6.", raw)
+        return (6, 18)
+    hour = 18
+    raw_hour = os.getenv("DOMESTIQUE_AI_WEEKLY_REVIEW_HOUR")
+    if raw_hour and raw_hour.strip():
+        try:
+            hour = int(raw_hour)
+        except ValueError:
+            hour = 18
+    return (day, hour)
+
+
 def get_garmin_token_dir() -> Path:
     """Répertoire où ``garth`` cache les tokens Garmin Connect.
 
@@ -369,6 +464,26 @@ def get_garmin_token_dir() -> Path:
 def get_ollama_model() -> str:
     """Modèle Ollama utilisé par le coach. Override via OLLAMA_MODEL."""
     return os.getenv("OLLAMA_MODEL", "gemma4:31b-cloud")
+
+
+def get_plan_min_ctl() -> float:
+    """Plancher de CTL appliqué au plafond TSS hebdo des plans.
+
+    ``_ctl_progression_cap`` calcule ``(max(plancher, CTL) + 5×semaine) × 7``.
+    À CTL bas (reprise), un plancher à 20 borne la semaine autour de 140-245
+    TSS — très conservateur. Un ancien compétiteur qui reprend peut le relever
+    (30-40) pour des semaines plus consistantes. Override via
+    ``DOMESTIQUE_AI_PLAN_MIN_CTL``.
+    """
+    raw = os.getenv("DOMESTIQUE_AI_PLAN_MIN_CTL")
+    if raw is None or raw.strip() == "":
+        return 20.0
+    try:
+        value = float(raw)
+    except ValueError:
+        logger.warning("DOMESTIQUE_AI_PLAN_MIN_CTL=%r invalide — fallback 20.", raw)
+        return 20.0
+    return max(10.0, value)
 
 
 def get_ollama_host() -> str | None:

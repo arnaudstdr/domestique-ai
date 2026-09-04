@@ -46,10 +46,10 @@ L'UI est une **PWA FastAPI + React** (Streamlit a été retiré) :
   yield les events `thinking` / `tool_call` / `tool_result` / `token` au fur
   et à mesure, consommés par `sse-starlette` côté serveur et par
   `consumeSseStream()` côté client.
-- Le push Garmin Connect est également streamé en SSE
-  (`POST /api/plan/{id}/push-garmin`) — events `start` / `progress` / `result` /
-  `done`. Le token Garmin est seedé une fois via `python -m
-  domestique_ai.export.garmin_connect`.
+- ⚠️ **Pas de push Garmin** : le endpoint `POST /api/plan/{id}/push-garmin`
+  documenté ici est **fictif** — il n'existe pas dans le code. L'export se fait
+  par téléchargement ZIP (fichiers `.FIT`) / ICS depuis la page Plan. Le token
+  Garmin est seedé une fois via `python -m domestique_ai.export.garmin_connect`.
 
 ## Architecture
 
@@ -288,9 +288,81 @@ Architecture en deux étages :
 
 Chaque correction émet une chaîne descriptive dans `adjustments`, ce qui permet à l'UI d'afficher un badge « ajusté » sur la semaine impactée.
 
+Il y a en réalité **5 garde-fous** : aux 4 ci-dessus s'ajoute la **cadence d'intensité par type** (`_enforce_intensity_cadence`) — sur les semaines de charge (≥ 3 séances, hors récup/taper), le plan doit contenir l'intensité attendue par le type (intervalles chaque semaine pour course/cyclosportive/maintenance ; intervalles 1 sem sur 2 et tempo sinon pour cyclo/forme). Conversion de l'endurance la plus longue, uniquement si le plafond TSS le permet. Le plafond TSS respecte aussi le plancher configurable `DOMESTIQUE_AI_PLAN_MIN_CTL` (défaut 20 — relever à 30-40 pour des semaines plus consistantes à la reprise).
+
+**Périodisation pilotée par le type d'objectif** — `processing/plan_builder._OBJECTIVE_FLAVORS` : `target_event_type` actionne 3 leviers (fenêtre de taper, fréquence des intervalles, surpondération de l'endurance longue) :
+- `course` / `cyclosportive` : taper 2 sem, intervalles chaque semaine, endurance neutre.
+- `cyclo` : taper 1 sem, intervalles 1 sem sur 2, endurance ×1.2 (volume avant tout).
+- `forme` (retour en forme / base, sans échéance de course) : **pas de taper**, intervalles 1 sem sur 2, endurance ×1.15 — volume progressif.
+- `maintenance` : pas de taper, intervalles chaque semaine, endurance ×0.95 (routine allégée).
+
+Le générateur LLM (`plan_generator`) reçoit le même profil (fenêtre de taper + consigne d'intention dans le prompt via `_training_emphasis`).
+
 **Fallback** : si la sortie LLM est invalide après 2 tentatives (Ollama injoignable, JSON mal formé, schéma rejeté, workouts vides), la semaine bascule sur le builder déterministe — les autres semaines peuvent rester côté LLM. Le frontend reçoit le `source: "llm" | "fallback"` par semaine.
 
 **Tests** : 22 tests dans `tests/test_plan_generator.py` (mock `chat_structured`, scénarios LLM/fallback/retry) + 21 tests dans `tests/test_plan_validator.py` (chaque garde-fou isolément + cas combinés).
+
+### Plan adaptatif — check du matin + revue hebdomadaire
+
+Le plan n'est plus un artefact fixe de 4 semaines : il **roule** et s'adapte aux
+données réelles via deux boucles, toutes deux avec fallback déterministe
+(le LLM ne décide jamais hors bornes, il ne fait que rédiger les raisons).
+
+**Check du matin (quotidien)** — `llm/daily_decision.py` + job
+`scheduler._daily_morning_check_job` (CronTrigger, défaut **08:00 local** via
+`DOMESTIQUE_AI_DAILY_CHECK_HOUR`/`MINUTE` et `DOMESTIQUE_AI_SCHEDULER_TZ`,
+`-1` = off). Le job fait d'abord un **pre-sync Google Health** (hier→aujourd'hui,
+idempotent) + **pre-sync Garmin** pour garantir des données fraîches, puis
+`evaluate_daily_decision()` :
+
+- Signaux : entrée `morning_metrics` du jour (HRV, sommeil, readiness), baseline
+  14 j, alertes morning + overtraining, TSB, séance prévue du plan.
+- Décision par règles : **rest** si alerte critical / readiness < 30 / sommeil < 5 h ;
+  **adjust** si readiness < 50 / sommeil < 6,5 h / qualité de sommeil basse
+  (`sleep_score < 60` sous 7 h) / TSB < −10 / dérive morning ;
+  **go** sinon. Le sommeil est un signal renforcé (seuil d'allègement remonté
+  à 6h30, qualité via `sleep_score`), et la dérive sommeil vs baseline 14 j est
+  déjà couverte par les alertes morning (≥ 10 % → allègement, ≥ 20 % → repos).
+  `adjust` = downgrade kind (intervals→tempo→endurance) + durée −25 %.
+- **Répercussion dans le plan** : décision ≠ go persistée dans `plan_decisions`
+  (`llm/plan_storage.save_day_decision`), cache `today_suggestions` invalidé.
+  Le Plan affiche « REPOS (coach) » ou « allégée » ; la compliance la traite
+  comme repos coach (pas une séance manquée). Override manuel via
+  `POST /api/plan/decision`. Aucune notification Pushover pour ce check.
+
+**Revue hebdomadaire** — `llm/weekly_review.py` + job `scheduler._weekly_review_job`
+(CronTrigger, défaut **dimanche 18h** local via `DOMESTIQUE_AI_WEEKLY_REVIEW_DAY`/
+`HOUR`, `0` = off) + bouton « Adapter le plan » / `POST /api/plan/weekly-review` :
+
+1. Pre-sync Google Health 7 j + rapport `collect_week_report()` : compliance de la
+   semaine écoulée (`processing/compliance.py` : fait/partiel/manqué/repos coach,
+   TSS planifié vs réalisé), tendances matin 14 j, alertes overtraining, TSB.
+2. Décision `_fallback_decision()` : **reduce** si ≥ 2 manquées / adhérence < 50 % /
+   readiness < 50 / sommeil < 6 h / TSB < −15 / alerte chronique ; **progress** si
+   semaine conforme (facteur 1.05) ; **maintain** sinon.
+3. Re-génération **du prochain lundi à l'objectif** (taper préservé) via
+   `build_training_plan` avec le CTL réel, mise à l'échelle par le facteur volume,
+   garde-fous `validate_and_correct()` rejoués, puis `save_plan` en **nouvelle
+   version** (`parent_plan_id` + `adapt_reason`, l'ancien passe en `superseded`).
+4. Idempotence : flag `weekly_review_last_week` dans `sync_meta` (une revue par
+   semaine ISO). Pushover « Plan adapté » si re-plan effectué.
+
+**Versionnage** : `training_plans` a désormais `status` (`active`/`superseded`),
+`parent_plan_id`, `start_date`, `adapt_reason`. Le « plan actif » est résolu par
+statut (`llm/plan_storage.load_active_plan`), fallback « plus récent couvrant la
+date » pour la compat. `GET /api/plan/active`, `GET /api/plan/{id}/versions`,
+`GET /api/plan/{id}/decisions`. `Workout` porte un `uid` stable (uuid court,
+rétro-compatible via `from_dict`).
+
+**Génération LLM enrichie** : `GenerationContext` (plan_generator) porte
+désormais TSB, readiness médiane, dérive HRV et compliance de la semaine écoulée
+— injectés dans `_build_user_prompt` (bloc « État réel »). Le tool LLM
+`review_week` expose le rapport de semaine en lecture (le coach explique un
+ajustement sans inventer de chiffres).
+
+**Tests** : `test_compliance.py` (8), `test_daily_decision.py` (8),
+`test_weekly_review.py` (8) + extensions `test_plan_api.py` (active/versions/
+weekly-review/decision).
 
 ### Comparateur d'activités (`processing/similar.py`)
 

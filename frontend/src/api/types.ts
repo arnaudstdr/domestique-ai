@@ -283,7 +283,7 @@ export interface GoogleHealthAuthResponse {
 }
 
 export interface Objective {
-  type: "cyclosportive" | "course" | "cyclo" | "maintenance";
+  type: "cyclosportive" | "course" | "cyclo" | "forme" | "maintenance";
   date: string | null;
   distance_km: number | null;
   elevation_m: number | null;
@@ -350,6 +350,7 @@ export interface Workout {
   structure: WorkoutStep[];
   estimated_tss: number;
   notes: string;
+  uid?: string;
 }
 
 export interface PlanSummary {
@@ -359,6 +360,10 @@ export interface PlanSummary {
   target_event_type: string | null;
   sessions_per_week: number | null;
   weeks: number | null;
+  status?: string;
+  parent_plan_id?: number | null;
+  start_date?: string | null;
+  adapt_reason?: string | null;
 }
 
 export interface PlanDetail extends PlanSummary {
@@ -368,6 +373,33 @@ export interface PlanDetail extends PlanSummary {
 export interface PlanCreateRequest {
   sessions_per_week: number;
   focus?: string | null;
+}
+
+export type PlanDecisionValue = "planned" | "adjusted" | "rest";
+
+export interface PlanDecision {
+  id: number;
+  plan_id: number;
+  date: string;
+  decision: PlanDecisionValue;
+  workout?: Workout | null;
+  reason: string;
+  decided_by: string;
+  created_at: string;
+}
+
+export interface WeeklyReviewResult {
+  skipped: boolean;
+  week_key?: string | null;
+  decision: string;
+  volume_factor: number;
+  reason: string;
+  replanned: boolean;
+  new_plan_id?: number | null;
+  parent_plan_id?: number | null;
+  sessions_count?: number | null;
+  error?: boolean;
+  report?: Record<string, unknown>;
 }
 
 // ---- Profil utilisateur ------------------------------------------------------
@@ -434,6 +466,13 @@ export interface DailyBriefResponse {
   primary_alert: DailyBriefAlert | null;
   today_workout: DailyBriefWorkout;
   source: "cache" | "llm" | "fallback";
+  morning_decision?: string | null;
+  morning_reason?: string | null;
+  morning_persisted?: boolean;
+  sleep_hours?: number | null;
+  sleep_score?: number | null;
+  sleep_baseline?: number | null;
+  sleep_delta_pct?: number | null;
 }
 
 // ---- Séance du jour ---------------------------------------------------------
@@ -444,6 +483,12 @@ export interface TodayWorkoutResponse {
   workout: Workout | null;
   tsb: number | null;
   tsb_zone: string | null;
+  rationale?: string | null;
+  signals?: Record<string, unknown> | null;
+  source?: string | null;
+  morning_decision?: string | null;
+  morning_reason?: string | null;
+  morning_persisted?: boolean;
 }
 
 // ---- Auth / comptes (multi-tenant) ------------------------------------------

@@ -336,7 +336,7 @@ class GoogleHealthAuthResponse(BaseModel):
 
 
 class Objective(BaseModel):
-    type: Literal["cyclosportive", "course", "cyclo", "maintenance"] = "maintenance"
+    type: Literal["cyclosportive", "course", "cyclo", "forme", "maintenance"] = "maintenance"
     date: str | None = None
     distance_km: float | None = None
     elevation_m: float | None = None
@@ -441,6 +441,7 @@ class WorkoutSchema(BaseModel):
     structure: list[WorkoutStepSchema] = Field(default_factory=list)
     estimated_tss: float = 0.0
     notes: str = ""
+    uid: str = ""
 
 
 class PlanSummary(BaseModel):
@@ -452,6 +453,10 @@ class PlanSummary(BaseModel):
     target_event_type: str | None = None
     sessions_per_week: int | None = None
     weeks: int | None = None
+    status: str = "active"
+    parent_plan_id: int | None = None
+    start_date: str | None = None
+    adapt_reason: str | None = None
 
 
 class PlanDetail(BaseModel):
@@ -463,12 +468,54 @@ class PlanDetail(BaseModel):
     target_event_type: str | None = None
     sessions_per_week: int | None = None
     weeks: int | None = None
+    status: str = "active"
+    parent_plan_id: int | None = None
+    start_date: str | None = None
+    adapt_reason: str | None = None
     workouts: list[WorkoutSchema]
 
 
 class PlanCreateRequest(BaseModel):
     sessions_per_week: int = Field(default=4, ge=2, le=7)
     focus: str | None = None
+
+
+class PlanDecisionCreate(BaseModel):
+    """Override manuel de la décision du jour (repos / séance allégée)."""
+
+    date: str
+    decision: Literal["rest", "adjusted"]
+    reason: str = ""
+    workout: WorkoutSchema | None = None
+
+
+class PlanDecisionOut(BaseModel):
+    """Décision du check du matin appliquée à un jour du plan."""
+
+    id: int
+    plan_id: int
+    date: str
+    decision: str
+    workout: WorkoutSchema | None = None
+    reason: str = ""
+    decided_by: str = "daily_check"
+    created_at: str
+
+
+class WeeklyReviewOut(BaseModel):
+    """Résultat d'une revue hebdomadaire (re-plan adaptatif)."""
+
+    skipped: bool = False
+    week_key: str | None = None
+    decision: str = "maintain"
+    volume_factor: float = 1.0
+    reason: str = ""
+    replanned: bool = False
+    new_plan_id: int | None = None
+    parent_plan_id: int | None = None
+    sessions_count: int | None = None
+    error: bool = False
+    report: dict[str, Any] = Field(default_factory=dict)
 
 
 class PrescriptionCreate(BaseModel):
@@ -534,6 +581,15 @@ class DailyBriefResponse(BaseModel):
     primary_alert: DailyBriefAlert | None = None
     today_workout: DailyBriefWorkout
     source: Literal["cache", "llm", "fallback"]
+    # Check du matin : décision go / adjust / rest répercutée dans le plan.
+    morning_decision: str | None = None
+    morning_reason: str | None = None
+    morning_persisted: bool = False
+    # Sommeil de la dernière nuit (coaching ciblé).
+    sleep_hours: float | None = None
+    sleep_score: int | None = None
+    sleep_baseline: float | None = None
+    sleep_delta_pct: float | None = None
 
 
 class TodayWorkoutResponse(BaseModel):
@@ -553,3 +609,7 @@ class TodayWorkoutResponse(BaseModel):
     rationale: str | None = None
     signals: dict[str, Any] | None = None
     source: Literal["cache", "llm", "fallback", "plan"] | None = None
+    # Check du matin : décision go / adjust / rest répercutée dans le plan.
+    morning_decision: str | None = None
+    morning_reason: str | None = None
+    morning_persisted: bool = False

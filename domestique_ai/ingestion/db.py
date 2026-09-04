@@ -171,12 +171,39 @@ def init_db(db_path: Path | None = None, *, ctx: AthleteContext | None = None) -
                 target_event_type TEXT,
                 sessions_per_week INTEGER,
                 weeks INTEGER,
-                payload TEXT NOT NULL
+                payload TEXT NOT NULL,
+                status TEXT DEFAULT 'active',
+                parent_plan_id INTEGER,
+                start_date TEXT,
+                adapt_reason TEXT
             )
         """)
+        for col, ddl in (
+            ("status", "TEXT DEFAULT 'active'"),
+            ("parent_plan_id", "INTEGER"),
+            ("start_date", "TEXT"),
+            ("adapt_reason", "TEXT"),
+        ):
+            _ensure_column(conn, "training_plans", col, ddl)
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_training_plans_created "
             "ON training_plans(created_at DESC)"
+        )
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS plan_decisions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                plan_id INTEGER,
+                date TEXT NOT NULL,
+                decision TEXT NOT NULL,
+                workout_payload TEXT,
+                reason TEXT,
+                decided_by TEXT,
+                created_at TEXT NOT NULL,
+                UNIQUE (plan_id, date)
+            )
+        """)
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_plan_decisions_date ON plan_decisions(date)"
         )
         conn.execute("""
             CREATE TABLE IF NOT EXISTS prescriptions (

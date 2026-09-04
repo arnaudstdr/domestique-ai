@@ -18,7 +18,7 @@ import yaml
 
 from domestique_ai.config import get_objective_path
 
-VALID_TYPES = {"cyclosportive", "course", "cyclo", "maintenance"}
+VALID_TYPES = {"cyclosportive", "course", "cyclo", "forme", "maintenance"}
 
 
 def _coerce_date(value: Any) -> str | None:

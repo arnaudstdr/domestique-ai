@@ -46,6 +46,16 @@ def test_load_rejects_invalid_type(tmp_path, monkeypatch):
         load_objective()
 
 
+def test_load_accepts_forme_type(tmp_path, monkeypatch):
+    path = tmp_path / "forme.yaml"
+    path.write_text("type: forme\nnotes: reconstruire du volume\n")
+    monkeypatch.setenv("DOMESTIQUE_AI_OBJECTIVE_PATH", str(path))
+
+    loaded = load_objective()
+    assert loaded is not None
+    assert loaded.type == "forme"
+
+
 def test_load_rejects_non_dict(tmp_path, monkeypatch):
     path = tmp_path / "bad.yaml"
     path.write_text("- just\n- a\n- list\n")

@@ -26,6 +26,7 @@ from __future__ import annotations
 import asyncio
 import datetime as _dt
 import json
+import statistics
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from typing import Any, Literal
@@ -41,7 +42,9 @@ from domestique_ai.processing.plan_builder import (
     _TSS_PER_MIN,
     Workout,
     _name_for,
+    _objective_flavor,
     _structure_for,
+    _training_emphasis,
     build_training_plan,
 )
 from domestique_ai.processing.plan_validator import validate_and_correct
@@ -147,6 +150,8 @@ def _build_user_prompt(
     is_taper: bool,
     is_recovery_week: bool,
     availability: Availability | None,
+    adaptation: str = "",
+    emphasis: str = "",
 ) -> str:
     """Prompt utilisateur : contexte chiffré + contraintes hebdo + intentions."""
     lines: list[str] = []
@@ -169,6 +174,13 @@ def _build_user_prompt(
         else "CHARGE (progression progressive du volume)"
     )
     lines.append(f"Phase : {phase}.")
+
+    if adaptation:
+        lines.append("État réel de l'athlète (données calculées, fiables) :")
+        lines.append(adaptation)
+
+    if emphasis:
+        lines.append(emphasis)
 
     if focus:
         lines.append(f"Focus spécifique demandé : {focus}.")
@@ -205,6 +217,8 @@ async def _generate_week_with_llm(
     is_taper: bool,
     is_recovery_week: bool,
     availability: Availability | None,
+    adaptation: str = "",
+    emphasis: str = "",
 ) -> list[Workout] | None:
     """Tente une génération LLM avec retry. Retourne ``None`` si échec définitif."""
     system = _build_system_prompt()
@@ -219,6 +233,8 @@ async def _generate_week_with_llm(
         is_taper,
         is_recovery_week,
         availability,
+        adaptation,
+        emphasis,
     )
     messages = [
         {"role": "system", "content": system},
@@ -260,6 +276,7 @@ def _fallback_week(
     target_event_type: str,
     focus: str | None,
     sessions_per_week: int,
+    min_ctl: float = 20.0,
 ) -> list[Workout]:
     """Fallback déterministe pour une seule semaine.
 
@@ -277,6 +294,7 @@ def _fallback_week(
         focus=focus,
         start_date=week_start,
         fallback_weeks=max(1, total_weeks - week_index),
+        min_ctl=min_ctl,
     )
     week_end = week_start + _dt.timedelta(days=7)
     return [w for w in plan if week_start <= _dt.date.fromisoformat(w.date) < week_end]
@@ -293,6 +311,41 @@ class GenerationContext:
     ctl_current: float
     availability: Availability | None
     today: _dt.date
+    min_ctl: float = 20.0
+    # Contexte adaptatif (optionnel) : réalité de la semaine écoulée.
+    tsb: float | None = None
+    readiness_median: float | None = None
+    hrv_delta_pct: float | None = None
+    compliance: dict[str, Any] | None = None
+    adapt_decision: str | None = None  # "reduce" | "maintain" | "progress"
+    adapt_reason: str | None = None
+
+
+def _build_adaptation_text(ctx: GenerationContext) -> str:
+    """Bloc texte décrivant l'état réel (semaine écoulée + récupération)."""
+    lines: list[str] = []
+    if ctx.tsb is not None:
+        lines.append(f"TSB courant : {ctx.tsb:.1f} pts.")
+    if ctx.readiness_median is not None:
+        lines.append(f"Readiness médiane sur 7 j : {ctx.readiness_median:.0f}/100.")
+    if ctx.hrv_delta_pct is not None:
+        lines.append(f"Dérive HRV vs baseline 14 j : {ctx.hrv_delta_pct:+.1f} %.")
+    compliance = ctx.compliance or {}
+    if compliance:
+        lines.append(
+            "Semaine écoulée (fait/manqué) : "
+            f"{compliance.get('done', 0)} faite(s), {compliance.get('partial', 0)} partielle(s), "
+            f"{compliance.get('missed', 0)} manquée(s), "
+            f"{compliance.get('skipped_by_decision', 0)} repos coach ; "
+            f"TSS planifié {compliance.get('planned_tss', 0.0)} vs réalisé "
+            f"{compliance.get('realized_tss', 0.0)}."
+        )
+    if ctx.adapt_decision:
+        lines.append(
+            f"Ajustement décidé par la revue hebdo : {ctx.adapt_decision.upper()}"
+            + (f" — {ctx.adapt_reason}" if ctx.adapt_reason else "")
+        )
+    return "\n".join(lines)
 
 
 def _resolve_total_weeks(ctx: GenerationContext) -> int:
@@ -314,6 +367,10 @@ async def generate_plan_stream(
     """
     total_weeks = _resolve_total_weeks(ctx)
     week_start = ctx.today - _dt.timedelta(days=ctx.today.weekday())
+    adaptation = _build_adaptation_text(ctx)
+    flavor = _objective_flavor(ctx.target_event_type)
+    emphasis = _training_emphasis(ctx.target_event_type)
+    taper_weeks = int(flavor["taper_weeks"])
 
     for week_index in range(total_weeks):
         cur_week_start = week_start + _dt.timedelta(days=week_index * 7)
@@ -330,7 +387,7 @@ async def generate_plan_stream(
         weeks_to_event = (
             (ctx.target_date - cur_week_start).days // 7 if ctx.target_date is not None else None
         )
-        is_taper = weeks_to_event is not None and 0 <= weeks_to_event < 2
+        is_taper = weeks_to_event is not None and taper_weeks > 0 and weeks_to_event < taper_weeks
         is_recovery_week = (week_index % 4 == 3) and not is_taper
 
         try:
@@ -345,6 +402,8 @@ async def generate_plan_stream(
                 is_taper=is_taper,
                 is_recovery_week=is_recovery_week,
                 availability=ctx.availability,
+                adaptation=adaptation,
+                emphasis=emphasis,
             )
         except asyncio.CancelledError:
             raise
@@ -366,6 +425,7 @@ async def generate_plan_stream(
                 target_event_type=ctx.target_event_type,
                 focus=ctx.focus,
                 sessions_per_week=ctx.sessions_per_week,
+                min_ctl=ctx.min_ctl,
             )
 
         # Validation déterministe avant émission.
@@ -373,6 +433,9 @@ async def generate_plan_stream(
             workouts,
             ctl_current=ctx.ctl_current,
             availability=ctx.availability,
+            target_event_type=ctx.target_event_type,
+            total_weeks=total_weeks,
+            min_ctl=ctx.min_ctl,
         )
         yield GeneratedWeek(
             week_index=week_index,
@@ -409,6 +472,7 @@ def build_context_from_app_state(
     logique que ``build_and_save_plan`` du module ``plan_storage``.
     """
     from domestique_ai.athlete_context import context_from_env
+    from domestique_ai.config import get_plan_min_ctl
     from domestique_ai.llm.availability import load_availability
     from domestique_ai.llm.objectives import load_objective
     from domestique_ai.processing.analyzer import (
@@ -435,6 +499,44 @@ def build_context_from_app_state(
 
     availability = load_availability(ctx.availability_path)
 
+    # Contexte adaptatif (best-effort, ne lève pas) : TSB, readiness médiane,
+    # compliance de la semaine écoulée.
+    tsb = None
+    readiness_median = None
+    hrv_delta_pct = None
+    compliance = None
+    try:
+        if curves:
+            tsb = round(float(curves[-1].get("TSB", 0.0)), 1)
+        from domestique_ai.processing.morning_metrics import (
+            compute_baselines,
+            fetch_morning_history,
+        )
+
+        history = fetch_morning_history(days=14, db_path=ctx.db_path)
+        last_week = [e for e in history if e["date"] >= (today - _dt.timedelta(days=7)).isoformat()]
+        readiness_values = [e["readiness_score"] for e in last_week if e.get("readiness_score") is not None]
+        if readiness_values:
+            readiness_median = round(statistics.median(readiness_values), 1)
+        baseline = compute_baselines("hrv_ms", db_path=ctx.db_path)
+        if baseline.get("available"):
+            hrv_delta_pct = round(baseline["delta_pct"], 1)
+        from domestique_ai.llm.plan_storage import list_decisions, load_active_plan
+        from domestique_ai.processing.compliance import compute_week_compliance
+
+        plan_meta = load_active_plan(ctx.db_path)
+        if plan_meta is not None:
+            plan_id, workouts = plan_meta
+            week_start = today - _dt.timedelta(days=today.weekday() - 7)
+            compliance = compute_week_compliance(
+                workouts,
+                activities,
+                week_start=week_start,
+                decisions=list_decisions(plan_id, db_path=ctx.db_path),
+            )
+    except Exception:  # noqa: BLE001 — contexte enrichi best-effort
+        pass
+
     return GenerationContext(
         sessions_per_week=sessions_per_week,
         focus=focus,
@@ -443,6 +545,11 @@ def build_context_from_app_state(
         ctl_current=ctl_current,
         availability=availability,
         today=today,
+        min_ctl=get_plan_min_ctl(),
+        tsb=tsb,
+        readiness_median=readiness_median,
+        hrv_delta_pct=hrv_delta_pct,
+        compliance=compliance,
     )
 
 

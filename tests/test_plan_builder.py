@@ -104,6 +104,91 @@ def test_intervals_swapped_in_recovery_week():
         assert kinds != {"intervals"}
 
 
+def _weekly_volumes(plan: list[Workout]) -> dict[str, int]:
+    """Volume (min) par semaine (clé: lundi)."""
+    out: dict[str, int] = {}
+    for w in plan:
+        d = dt.date.fromisoformat(w.date)
+        monday = (d - dt.timedelta(days=d.weekday())).isoformat()
+        out[monday] = out.get(monday, 0) + w.duration_min
+    return out
+
+
+def test_forme_type_has_no_taper_but_course_does():
+    today = dt.date(2026, 5, 4)
+    target = today + dt.timedelta(weeks=8)
+    forme = _weekly_volumes(
+        build_training_plan(
+            target_date=target, ctl_current=60.0, sessions_per_week=4,
+            start_date=today, target_event_type="forme",
+        )
+    )
+    course = _weekly_volumes(
+        build_training_plan(
+            target_date=target, ctl_current=60.0, sessions_per_week=4,
+            start_date=today, target_event_type="course",
+        )
+    )
+    keys_forme = sorted(forme)
+    keys_course = sorted(course)
+    # Pour les deux, W6 est en position cycle identique à W2 (factor 1.10).
+    # course : taper sur 2 semaines → W6 est réduite (~0.70) vs W2 (~1.10).
+    assert course[keys_course[6]] < course[keys_course[2]] * 0.8
+    # forme : pas de taper → W6 reste une semaine de charge normale ≈ W2.
+    assert forme[keys_forme[6]] >= forme[keys_forme[2]] * 0.9
+
+
+def test_forme_type_intervals_every_other_week():
+    today = dt.date(2026, 5, 4)
+    target = today + dt.timedelta(weeks=8)
+    plan = build_training_plan(
+        target_date=target, ctl_current=60.0, sessions_per_week=4,
+        start_date=today, target_event_type="forme",
+    )
+    intervals_weeks: set[int] = set()
+    for w in plan:
+        if w.kind != "intervals":
+            continue
+        d = dt.date.fromisoformat(w.date)
+        week_idx = (d - today).days // 7
+        intervals_weeks.add(week_idx)
+    # Intervalles uniquement les semaines paires de charge (0, 2, 4, 6).
+    assert intervals_weeks == {0, 2, 4, 6}
+
+
+def test_cyclo_type_boosts_endurance_volume():
+    today = dt.date(2026, 5, 4)
+    target = today + dt.timedelta(weeks=6)
+    plan_cyclo = build_training_plan(
+        target_date=target, ctl_current=60.0, sessions_per_week=4,
+        start_date=today, target_event_type="cyclo",
+    )
+    plan_base = build_training_plan(
+        target_date=target, ctl_current=60.0, sessions_per_week=4,
+        start_date=today, target_event_type="cyclosportive",
+    )
+    endurance_cyclo = sum(w.duration_min for w in plan_cyclo if w.kind == "endurance")
+    endurance_base = sum(w.duration_min for w in plan_base if w.kind == "endurance")
+    assert endurance_cyclo > endurance_base
+
+
+def test_min_ctl_raises_tss_cap_for_low_ctl():
+    """Le plancher configurable relève le plafond TSS à CTL très bas."""
+    today = dt.date(2026, 5, 4)
+    plan_low_floor = build_training_plan(
+        target_date=None, ctl_current=5.0, sessions_per_week=4,
+        start_date=today, target_event_type="forme", fallback_weeks=4,
+    )
+    plan_raised_floor = build_training_plan(
+        target_date=None, ctl_current=5.0, sessions_per_week=4,
+        start_date=today, target_event_type="forme", fallback_weeks=4,
+        min_ctl=40.0,
+    )
+    tss_low = sum(w.estimated_tss for w in plan_low_floor)
+    tss_raised = sum(w.estimated_tss for w in plan_raised_floor)
+    assert tss_raised > tss_low
+
+
 def test_progression_is_capped_by_ctl():
     today = dt.date(2026, 5, 4)
     target = today + dt.timedelta(weeks=12)

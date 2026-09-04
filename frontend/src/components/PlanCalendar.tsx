@@ -9,7 +9,7 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
-import type { Workout } from "../api/types";
+import type { PlanDecision, Workout } from "../api/types";
 import { CHART, axisProps, tooltipStyle } from "../chartTheme";
 import {
   KIND_LABELS,
@@ -20,6 +20,7 @@ import {
 
 interface Props {
   workouts: Workout[];
+  decisions?: PlanDecision[];
 }
 
 interface WeekGroup {
@@ -82,9 +83,11 @@ function dayLabel(dateStr: string): string {
   });
 }
 
-export default function PlanCalendar({ workouts }: Props) {
+export default function PlanCalendar({ workouts, decisions = [] }: Props) {
   const [openId, setOpenId] = useState<string | null>(null);
   const weeks = groupByWeek(workouts);
+  const decisionsByDate = new Map<string, PlanDecision>();
+  for (const d of decisions) decisionsByDate.set(d.date, d);
   const chartData = weeks.map((w, i) => ({
     name: `S${i + 1}`,
     tss: Math.round(w.totalTss),
@@ -137,6 +140,37 @@ export default function PlanCalendar({ workouts }: Props) {
           {week.workouts.map((w) => {
             const wId = `${w.date}-${w.name}`;
             const isOpen = openId === wId;
+            const decision = decisionsByDate.get(w.date);
+            if (decision?.decision === "rest") {
+              return (
+                <div
+                  key={wId}
+                  className="rounded-lg border border-yellow-500/25 bg-yellow-500/[0.05] p-2"
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="flex min-w-0 items-center gap-2">
+                      <span className="pill bg-yellow-500/15 text-yellow-300">
+                        REPOS
+                      </span>
+                      <div className="min-w-0">
+                        <div className="truncate text-sm text-gray-100">
+                          {w.name}
+                        </div>
+                        <div className="text-xs text-muted">
+                          {dayLabel(w.date)} {formatDate(w.date)} · remplacé par
+                          repos (coach)
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                  {decision.reason && (
+                    <div className="mt-1 text-[11px] italic text-muted">
+                      {decision.reason}
+                    </div>
+                  )}
+                </div>
+              );
+            }
             return (
               <div key={wId} className="rounded-lg bg-surface/40 p-2">
                 <button
@@ -150,6 +184,14 @@ export default function PlanCalendar({ workouts }: Props) {
                     >
                       {KIND_LABELS[w.kind] || w.kind}
                     </span>
+                    {decision?.decision === "adjusted" && (
+                      <span
+                        className="pill bg-accent/15 text-accent"
+                        title={decision.reason || "Séance allégée par le check du matin"}
+                      >
+                        allégée
+                      </span>
+                    )}
                     <div className="min-w-0">
                       <div className="truncate text-sm text-gray-100">
                         {w.name}

@@ -6,6 +6,7 @@ import {
   Download,
   Dumbbell,
   Library,
+  RefreshCw,
   Sparkles,
   Target,
   Trash2,
@@ -18,9 +19,11 @@ import {
 } from "../api/client";
 import type {
   Objective,
+  PlanDecision,
   PlanDetail,
   PlanSummary,
   PrescriptionOut,
+  WeeklyReviewResult,
   Workout,
 } from "../api/types";
 import PlanCalendar from "../components/PlanCalendar";
@@ -61,6 +64,7 @@ const OBJECTIVE_LABELS: Record<Objective["type"], string> = {
   cyclosportive: "Cyclosportive",
   course: "Course",
   cyclo: "Cyclo",
+  forme: "Retour en forme",
   maintenance: "Maintenance",
 };
 
@@ -119,6 +123,9 @@ export default function Plan() {
   const [downloadingIcs, setDownloadingIcs] = useState(false);
   const [mode, setMode] = useState<GenerationMode>("classic");
   const [llmStream, setLlmStream] = useState<LlmStreamState>(EMPTY_LLM_STREAM);
+  const [reviewing, setReviewing] = useState(false);
+  const [reviewResult, setReviewResult] = useState<WeeklyReviewResult | null>(null);
+  const [decisions, setDecisions] = useState<PlanDecision[]>([]);
   const { push } = useToast();
   const viewing = useViewing();
 
@@ -175,6 +182,48 @@ export default function Plan() {
       cancelled = true;
     };
   }, [selectedId, push]);
+
+  useEffect(() => {
+    if (selectedId == null) {
+      setDecisions([]);
+      return;
+    }
+    let cancelled = false;
+    api.plan
+      .decisions(selectedId)
+      .then((d) => {
+        if (!cancelled) setDecisions(d);
+      })
+      .catch(() => {
+        if (!cancelled) setDecisions([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedId]);
+
+  async function runWeeklyReview(): Promise<void> {
+    setReviewing(true);
+    setReviewResult(null);
+    try {
+      const result = await api.plan.weeklyReview();
+      setReviewResult(result);
+      if (result.replanned) {
+        push("Revue hebdomadaire : plan adapté.", "success");
+      } else if (result.skipped) {
+        push("Revue déjà effectuée cette semaine.", "info");
+      } else {
+        push(`Revue hebdo : ${result.reason}`, "info");
+      }
+      await refreshList(true);
+      setSelectedId(result.new_plan_id ?? null);
+    } catch (err) {
+      const msg = err instanceof ApiError ? err.message : String(err);
+      push(`Erreur revue hebdo : ${msg}`, "error");
+    } finally {
+      setReviewing(false);
+    }
+  }
 
   async function generate(): Promise<void> {
     if (mode === "llm") {
@@ -541,6 +590,64 @@ export default function Plan() {
       ) : null}
 
       <div className="card space-y-3">
+        <div className="flex items-center justify-between gap-2">
+          <h2 className="flex items-center gap-2 font-display text-lg font-bold tracking-tight">
+            <RefreshCw className="h-4 w-4 text-accent" strokeWidth={1.75} aria-hidden="true" />
+            Revue hebdomadaire
+          </h2>
+          {!viewing && (
+            <button
+              onClick={runWeeklyReview}
+              disabled={reviewing}
+              className="btn-ghost px-3 py-1.5 text-sm"
+              title="Le coach analyse la semaine écoulée et adapte le reste du plan"
+            >
+              {reviewing ? "Analyse…" : "Adapter le plan"}
+            </button>
+          )}
+        </div>
+        <p className="text-xs text-muted">
+          Le coach croise la semaine écoulée (séances faites / manquées), la
+          récupération du matin (HRV, sommeil, readiness) et le TSB pour
+          régénérer la suite du plan à partir de lundi.
+        </p>
+        {reviewResult && (
+          <div
+            className={`rounded-xl border px-3 py-2.5 text-sm ${
+              reviewResult.error
+                ? "border-red-500/30 bg-red-500/10 text-red-400"
+                : "border-accent/30 bg-accent/[0.06] text-gray-100"
+            }`}
+          >
+            <div className="flex flex-wrap items-center gap-2">
+              <span
+                className={`pill ${
+                  reviewResult.decision === "reduce"
+                    ? "bg-yellow-500/15 text-yellow-300"
+                    : reviewResult.decision === "progress"
+                      ? "bg-emerald-500/15 text-emerald-300"
+                      : "bg-surface/60 text-gray-200"
+                }`}
+              >
+                {reviewResult.decision}
+              </span>
+              {reviewResult.replanned && (
+                <span className="pill bg-accent/15 text-accent">
+                  re-plan n°{reviewResult.new_plan_id}
+                </span>
+              )}
+              {reviewResult.skipped && (
+                <span className="pill bg-surface/60 text-gray-300">
+                  déjà faite cette semaine
+                </span>
+              )}
+            </div>
+            <p className="mt-1.5">{reviewResult.reason}</p>
+          </div>
+        )}
+      </div>
+
+      <div className="card space-y-3">
         <h2 className="flex items-center gap-2 font-display text-lg font-bold tracking-tight">
           <Library className="h-4 w-4 text-accent" strokeWidth={1.75} aria-hidden="true" />
           Plans persistés
@@ -563,10 +670,46 @@ export default function Plan() {
                 {plans.map((p) => (
                   <option key={p.id} value={p.id}>
                     #{p.id} — {describePlan(p)}
+                    {p.status === "superseded" ? " (obsolète)" : ""}
+                    {p.adapt_reason ? " — ajusté" : ""}
                   </option>
                 ))}
               </select>
             </label>
+            {detail?.adapt_reason && (
+              <div className="rounded-xl border border-yellow-500/20 bg-yellow-500/[0.06] px-3 py-2 text-xs text-yellow-200/90">
+                <span className="font-semibold">Ajusté :</span> {detail.adapt_reason}
+              </div>
+            )}
+            {decisions.length > 0 && (
+              <div className="space-y-1.5">
+                <span className="text-xs text-muted">Décisions du check du matin</span>
+                <ul className="space-y-1.5">
+                  {decisions.map((d) => (
+                    <li
+                      key={d.id}
+                      className="rounded-lg border border-accent/25 bg-accent/[0.05] px-2.5 py-1.5"
+                    >
+                      <div className="flex items-center justify-between gap-2 text-xs">
+                        <span
+                          className={`pill ${
+                            d.decision === "rest"
+                              ? "bg-yellow-500/15 text-yellow-300"
+                              : "bg-accent/15 text-accent"
+                          }`}
+                        >
+                          {d.decision === "rest" ? "REPOS" : "allégée"}
+                        </span>
+                        <span className="text-muted">
+                          {d.date} · {d.decided_by === "user" ? "toi" : "coach"}
+                        </span>
+                      </div>
+                      {d.reason && <p className="mt-1 text-[11px] text-muted">{d.reason}</p>}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
             <div className="flex gap-2">
               <button
                 onClick={downloadZip}
@@ -619,7 +762,9 @@ export default function Plan() {
         <div className="card text-sm text-muted">Chargement du plan…</div>
       )}
 
-      {!loadingDetail && detail && <PlanCalendar workouts={detail.workouts} />}
+      {!loadingDetail && detail && (
+        <PlanCalendar workouts={detail.workouts} decisions={decisions} />
+      )}
     </div>
   );
 }
