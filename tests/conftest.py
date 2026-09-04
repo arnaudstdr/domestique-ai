@@ -7,13 +7,18 @@ import pytest
 
 @pytest.fixture(autouse=True)
 def _isolate_platform_db(tmp_path, monkeypatch):
-    """Isole la DB plateforme par test.
+    """Isole la DB plateforme ET la racine des espaces athlètes par test.
 
     Le ``lifespan`` FastAPI initialise désormais la DB plateforme ; sans cette
     isolation, les tests qui montent l'app écriraient dans ``data/platform.db``
     (réel) et partageraient un état entre tests.
+
+    ``DOMESTIQUE_AI_ATHLETES_ROOT`` est isolé pareil : les tests qui créent un
+    athlète non-bootstrap (auth, roster, prescriptions) écriraient sinon dans
+    ``data/athletes/`` réel — 315 dossiers orphelins accumulés sur un run.
     """
     monkeypatch.setenv("DOMESTIQUE_AI_PLATFORM_DB_PATH", str(tmp_path / "platform.db"))
+    monkeypatch.setenv("DOMESTIQUE_AI_ATHLETES_ROOT", str(tmp_path / "athletes"))
     # Les tests qui montent `TestClient(app)` sans `with` ne déclenchent pas le
     # lifespan (donc pas l'init plateforme) ; on l'initialise ici pour tous.
     from domestique_ai.platform_db import init_platform_db

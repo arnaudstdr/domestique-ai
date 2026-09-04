@@ -34,7 +34,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field, ValidationError, field_validator
 
 from domestique_ai.athlete_context import AthleteContext
-from domestique_ai.llm.availability import Availability
+from domestique_ai.llm.availability import _WEEKDAY_BY_INDEX, Availability
 from domestique_ai.llm.ollama_client import chat_structured
 from domestique_ai.processing.plan_builder import (
     _BASE_DURATION_MIN,
@@ -197,6 +197,20 @@ def _build_user_prompt(
         if constraints:
             lines.append("Contraintes par jour :")
             lines.extend(constraints)
+        prefs: list[str] = []
+        if availability.intervals_day is not None:
+            prefs.append(
+                f"jour intervalles = {_WEEKDAY_BY_INDEX[availability.intervals_day]}"
+            )
+        if availability.long_endurance_day is not None:
+            prefs.append(
+                f"jour sortie longue = {_WEEKDAY_BY_INDEX[availability.long_endurance_day]}"
+            )
+        if prefs:
+            lines.append(
+                "Préférences de l'athlète — RESPECTE-LES pour placer les séances : "
+                + ", ".join(prefs) + "."
+            )
 
     lines.append(
         "Respecte la polarisation 80/20 : au plus une séance Z4-Z5 par semaine, "
