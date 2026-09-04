@@ -364,6 +364,54 @@ def test_validator_keeps_plan_within_cap_when_adding_intensity():
     assert sum(w.estimated_tss for w in out) <= 20 * 7 + 1e-3
 
 
+# ---------- Garde-fou 6 : sortie longue sur le jour dédié --------------------
+
+
+def _mk_avail_with_long_sunday():
+    return _mk_availability(
+        {0: (240, "outdoor"), 3: (60, "indoor"), 5: (240, "outdoor"), 6: (240, "outdoor")},
+        long_endurance_day=6,
+    )
+
+
+def test_validator_moves_longest_endurance_to_long_day():
+    """La plus longue endurance est déplacée sur le jour long (dimanche)."""
+    # 2026-05-25 = lundi, 05-30 = samedi (endurance longue), 05-31 = dimanche (endurance courte).
+    plan = [
+        _mk_workout("2026-05-25", kind="tempo", duration_min=60),
+        _mk_workout("2026-05-28", kind="recovery", duration_min=45),
+        _mk_workout("2026-05-30", kind="endurance", duration_min=90),
+        _mk_workout("2026-05-31", kind="endurance", duration_min=60),
+    ]
+    out, adjustments = validate_and_correct(
+        plan, ctl_current=50.0, availability=_mk_avail_with_long_sunday(),
+        target_event_type="forme", total_weeks=4,
+    )
+    sunday = next(w for w in out if w.date == "2026-05-31")
+    saturday = next(w for w in out if w.date == "2026-05-30")
+    assert sunday.kind == "endurance"
+    assert sunday.duration_min >= saturday.duration_min
+    assert any("sortie longue" in a for a in adjustments)
+
+
+def test_validator_lengthens_short_long_ride_when_cap_allows():
+    """Une sortie longue trop courte sur le jour dédié est portée à ≥ 90 min."""
+    plan = [
+        _mk_workout("2026-05-25", kind="tempo", duration_min=60),
+        _mk_workout("2026-05-28", kind="recovery", duration_min=45),
+        _mk_workout("2026-05-30", kind="endurance", duration_min=60),
+        _mk_workout("2026-05-31", kind="endurance", duration_min=75),
+    ]
+    out, adjustments = validate_and_correct(
+        plan, ctl_current=80.0, availability=_mk_avail_with_long_sunday(),
+        target_event_type="forme", total_weeks=4,
+    )
+    sunday = next(w for w in out if w.date == "2026-05-31")
+    assert sunday.kind == "endurance"
+    assert sunday.duration_min >= 75
+    assert any("sortie longue" in a for a in adjustments)
+
+
 def test_validator_resets_estimated_tss_after_duration_change():
     """Quand on raccourcit, ``estimated_tss`` doit être recalculé."""
     plan = [_mk_workout("2026-05-25", duration_min=240, kind="endurance")]

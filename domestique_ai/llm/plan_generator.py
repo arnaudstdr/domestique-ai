@@ -442,7 +442,9 @@ async def generate_plan_stream(
                 min_ctl=ctx.min_ctl,
             )
 
-        # Validation déterministe avant émission.
+        # Validation déterministe avant émission. Le week_idx est ancré sur le
+        # vrai début du plan (sinon, semaine validée isolément → week_idx 0 →
+        # plafonds TSS plats et pas de progression).
         corrected, adjustments = validate_and_correct(
             workouts,
             ctl_current=ctx.ctl_current,
@@ -450,6 +452,7 @@ async def generate_plan_stream(
             target_event_type=ctx.target_event_type,
             total_weeks=total_weeks,
             min_ctl=ctx.min_ctl,
+            plan_start_iso=week_start.isoformat(),
         )
         yield GeneratedWeek(
             week_index=week_index,

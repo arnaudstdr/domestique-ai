@@ -25,7 +25,10 @@ Règles appliquées, dans cet ordre, semaine par semaine :
    le plan doit contenir une séance d'intensité conforme au type (``intervals``
    chaque semaine pour course/cyclosportive/maintenance ; ``intervals`` une
    semaine sur deux et tempo sinon pour cyclo/forme). Conversion de l'endurance
-   la plus longue, uniquement si le plafond TSS le permet.
+   la plus longue — hors jour long — uniquement si le plafond TSS le permet.
+6. **Sortie longue sur le jour dédié** : la plus longue endurance des semaines
+   de charge est placée sur ``long_endurance_day`` et portée à ≥ 90 min si le
+   plafond le permet (échange de dates si le jour est occupé).
 
 À chaque correction appliquée, on émet une chaîne descriptive dans la liste
 ``adjustments`` retournée, pour que l'UI puisse afficher un badge « ajusté »
@@ -38,7 +41,7 @@ import datetime as _dt
 from collections import defaultdict
 from typing import Any
 
-from domestique_ai.llm.availability import Availability
+from domestique_ai.llm.availability import _WEEKDAY_BY_INDEX, Availability
 from domestique_ai.processing.plan_builder import (
     _BASE_DURATION_MIN,
     _TARGET_ZONE,
@@ -51,6 +54,9 @@ from domestique_ai.processing.plan_builder import (
 
 # Part Z4-Z5 maximale du temps actif hebdomadaire (polarisation 80/20).
 _MAX_HIGH_INTENSITY_SHARE = 0.25
+
+# Durée minimale de la « sortie longue » du jour dédié (semaines de charge).
+_LONG_RIDE_MIN = 90
 
 # Nombre maximal de séances par semaine (au moins 1 jour de repos).
 _MAX_SESSIONS_PER_WEEK = 6
@@ -255,6 +261,7 @@ def _enforce_intensity_cadence(
     flavor: dict[str, float],
     total_weeks: int | None,
     min_ctl: float,
+    availability: Availability | None,
     adjustments: list[str],
 ) -> list[Workout]:
     """Garantit la cadence d'intensité du type d'objectif, sans dépasser le plafond.
@@ -289,9 +296,15 @@ def _enforce_intensity_cadence(
         return week
 
     target_kind = "intervals" if intervals_week else "tempo"
+    # On préfère convertir une endurance hors du jour long : la sortie longue
+    # du dimanche ne doit pas être sacrifiée pour la cadence d'intensité.
+    long_wd = availability.long_endurance_day if availability is not None else None
     candidates = sorted(
         [(i, w) for i, w in enumerate(week) if w.kind == "endurance"],
-        key=lambda iw: -iw[1].duration_min,
+        key=lambda iw: (
+            long_wd is not None and _dt.date.fromisoformat(iw[1].date).weekday() == long_wd,
+            -iw[1].duration_min,
+        ),
     )
     if not candidates:
         return week
@@ -315,6 +328,124 @@ def _enforce_intensity_cadence(
     return new_week
 
 
+def _rebuild_at_date(
+    workout: Workout, new_date_iso: str, week_idx: int, *, duration_min: int | None = None
+) -> Workout:
+    """Reconstruit une séance à une autre date (mêmes kind/durée sauf override)."""
+    duration = duration_min if duration_min is not None else workout.duration_min
+    return Workout(
+        date=new_date_iso,
+        name=_name_for(workout.kind, duration, week_idx, False, False),
+        sport=workout.sport,
+        kind=workout.kind,
+        duration_min=duration,
+        target_zone=workout.target_zone,
+        structure=_structure_for(workout.kind, duration),
+        estimated_tss=round(_TSS_PER_MIN.get(workout.kind, 1.0) * duration, 1),
+        notes=workout.notes,
+        uid=workout.uid,
+    )
+
+
+def _enforce_long_ride(
+    week: list[Workout],
+    week_idx: int,
+    availability: Availability | None,
+    flavor: dict[str, float],
+    total_weeks: int | None,
+    ctl_current: float,
+    min_ctl: float,
+    adjustments: list[str],
+) -> list[Workout]:
+    """Place la sortie longue (endurance la plus longue, ≥ 90 min) sur le jour dédié.
+
+    S'applique aux semaines de charge structurées (≥ 3 séances, ni récup 3:1 ni
+    taper) quand l'availability déclare ``long_endurance_day``. Si la plus
+    longue endurance n'est pas sur ce jour, on l'y déplace (échange avec la
+    séance qui l'occupe) ; si elle y est mais trop courte, on la rallonge tant
+    que le plafond TSS le permet.
+    """
+    if len(week) < 3 or availability is None or availability.long_endurance_day is None:
+        return week
+    taper_weeks = int(flavor["taper_weeks"])
+    if total_weeks is not None and week_idx >= total_weeks - taper_weeks:
+        return week
+    if week_idx % 4 == 3:
+        return week
+
+    long_wd = availability.long_endurance_day
+    best = max(
+        (w for w in week if w.kind == "endurance"),
+        key=lambda w: w.duration_min,
+        default=None,
+    )
+    if best is None:
+        return week
+
+    def _wd(w: Workout) -> int:
+        return _dt.date.fromisoformat(w.date).weekday()
+
+    best_date = _dt.date.fromisoformat(best.date)
+    week_start = best_date - _dt.timedelta(days=best_date.weekday())
+    long_day_date = (week_start + _dt.timedelta(days=long_wd)).isoformat()
+    new_week = list(week)
+    best_idx = next(i for i, w in enumerate(new_week) if w.uid == best.uid)
+
+    if _wd(best) == long_wd:
+        if best.duration_min >= _LONG_RIDE_MIN:
+            return week
+        # Sur le bon jour mais trop courte : rallonger si le plafond le permet.
+        cap = _ctl_progression_cap(ctl_current, week_idx, min_ctl)
+        room = cap - sum(w.estimated_tss for w in week)
+        extra_min = int(room / max(_TSS_PER_MIN["endurance"], 1e-6))
+        new_min = min(_LONG_RIDE_MIN, best.duration_min + max(0, extra_min))
+        if new_min == best.duration_min:
+            return week
+        new_week[best_idx] = _rebuild_at_date(
+            best, best.date, week_idx, duration_min=new_min
+        )
+        adjustments.append(
+            f"{best.date} : sortie longue portée à {new_min} min (jour long)"
+        )
+        return new_week
+
+    long_day_session = next((w for w in week if _wd(w) == long_wd), None)
+    if long_day_session is not None and long_day_session.duration_min >= best.duration_min:
+        return week  # le jour long détient déjà la plus longue endurance
+
+    if long_day_session is not None:
+        # Échanger : la plus longue endurance prend le jour long, la séance qui
+        # l'occupait reprend la date de départ.
+        ls_idx = next(i for i, w in enumerate(new_week) if w.uid == long_day_session.uid)
+        new_week[best_idx] = _rebuild_at_date(best, long_day_date, week_idx)
+        new_week[ls_idx] = _rebuild_at_date(long_day_session, best.date, week_idx)
+        adjustments.append(
+            f"{best.date} ↔ {long_day_date} : sortie longue déplacée au jour long"
+        )
+    else:
+        new_week[best_idx] = _rebuild_at_date(best, long_day_date, week_idx)
+        adjustments.append(
+            f"{best.date} : sortie longue déplacée au "
+            f"{_WEEKDAY_BY_INDEX.get(long_wd, long_wd)}"
+        )
+
+    # Maintenant sur le jour long : rallonger vers 90 min si le plafond le permet.
+    placed = new_week[best_idx]
+    if placed.duration_min < _LONG_RIDE_MIN:
+        cap = _ctl_progression_cap(ctl_current, week_idx, min_ctl)
+        room = cap - sum(w.estimated_tss for w in new_week)
+        extra_min = int(room / max(_TSS_PER_MIN["endurance"], 1e-6))
+        new_min = min(_LONG_RIDE_MIN, placed.duration_min + max(0, extra_min))
+        if new_min > placed.duration_min:
+            new_week[best_idx] = _rebuild_at_date(
+                placed, placed.date, week_idx, duration_min=new_min
+            )
+            adjustments.append(
+                f"{placed.date} : sortie longue portée à {new_min} min (jour long)"
+            )
+    return new_week
+
+
 def _weeks_since_plan_start(date_iso: str, plan_start_iso: str) -> int:
     """Indice 0-based de la semaine d'une séance par rapport au début du plan."""
     start_year, start_week = _iso_week_key(plan_start_iso)
@@ -330,6 +461,7 @@ def validate_and_correct(
     target_event_type: str = "cyclosportive",
     total_weeks: int | None = None,
     min_ctl: float = 20.0,
+    plan_start_iso: str | None = None,
 ) -> tuple[list[Workout], list[str]]:
     """Applique les garde-fous au plan et retourne ``(plan_corrigé, ajustements)``.
 
@@ -344,6 +476,9 @@ def validate_and_correct(
             taper de la cadence d'intensité). ``None`` = inconnu (traité comme
             semaines de charge).
         min_ctl : plancher du plafond TSS hebdo (voir ``_ctl_progression_cap``).
+        plan_start_iso : début du plan (ISO) pour ancrer le ``week_idx`` — à
+            fournir quand on valide une seule semaine isolée (flux LLM), sinon
+            le week_idx repart à 0 et les plafonds de progression ne montent pas.
 
     Returns:
         Un tuple ``(plan, adjustments)`` où ``plan`` est l'ensemble corrigé et
@@ -357,7 +492,7 @@ def validate_and_correct(
 
     adjustments: list[str] = []
     by_week = _group_by_week(plan)
-    plan_start_iso = min(w.date for w in plan)
+    plan_start_iso = plan_start_iso or min(w.date for w in plan)
     flavor = _objective_flavor(target_event_type)
 
     corrected: list[Workout] = []
@@ -372,7 +507,10 @@ def validate_and_correct(
         week = _enforce_polarization(week, week_idx, adjustments)
         week = _enforce_tss_cap(week, week_idx, ctl_current, adjustments, min_ctl)
         week = _enforce_intensity_cadence(
-            week, week_idx, ctl_current, flavor, total_weeks, min_ctl, adjustments
+            week, week_idx, ctl_current, flavor, total_weeks, min_ctl, availability, adjustments
+        )
+        week = _enforce_long_ride(
+            week, week_idx, availability, flavor, total_weeks, ctl_current, min_ctl, adjustments
         )
         corrected.extend(week)
 
