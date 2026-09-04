@@ -57,7 +57,7 @@ from domestique_ai.api.routers import (
     roster as roster_router,
 )
 from domestique_ai.api.scheduler import start_scheduler, stop_scheduler
-from domestique_ai.config import REPO_ROOT, get_api_token, get_platform_db_path
+from domestique_ai.config import REPO_ROOT, get_api_token
 from domestique_ai.platform_db import init_platform_db
 
 _FRONTEND_DIST = REPO_ROOT / "frontend" / "dist"
@@ -224,7 +224,6 @@ def _extract_header(scope: Scope, name: bytes) -> str | None:
 app.add_middleware(
     BearerAuthMiddleware,
     token=get_api_token(),
-    platform_db_path=get_platform_db_path(),
 )
 app.add_middleware(RequestLoggingMiddleware)
 app.add_middleware(

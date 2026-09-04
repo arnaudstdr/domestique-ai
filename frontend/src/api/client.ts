@@ -5,6 +5,8 @@ import type {
   ActivitiesList,
   ActivityDetail,
   ActivityFilters,
+  ActivityStreams,
+  ActivityWeather,
   AthleteSummary,
   Availability,
   CoachMessage,
@@ -234,6 +236,8 @@ export const api = {
     },
     sportTypes: () => http<string[]>(`/api/activities/sport-types`),
     detail: (id: number) => http<ActivityDetail>(`/api/activities/${id}`),
+    streams: (id: number) => http<ActivityStreams>(`/api/activities/${id}/streams`),
+    weather: (id: number) => http<ActivityWeather>(`/api/activities/${id}/weather`),
     similar: (id: number, limit = 10) =>
       http<SimilarActivitiesResponse>(
         `/api/activities/${id}/similar?limit=${limit}`,

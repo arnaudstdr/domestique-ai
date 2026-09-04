@@ -49,7 +49,9 @@ def fetch_activities_from_db(
             "SELECT strava_id, garmin_id, date, duration, avg_heart_rate, max_heart_rate, "
             "avg_power, elevation_gain, distance, training_load, "
             "hr_z1_time, hr_z2_time, hr_z3_time, hr_z4_time, hr_z5_time, "
-            "sport_type, avg_temp, min_temp, max_temp, map_polyline "
+            "sport_type, avg_temp, min_temp, max_temp, map_polyline, "
+            "name, calories, max_power, cadence_avg, cadence_max, "
+            "speed_avg, speed_max, elevation_loss, start_lat, start_lng "
             "FROM activities ORDER BY date ASC"
         )
         rows = cursor.fetchall()
@@ -77,6 +79,16 @@ def fetch_activities_from_db(
             "min_temp": row[17],
             "max_temp": row[18],
             "map_polyline": row[19],
+            "name": row[20],
+            "calories": row[21],
+            "max_power": row[22],
+            "cadence_avg": row[23],
+            "cadence_max": row[24],
+            "speed_avg": row[25],
+            "speed_max": row[26],
+            "elevation_loss": row[27],
+            "start_lat": row[28],
+            "start_lng": row[29],
         }
         for row in rows
     ]

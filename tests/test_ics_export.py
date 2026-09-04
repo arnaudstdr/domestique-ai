@@ -281,7 +281,7 @@ def test_plan_to_ics_categories_include_kind():
 # ---------- Endpoint ---------------------------------------------------------
 
 
-def test_endpoint_returns_text_calendar(tmp_path, monkeypatch):
+def test_endpoint_returns_text_calendar(tmp_path, monkeypatch, api_auth_headers):
     """Smoke test : l'endpoint répond 200 avec un body iCalendar valide."""
     # On stocke un plan minimal en DB tmp pour pouvoir le récupérer ensuite.
     from fastapi.testclient import TestClient
@@ -302,7 +302,7 @@ def test_endpoint_returns_text_calendar(tmp_path, monkeypatch):
         sessions_per_week=4,
     )
 
-    client = TestClient(app)
+    client = TestClient(app, headers=api_auth_headers)
     response = client.get(f"/api/plan/{plan_id}/export.ics")
     assert response.status_code == 200
     assert response.headers["content-type"].startswith("text/calendar")
@@ -312,13 +312,13 @@ def test_endpoint_returns_text_calendar(tmp_path, monkeypatch):
     assert text.count("BEGIN:VEVENT") == 2
 
 
-def test_endpoint_returns_404_when_plan_missing(tmp_path, monkeypatch):
+def test_endpoint_returns_404_when_plan_missing(tmp_path, monkeypatch, api_auth_headers):
     from fastapi.testclient import TestClient
 
     from domestique_ai.api.main import app
 
     monkeypatch.setenv("DOMESTIQUE_AI_DB_PATH", str(tmp_path / "missing.db"))
-    client = TestClient(app)
+    client = TestClient(app, headers=api_auth_headers)
     response = client.get("/api/plan/9999/export.ics")
     assert response.status_code == 404
 

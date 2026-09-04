@@ -13,6 +13,8 @@ import { Bot } from "lucide-react";
 import { api, ApiError, streamCoachAnalyze } from "../api/client";
 import type {
   ActivityDetail as ActivityDetailType,
+  ActivityStreams as ActivityStreamsType,
+  ActivityWeather,
   SimilarActivitiesResponse,
 } from "../api/types";
 import ActivityMap from "../components/ActivityMap";
@@ -80,6 +82,8 @@ export default function ActivityDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
   const [detail, setDetail] = useState<ActivityDetailType | null>(null);
+  const [streams, setStreams] = useState<ActivityStreamsType | null>(null);
+  const [weather, setWeather] = useState<ActivityWeather | null>(null);
   const [similar, setSimilar] = useState<SimilarActivitiesResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [analyzing, setAnalyzing] = useState(false);
@@ -145,6 +149,8 @@ export default function ActivityDetail() {
     let aborted = false;
     setLoading(true);
     setSimilar(null);
+    setStreams(null);
+    setWeather(null);
     api.activities
       .detail(Number(id))
       .then((d) => {
@@ -166,6 +172,25 @@ export default function ActivityDetail() {
       .catch(() => {
         // Silencieux : l'absence de comparateur ne doit pas perturber la page.
       });
+    // Streams (courbes + carte) : fetch live Garmin côté serveur, cache 1 h.
+    // 404 silencieux (activités historiques Strava, Garmin injoignable).
+    api.activities
+      .streams(Number(id))
+      .then((s) => {
+        if (!aborted) setStreams(s);
+      })
+      .catch(() => {
+        // Silencieux : la page reste utilisable sans courbes.
+      });
+    // Météo au lieu/heure (best-effort côté serveur).
+    api.activities
+      .weather(Number(id))
+      .then((w) => {
+        if (!aborted && w.available) setWeather(w);
+      })
+      .catch(() => {
+        // Silencieux : la météo ne doit jamais perturber la page.
+      });
     return () => {
       aborted = true;
     };
@@ -186,7 +211,12 @@ export default function ActivityDetail() {
   }
 
   const a = detail.activity;
-  const s = detail.streams;
+  const s = streams ?? detail.streams;
+
+  const hasCadence =
+    a.cadence_avg != null || a.cadence_max != null;
+  const hasSpeed =
+    a.speed_avg_kmh != null || a.speed_max_kmh != null;
 
   return (
     <div className="stagger space-y-3">
@@ -219,9 +249,53 @@ export default function ActivityDetail() {
           value={a.avg_hr != null ? `${Math.round(a.avg_hr)} bpm` : "—"}
         />
         <MetricCard
+          label="FC max"
+          value={a.max_hr != null ? `${Math.round(a.max_hr)} bpm` : "—"}
+        />
+        <MetricCard
           label="Puissance"
           value={a.avg_power != null ? `${Math.round(a.avg_power)} W` : "—"}
+          hint={
+            a.max_power != null
+              ? `max ${Math.round(a.max_power)} W`
+              : undefined
+          }
         />
+        {hasSpeed && (
+          <MetricCard
+            label="Vitesse"
+            value={
+              a.speed_avg_kmh != null ? `${a.speed_avg_kmh.toFixed(1)} km/h` : "—"
+            }
+            hint={
+              a.speed_max_kmh != null
+                ? `max ${a.speed_max_kmh.toFixed(1)} km/h`
+                : undefined
+            }
+          />
+        )}
+        {hasCadence && (
+          <MetricCard
+            label="Cadence"
+            value={
+              a.cadence_avg != null ? `${Math.round(a.cadence_avg)}` : "—"
+            }
+            hint={
+              a.cadence_max != null
+                ? `max ${Math.round(a.cadence_max)}`
+                : undefined
+            }
+          />
+        )}
+        {a.elevation_loss != null && (
+          <MetricCard
+            label="D−"
+            value={`${Math.round(a.elevation_loss)} m`}
+          />
+        )}
+        {a.calories != null && (
+          <MetricCard label="Calories" value={`${Math.round(a.calories)} kcal`} />
+        )}
         {a.avg_temp != null && (
           <MetricCard
             label="Température"
@@ -234,6 +308,32 @@ export default function ActivityDetail() {
           />
         )}
       </div>
+
+      {weather && (
+        <div className="card text-sm">
+          <h3 className="label-eyebrow mb-2">Météo</h3>
+          <div className="flex flex-wrap gap-x-5 gap-y-1 text-muted">
+            <span>
+              <span className="text-gray-50">{weather.description ?? "—"}</span>
+              {weather.temp_c != null && ` · ${weather.temp_c.toFixed(1)} °C`}
+              {weather.apparent_temp_c != null &&
+                weather.apparent_temp_c !== weather.temp_c &&
+                ` (ressenti ${weather.apparent_temp_c.toFixed(1)} °C)`}
+            </span>
+            {weather.wind_compass && (
+              <span>
+                Vent {weather.wind_compass.toUpperCase()}
+                {weather.wind_direction_deg != null &&
+                  ` (${Math.round(weather.wind_direction_deg)}°)`}
+              </span>
+            )}
+            {weather.relative_humidity_pct != null && (
+              <span>Humidité {Math.round(weather.relative_humidity_pct)} %</span>
+            )}
+            {weather.station && <span>Station {weather.station}</span>}
+          </div>
+        </div>
+      )}
 
       {s.latlng && <ActivityMap latlng={s.latlng} />}
 
@@ -257,6 +357,13 @@ export default function ActivityDetail() {
         values={s.watts}
         color={CHART.accent}
         yKey="watts"
+      />
+      <StreamChart
+        title="Vitesse (km/h)"
+        time={s.time}
+        values={s.velocity_smooth?.map((v) => v * 3.6) ?? null}
+        color={CHART.ctl}
+        yKey="speed"
       />
       <StreamChart
         title="Température (°C)"

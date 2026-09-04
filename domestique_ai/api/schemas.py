@@ -133,6 +133,15 @@ class ActivitySummary(BaseModel):
     min_temp: float | None = None
     max_temp: float | None = None
     map_polyline: str | None = None
+    # Champs enrichis (payload liste Garmin, 09/2026) — NULL selon device/sport.
+    calories: float | None = None
+    max_power: float | None = None
+    cadence_avg: float | None = None
+    cadence_max: float | None = None
+    # Vitesses stockées en m/s en DB, exposées en km/h (arrondies 0.1).
+    speed_avg_kmh: float | None = None
+    speed_max_kmh: float | None = None
+    elevation_loss: float | None = None
     # Source d'ingestion : "strava" (lignes historiques, ingestion supprimée
     # en 09/2026) ou "garmin". Le champ ``external_id`` porte l'id externe de
     # la source (strava_id legacy ou garmin_id).
@@ -162,6 +171,25 @@ class ActivityDetail(BaseModel):
     activity: ActivitySummary
     streams: ActivityStreams
     hr_zones: dict[str, float] | None = None
+
+
+class ActivityWeather(BaseModel):
+    """Météo au lieu/heure d'une activité (endpoint Garmin ``/weather``).
+
+    ``available`` à ``False`` quand Garmin ne renvoie rien (activité indoor,
+    endpoint injoignable) — le front masque alors la carte.
+    """
+
+    available: bool = False
+    issue_date: str | None = None
+    temp_c: float | None = None
+    apparent_temp_c: float | None = None
+    dew_point_c: float | None = None
+    relative_humidity_pct: float | None = None
+    wind_direction_deg: float | None = None
+    wind_compass: str | None = None
+    description: str | None = None
+    station: str | None = None
 
 
 class SimilarActivityMatch(BaseModel):

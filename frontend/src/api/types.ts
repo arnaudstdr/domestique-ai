@@ -155,6 +155,14 @@ export interface ActivitySummary {
   min_temp: number | null;
   max_temp: number | null;
   map_polyline: string | null;
+  calories: number | null;
+  max_power: number | null;
+  cadence_avg: number | null;
+  cadence_max: number | null;
+  speed_avg_kmh: number | null;
+  speed_max_kmh: number | null;
+  elevation_loss: number | null;
+  source: string;
 }
 
 export interface ActivitiesList {
@@ -195,6 +203,19 @@ export interface ActivityDetail {
   activity: ActivitySummary;
   streams: ActivityStreams;
   hr_zones: Record<string, number> | null;
+}
+
+export interface ActivityWeather {
+  available: boolean;
+  issue_date: string | null;
+  temp_c: number | null;
+  apparent_temp_c: number | null;
+  dew_point_c: number | null;
+  relative_humidity_pct: number | null;
+  wind_direction_deg: number | null;
+  wind_compass: string | null;
+  description: string | null;
+  station: string | null;
 }
 
 export interface MorningEntry {

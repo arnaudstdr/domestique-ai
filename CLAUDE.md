@@ -107,7 +107,14 @@ Chaque activité est ventilée en 5 zones %HRR (Karvonen) — colonnes `hr_z1_ti
 - Les pauses d'enregistrement (saut > 5 s entre deux samples) ne sont pas comptabilisées (constante `_HR_ZONE_PAUSE_GAP_SEC`).
 - Convention DB : `NULL` = non calculé ; `0.0` = calculé mais aucune seconde dans cette zone.
 
-À l'ingestion (`sync_activities_garmin`), si `STRAVA_HR_REST` + `STRAVA_HR_MAX` sont configurés, un appel `get_activity_details` est fait par activité avec `avg_heart_rate` non null, et les séries HR/temps sont extraites par `parse_details_streams()` (parsing défensif, deux orientations de payload gérées). Les activités dont les détails sont indisponibles restent à `NULL` et ne sont pas rattrapées automatiquement.
+À l'ingestion (`sync_activities_garmin`), si `STRAVA_HR_REST` + `STRAVA_HR_MAX` sont configurés, un appel `get_activity_details` est fait par activité avec `avg_heart_rate` non null, et les séries HR/temps sont extraites par `parse_details_streams()` (parsing défensif, trois orientations de payload gérées : moderne `metricDescriptors` + `activityDetailMetrics` — shape réelle observée 09/2026 —, et legacy `metricsEntries` par métrique ou par échantillon). Les lignes restées à `NULL` (parsing cassé avant la correction 09/2026) sont **rattrapées par le backfill one-off** (voir « Ingestion Garmin Connect »).
+
+### Champs enrichis + streams + météo Garmin (09/2026)
+
+- **Champs enrichis** : au sync, le payload liste Garmin fournit aussi `activityName`, `calories`, `maxPower`, cadence moy/max (unités hétérogènes bike rpm / run pas-min stockées telles quelles), vitesse moy/max (m/s), `elevationLoss`, point de départ (`start_lat`/`start_lng` — pave une future résolution Haversine du comparateur). Colonnes dédiées (`name`, `calories`, `max_power`, `cadence_avg`, `cadence_max`, `speed_avg`, `speed_max`, `elevation_loss`, `start_lat`, `start_lng`), migrées par `_ensure_column`.
+- **Streams** : `GET /api/activities/{external_id}/streams` → fetch live `get_activity_details(id, maxpoly=1000)`, parsing `parse_details_series()` (HR, temps, temp, **power, altitude, speed, distance, latlng**), cache mémoire 1 h (pattern ex-Strava — les streams ne sont PAS persistés en DB). Activités Strava legacy → 404 explicite. Sert les courbes + la carte de la page détail.
+- **Météo** : `GET /api/activities/{external_id}/weather` → `get_activity_weather` Garmin (temp/apparent/dew point **en °F, convertis °C** par `parse_activity_weather()`, humidité, vent, descriptif, station METAR). Best-effort : erreur Garmin → `available: false`, jamais de 5xx.
+- **Backfill one-off** : `backfill_garmin_fields()` re-fetch la liste sur la fenêtre des lignes Garmin en base et `UPDATE` les champs enrichis ; pour les activités avec GPS, un appel détails récupère en plus le tracé (`geoPolylineDTO.polyline` → downsample ≤ 300 pts → **polyline encodée Google** via `encode_polyline()`, consommée par `RoutePreview` sur les cartes de liste) et rattrape zones HR + temp des lignes encore à `NULL`. Déclenché automatiquement au premier sync après déploiement — flag `garmin_fields_backfill_done` dans la table `sync_meta` (posé seulement en cas de succès, retry au sync suivant sinon). Jamais bloquant pour la sync.
 
 ### Température météo (avg/min/max par activité)
 
@@ -124,7 +131,6 @@ Les activités sont ingérées depuis l'**API non officielle Garmin Connect** (m
 - **Connexion** : seed interactif une fois (`python -m domestique_ai.export.garmin_connect`, MFA inclus) — le cache token `data/.garmin_tokens` est **global** (compte du propriétaire bootstrap). Credentials `GARMIN_EMAIL`/`GARMIN_PASSWORD` dans le `.env`.
 - **Endpoints** : `POST /api/garmin/sync` (sync manuel en tâche de fond), `GET /api/garmin/sync-status`, `GET /api/garmin/status` (état de connexion).
 - **Sync incrémentale** : la fenêtre par défaut démarre 1 j avant la dernière activité Garmin connue (ou 3 ans d'historique au 1er sync). Mapping `typeKey` Garmin → `sport_type` (nomenclature historique type Strava, `_SPORT_MAP`) pour conserver les buckets indoor/outdoor du comparateur.
-- **Parsing défensif** : les payloads de détails (`get_activity_details`) changent d'orientation — `parse_details_streams()` gère les deux (une entrée par métrique vs une entrée par échantillon) et logge le payload brut en cas d'échec pour adaptation rapide.
 - **⚠️ Endpoints non officiels** : peuvent changer sans préavis.
 
 ### Auto-sync Garmin (scheduler APScheduler)

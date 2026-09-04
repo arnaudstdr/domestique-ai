@@ -174,8 +174,10 @@ def get_activity_details(external_id: int, *, ctx: AthleteContext | None = None)
     """Détail complet d'une activité identifiée par son id externe.
 
     Inclut la température (``avg_temp`` / ``min_temp`` / ``max_temp`` en °C)
-    quand le stream était disponible à l'ingestion. Utile pour expliquer une
-    dérive HR par la chaleur ou justifier un effort ressenti élevé.
+    quand le stream était disponible à l'ingestion, plus les champs enrichis
+    du payload liste Garmin (kcal, cadence, vitesse, D−, puissance max).
+    Utile pour expliquer une dérive HR par la chaleur ou justifier un effort
+    ressenti élevé.
     """
     import sqlite3
 
@@ -188,7 +190,9 @@ def get_activity_details(external_id: int, *, ctx: AthleteContext | None = None)
             "SELECT coalesce(strava_id, garmin_id), date, duration, avg_heart_rate, "
             "max_heart_rate, avg_power, elevation_gain, distance, training_load, "
             "hr_z1_time, hr_z2_time, hr_z3_time, hr_z4_time, hr_z5_time, "
-            "avg_temp, min_temp, max_temp "
+            "avg_temp, min_temp, max_temp, "
+            "name, calories, max_power, cadence_avg, cadence_max, "
+            "speed_avg, speed_max, elevation_loss "
             "FROM activities WHERE strava_id = ? OR garmin_id = ?",
             (external_id, external_id),
         )
@@ -197,21 +201,31 @@ def get_activity_details(external_id: int, *, ctx: AthleteContext | None = None)
         conn.close()
     if not row:
         return {"available": False, "external_id": external_id}
+    speed_avg = row[22]
+    speed_max = row[23]
     return {
         "available": True,
         "external_id": row[0],
+        "name": row[17],
         "date": row[1],
         "duration_sec": row[2],
         "avg_heart_rate": row[3],
         "max_heart_rate": row[4],
         "avg_power": row[5],
+        "max_power": row[19],
         "elevation_m": row[6],
+        "elevation_loss_m": row[24],
         "distance_km": round((row[7] or 0) / 1000, 2),
         "training_load": row[8],
         "hr_zones_sec": {HR_ZONE_KEYS[i]: row[9 + i] for i in range(5)},
         "avg_temp_c": row[14],
         "min_temp_c": row[15],
         "max_temp_c": row[16],
+        "calories_kcal": row[18],
+        "cadence_avg": row[20],
+        "cadence_max": row[21],
+        "speed_avg_kmh": round(speed_avg * 3.6, 1) if speed_avg is not None else None,
+        "speed_max_kmh": round(speed_max * 3.6, 1) if speed_max is not None else None,
     }
 
 

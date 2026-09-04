@@ -12,7 +12,11 @@ from domestique_ai.ingestion.db import init_db
 
 
 @pytest.fixture()
-def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[TestClient]:
+def client(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    api_auth_headers: dict[str, str],
+) -> Iterator[TestClient]:
     db = tmp_path / "avail_test.db"
     monkeypatch.setenv("DOMESTIQUE_AI_DB_PATH", str(db))
     monkeypatch.setenv("DOMESTIQUE_AI_AVAILABILITY_PATH", str(tmp_path / "avail.yaml"))
@@ -20,7 +24,7 @@ def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[TestClie
 
     from domestique_ai.api.main import app
 
-    with TestClient(app) as c:
+    with TestClient(app, headers=api_auth_headers) as c:
         yield c
 
 

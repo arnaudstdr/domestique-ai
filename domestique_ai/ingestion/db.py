@@ -56,7 +56,17 @@ def init_db(db_path: Path | None = None, *, ctx: AthleteContext | None = None) -
                 avg_temp REAL,
                 min_temp REAL,
                 max_temp REAL,
-                map_polyline TEXT
+                map_polyline TEXT,
+                name TEXT,
+                calories REAL,
+                max_power REAL,
+                cadence_avg REAL,
+                cadence_max REAL,
+                speed_avg REAL,
+                speed_max REAL,
+                elevation_loss REAL,
+                start_lat REAL,
+                start_lng REAL
             )
         """)
         _ensure_column(conn, "activities", "max_heart_rate", "REAL")
@@ -69,9 +79,31 @@ def init_db(db_path: Path | None = None, *, ctx: AthleteContext | None = None) -
         # Source Garmin Connect (source d'ingestion courante) : les lignes
         # Garmin ont strava_id NULL et garmin_id renseigné.
         _ensure_column(conn, "activities", "garmin_id", "INTEGER")
+        # Champs enrichis (payload liste Garmin 09/2026) : parsing défensif —
+        # absents selon device/sport, donc tous nullable.
+        for col, ddl in (
+            ("name", "TEXT"),
+            ("calories", "REAL"),
+            ("max_power", "REAL"),
+            ("cadence_avg", "REAL"),
+            ("cadence_max", "REAL"),
+            ("speed_avg", "REAL"),
+            ("speed_max", "REAL"),
+            ("elevation_loss", "REAL"),
+            ("start_lat", "REAL"),
+            ("start_lng", "REAL"),
+        ):
+            _ensure_column(conn, "activities", col, ddl)
         conn.execute(
             "CREATE UNIQUE INDEX IF NOT EXISTS idx_activities_garmin_id "
             "ON activities(garmin_id) WHERE garmin_id IS NOT NULL"
+        )
+        # Normalisation des sport_type hérités d'un mappage Garmin antérieur
+        # (typeKey "road_biking" non mappé → fallback "RoadBiking"). Idempotent,
+        # no-op une fois la base corrigée — pas de flag sync_meta nécessaire.
+        conn.execute(
+            "UPDATE activities SET sport_type = 'Ride' "
+            "WHERE sport_type = 'RoadBiking'"
         )
         conn.execute("""
             CREATE TABLE IF NOT EXISTS conversations (
@@ -170,6 +202,12 @@ def init_db(db_path: Path | None = None, *, ctx: AthleteContext | None = None) -
                 PRIMARY KEY (date, objective_hash, tsb_rounded)
             )
         """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS sync_meta (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL
+            )
+        """)
         conn.commit()
     finally:
         conn.close()
@@ -192,3 +230,29 @@ def summarize_temp_stream(
         return None
     avg = round(sum(clean) / len(clean), 1)
     return avg, round(min(clean), 1), round(max(clean), 1)
+
+
+def get_sync_meta(key: str, db_path: Path | None = None) -> str | None:
+    """Lit une valeur de la table ``sync_meta`` (flags de maintenance one-off)."""
+    path = Path(db_path) if db_path else get_db_path()
+    conn = sqlite3.connect(path)
+    try:
+        row = conn.execute("SELECT value FROM sync_meta WHERE key = ?", (key,)).fetchone()
+    finally:
+        conn.close()
+    return row[0] if row else None
+
+
+def set_sync_meta(key: str, value: str, db_path: Path | None = None) -> None:
+    """Écrit (upsert) une valeur dans ``sync_meta``."""
+    path = Path(db_path) if db_path else get_db_path()
+    conn = sqlite3.connect(path)
+    try:
+        conn.execute(
+            "INSERT INTO sync_meta (key, value) VALUES (?, ?) "
+            "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            (key, value),
+        )
+        conn.commit()
+    finally:
+        conn.close()

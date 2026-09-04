@@ -19,3 +19,20 @@ def _isolate_platform_db(tmp_path, monkeypatch):
     from domestique_ai.platform_db import init_platform_db
 
     init_platform_db()
+
+
+@pytest.fixture()
+def api_auth_headers() -> dict[str, str]:
+    """Header Bearer pour les tests qui montent le vrai ``app``.
+
+    ``main.py`` active ``BearerAuthMiddleware`` dès que ``DOMESTIQUE_AI_API_TOKEN``
+    est renseigné (config chargée depuis ``.env``). On renvoie un header construit
+    depuis le token de l'environnement ; en auth-off (token absent), ``{}``
+    (le middleware est désactivé, aucune entête nécessaire).
+    """
+    from domestique_ai.config import get_api_token
+
+    token = get_api_token()
+    if not token:
+        return {}
+    return {"Authorization": f"Bearer {token}"}

@@ -161,9 +161,7 @@ def test_garmin_auto_sync_job_triggers_bootstrap(monkeypatch):
 
     users = [{"public_id": "owner", "is_bootstrap": True, "role": "coach"}]
     monkeypatch.setattr(platform_db, "list_users", lambda path=None: users)
-    monkeypatch.setattr(
-        platform_db, "get_or_create_bootstrap_coach", lambda: users[0]
-    )
+    monkeypatch.setattr(platform_db, "get_or_create_bootstrap_coach", lambda: users[0])
 
     ctx = AthleteContext(
         db_path=Path("/tmp/owner.db"),
@@ -180,12 +178,8 @@ def test_garmin_auto_sync_job_triggers_bootstrap(monkeypatch):
 
     # Cache token Garmin présent (dossier temporaire vide suffit : on mocke).
     with tempfile.TemporaryDirectory() as td:
-        monkeypatch.setattr(
-            domestique_ai.config, "get_garmin_token_dir", lambda: Path(td)
-        )
-        monkeypatch.setattr(
-            "domestique_ai.export.garmin_connect.token_cache_present", lambda: True
-        )
+        monkeypatch.setattr(domestique_ai.config, "get_garmin_token_dir", lambda: Path(td))
+        monkeypatch.setattr("domestique_ai.export.garmin_connect.token_cache_present", lambda: True)
         seen: list[str] = []
 
         def fake_trigger(ctx_, key) -> bool:

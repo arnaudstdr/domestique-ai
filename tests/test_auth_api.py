@@ -45,7 +45,11 @@ def client() -> Iterator[TestClient]:
 
 
 @pytest.fixture()
-def client_auth_off() -> Iterator[TestClient]:
+def client_auth_off(monkeypatch: pytest.MonkeyPatch) -> Iterator[TestClient]:
+    # Le mode auth-off doit vraiment être dépourvu de token : sinon le .env du
+    # dev (DOMESTIQUE_AI_API_TOKEN renseigné) fait tomber get_current_user sur
+    # un 401 au lieu du fallback bootstrap coach.
+    monkeypatch.delenv("DOMESTIQUE_AI_API_TOKEN", raising=False)
     with TestClient(_make_app(None)) as c:
         yield c
 
