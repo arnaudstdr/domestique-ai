@@ -180,9 +180,17 @@ Le job ping est indépendant du job sync — on peut activer l'un sans l'autre (
 ### Google Health API — données bracelet (Fitbit / Pixel Watch)
 
 L'intégration lit les métriques de récupération depuis la **Google Health API**
-(successeur cloud de la Fitbit Web API). Elle alimente automatiquement la
-rubrique « Matin » : HRV, FC repos, sommeil + stades, SpO2, fréquence
-respiratoire, température cutanée, pas et calories actives.
+(successeur cloud de la Fitbit Web API). Elle alimente automatiquement la page
+« Santé » (anciennement « Matin », route `/sante`) : HRV, FC repos, sommeil +
+stades, SpO2, fréquence respiratoire, température cutanée, pas et calories
+actives.
+
+> **Nommage UI vs domaine** : dans l'interface, la page s'appelle « Santé »
+> (route `/sante`, composant `frontend/src/pages/Morning.tsx`, onglet `HeartPulse`
+> dans `BottomNav`). Le **backend et le domaine restent nommés `morning`** —
+> `/api/morning`, `api/routers/morning.py`, schémas `Morning*`, client TS
+> `api.morning` — volontairement non renommés (gros refactor sans valeur
+> utilisateur). Ne pas « aligner » le backend sur le nom UI sans accord.
 
 Deux scores sont recalculés localement :
 
@@ -219,7 +227,7 @@ DOMESTIQUE_AI_GOOGLE_HEALTH_AUTO_SYNC_MINUTES=360
    - `googlehealth.sleep.readonly`
 4. Créer des credentials OAuth 2.0 de type **Web application** avec les
    redirect URIs autorisés (localhost + production).
-5. Lancer le flow depuis la page `/matin` ou via
+5. Lancer le flow depuis la page `/sante` ou via
    `GET /api/google-health/auth`.
 6. Soumettre à la **review de vérification Google** pour les scopes restreints.
    En attendant, ajouter ton compte comme test user pour développer.

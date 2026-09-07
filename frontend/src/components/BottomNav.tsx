@@ -4,9 +4,9 @@ import {
   Bot,
   ClipboardList,
   Dumbbell,
+  HeartPulse,
   LayoutDashboard,
   LineChart,
-  Sunrise,
   type LucideIcon,
 } from "lucide-react";
 
@@ -15,7 +15,7 @@ type NavItem = { to: string; label: string; Icon: LucideIcon };
 const ITEMS: NavItem[] = [
   { to: "/", label: "Dashboard", Icon: LayoutDashboard },
   { to: "/activites", label: "Activités", Icon: Bike },
-  { to: "/matin", label: "Matin", Icon: Sunrise },
+  { to: "/sante", label: "Santé", Icon: HeartPulse },
   { to: "/plan", label: "Plan", Icon: ClipboardList },
   { to: "/coach", label: "Coach", Icon: Bot },
 ];

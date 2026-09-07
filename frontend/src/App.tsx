@@ -1,4 +1,4 @@
-import { Link, Route, Routes, useNavigate } from "react-router-dom";
+import { Link, Navigate, Route, Routes, useNavigate } from "react-router-dom";
 import { Eye, Settings, Users, X } from "lucide-react";
 import BottomNav from "./components/BottomNav";
 import Dashboard from "./pages/Dashboard";
@@ -106,7 +106,8 @@ function AuthenticatedLayout() {
           <Route path="/" element={<Dashboard />} />
           <Route path="/activites" element={<Activities />} />
           <Route path="/activites/:id" element={<ActivityDetail />} />
-          <Route path="/matin" element={<Morning />} />
+          <Route path="/sante" element={<Morning />} />
+          <Route path="/matin" element={<Navigate to="/sante" replace />} />
           <Route path="/coach" element={<Coach />} />
           <Route path="/plan" element={<Plan />} />
           <Route path="/tendances" element={<Tendances />} />
