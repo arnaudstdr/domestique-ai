@@ -233,6 +233,7 @@ export interface MorningEntry {
   sleep_rem_min: number | null;
   sleep_light_min: number | null;
   sleep_awake_min: number | null;
+  sleep_stages_json: string | null;
   steps: number | null;
   active_calories: number | null;
   readiness_score: number | null;

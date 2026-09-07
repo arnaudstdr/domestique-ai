@@ -257,6 +257,7 @@ class MorningEntry(BaseModel):
     sleep_rem_min: int | None = None
     sleep_light_min: int | None = None
     sleep_awake_min: int | None = None
+    sleep_stages_json: str | None = None
     steps: int | None = None
     active_calories: int | None = None
     readiness_score: int | None = None
@@ -307,6 +308,7 @@ class MorningSubmit(BaseModel):
     sleep_rem_min: int | None = None
     sleep_light_min: int | None = None
     sleep_awake_min: int | None = None
+    sleep_stages_json: str | None = None
     steps: int | None = None
     active_calories: int | None = None
     readiness_score: int | None = None

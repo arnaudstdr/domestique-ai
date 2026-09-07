@@ -1,6 +1,9 @@
 import { useEffect, useState } from "react";
 import {
+  Bar,
+  BarChart,
   CartesianGrid,
+  Legend,
   Line,
   LineChart,
   ResponsiveContainer,
@@ -10,6 +13,7 @@ import {
 } from "recharts";
 import {
   Activity,
+  BedDouble,
   RefreshCw,
   Save,
   Sunrise,
@@ -22,7 +26,7 @@ import type {
   GoogleHealthStatusResponse,
 } from "../api/types";
 import MetricCard from "../components/MetricCard";
-import { CHART, axisProps, tooltipStyle } from "../chartTheme";
+import { CHART, axisProps, legendStyle, tooltipStyle } from "../chartTheme";
 import { useToast } from "../hooks/useToast";
 
 const MANUAL_METRICS: {
@@ -338,6 +342,10 @@ export default function Morning() {
             </div>
           )}
 
+          {latestEntry && <SleepHypnogram entry={latestEntry} />}
+
+          <SleepStackedChart history={data.history} />
+
           <h3 className="label-eyebrow">Tendances 90 j</h3>
           <div className="grid grid-cols-2 gap-3">
             {MANUAL_METRICS.slice(0, 4).map((m) => {
@@ -477,6 +485,223 @@ function MorningChart({
               dot={false}
             />
           </LineChart>
+        </ResponsiveContainer>
+      </div>
+    </div>
+  );
+}
+
+interface SleepStagePoint {
+  start: string;
+  end: string;
+  type: string;
+}
+
+const HYPNO_COLORS: Record<string, string> = {
+  DEEP: "#818cf8",
+  "DEEP_SLEEP": "#818cf8",
+  REM: "#34d399",
+  "REM_SLEEP": "#34d399",
+  LIGHT: "#fbbf24",
+  ASLEEP: "#fbbf24",
+  AWAKE: "#f87171",
+  "AWAKE_SLEEP": "#f87171",
+  WAKE: "#f87171",
+};
+const HYPNO_FALLBACK_COLOR = "#6b7280";
+const HYPNO_STAGE_LABELS: Record<string, string> = {
+  DEEP: "Deep",
+  "DEEP_SLEEP": "Deep",
+  REM: "REM",
+  "REM_SLEEP": "REM",
+  LIGHT: "Light",
+  ASLEEP: "Light",
+  AWAKE: "Éveillé",
+  "AWAKE_SLEEP": "Éveillé",
+  WAKE: "Éveillé",
+};
+
+function parseSleepStages(entry: MorningEntry): SleepStagePoint[] | null {
+  if (!entry.sleep_stages_json) return null;
+  try {
+    const parsed = JSON.parse(entry.sleep_stages_json) as SleepStagePoint[];
+    if (!Array.isArray(parsed) || parsed.length === 0) return null;
+    const valid = parsed.filter(
+      (s) =>
+        s &&
+        typeof s.start === "string" &&
+        typeof s.end === "string" &&
+        !Number.isNaN(Date.parse(s.start)) &&
+        !Number.isNaN(Date.parse(s.end)),
+    );
+    return valid.length > 0 ? valid : null;
+  } catch {
+    return null;
+  }
+}
+
+function formatClock(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "—";
+  return d.toLocaleTimeString("fr-FR", {
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  });
+}
+
+function SleepHypnogram({ entry }: { entry: MorningEntry }) {
+  const stages = parseSleepStages(entry);
+  if (!stages) {
+    return (
+      <div className="card">
+        <h4 className="label-eyebrow mb-1 flex items-center gap-2">
+          <BedDouble className="h-4 w-4 text-accent" strokeWidth={1.75} />
+          Hypnogramme (dernière nuit)
+        </h4>
+        <p className="text-sm text-muted">
+          Données de stades horodatées non disponibles pour cette nuit
+          (saisie manuelle ou nuit non re-synchronisée).
+        </p>
+      </div>
+    );
+  }
+
+  const t0 = new Date(stages[0].start).getTime();
+  const tEnd = new Date(stages[stages.length - 1].end).getTime();
+  const totalMs = Math.max(1, tEnd - t0);
+
+  const ticks: { time: string; posPct: number }[] = [];
+  const tickStepMs = 2 * 60 * 60 * 1000;
+  for (let t = t0; t <= tEnd; t += tickStepMs) {
+    ticks.push({
+      time: formatClock(new Date(t).toISOString()),
+      posPct: ((t - t0) / totalMs) * 100,
+    });
+  }
+
+  return (
+    <div className="card space-y-2">
+      <h4 className="label-eyebrow flex items-center gap-2">
+        <BedDouble className="h-4 w-4 text-accent" strokeWidth={1.75} />
+        Hypnogramme (dernière nuit)
+      </h4>
+      <div className="relative">
+        <div className="flex h-14 w-full overflow-hidden rounded-lg bg-white/[0.03]">
+          {stages.map((s, i) => {
+            const startMs = new Date(s.start).getTime();
+            const endMs = new Date(s.end).getTime();
+            const durPct = Math.max(0.4, ((endMs - startMs) / totalMs) * 100);
+            const color = HYPNO_COLORS[s.type] ?? HYPNO_FALLBACK_COLOR;
+            const label = HYPNO_STAGE_LABELS[s.type] ?? s.type;
+            const durMin = Math.round((endMs - startMs) / 60000);
+            return (
+              <div
+                key={i}
+                title={`${label} · ${formatClock(s.start)} → ${formatClock(s.end)} (${formatMin(durMin)})`}
+                className="h-full border-r border-black/30 first:rounded-l-lg last:rounded-r-lg"
+                style={{ width: `${durPct}%`, backgroundColor: color }}
+              />
+            );
+          })}
+        </div>
+        <div className="relative mt-1 h-4">
+          {ticks.map((tk, i) => (
+            <span
+              key={i}
+              className="absolute -translate-x-1/2 text-[10px] text-muted"
+              style={{ left: `${tk.posPct}%` }}
+            >
+              {tk.time}
+            </span>
+          ))}
+        </div>
+      </div>
+      <div className="flex flex-wrap gap-3 text-xs text-muted">
+        {(["DEEP", "REM", "LIGHT", "AWAKE"] as const).map((k) => (
+          <span key={k} className="inline-flex items-center gap-1.5">
+            <span className="inline-block h-2 w-2 rounded-full" style={{ backgroundColor: HYPNO_COLORS[k] }} />
+            {HYPNO_STAGE_LABELS[k]}
+          </span>
+        ))}
+        <span className="inline-flex items-center gap-1.5">
+          <span className="inline-block h-2 w-2 rounded-full" style={{ backgroundColor: HYPNO_FALLBACK_COLOR }} />
+          Autre
+        </span>
+      </div>
+    </div>
+  );
+}
+
+function SleepStackTooltip({
+  active,
+  payload,
+  label,
+}: {
+  active?: boolean;
+  payload?: { dataKey: string; value: number; color: string }[];
+  label?: string;
+}) {
+  if (!active || !payload || payload.length === 0) return null;
+  const total = payload.reduce((acc, p) => acc + (p.value || 0), 0);
+  return (
+    <div style={tooltipStyle}>
+      <div className="mb-1 font-medium">{label}</div>
+      {payload.map((p) => (
+        <div key={p.dataKey} className="flex items-center justify-between gap-4">
+          <span className="inline-flex items-center gap-1.5">
+            <span className="inline-block h-2 w-2 rounded-full" style={{ backgroundColor: p.color }} />
+            {p.dataKey}
+          </span>
+          <span>{formatMin(p.value || 0)}</span>
+        </div>
+      ))}
+      <div className="mt-1 flex items-center justify-between gap-4 border-t border-white/10 pt-1 font-medium">
+        <span>Total</span>
+        <span>{formatMin(total)}</span>
+      </div>
+    </div>
+  );
+}
+
+function SleepStackedChart({ history }: { history: MorningEntry[] }) {
+  const chartData = history
+    .filter((e) => hasSleepStages(e))
+    .map((e) => ({
+      date: e.date,
+      Deep: e.sleep_deep_min ?? 0,
+      REM: e.sleep_rem_min ?? 0,
+      Light: e.sleep_light_min ?? 0,
+      Awake: e.sleep_awake_min ?? 0,
+    }));
+  if (chartData.length === 0) return null;
+  return (
+    <div className="card">
+      <h4 className="label-eyebrow mb-2">Répartition des stades — 90 j</h4>
+      <div className="h-40">
+        <ResponsiveContainer width="100%" height="100%">
+          <BarChart data={chartData} margin={{ top: 4, right: 8, left: -16, bottom: 0 }}>
+            <CartesianGrid stroke={CHART.grid} strokeDasharray="3 3" />
+            <XAxis
+              dataKey="date"
+              tickFormatter={(d) => (d as string).slice(5)}
+              minTickGap={24}
+              {...axisProps}
+            />
+            <YAxis {...axisProps} />
+            <Tooltip content={<SleepStackTooltip />} />
+            <Legend wrapperStyle={legendStyle} />
+            {SLEEP_STAGES.map((s) => (
+              <Bar
+                key={s.key}
+                dataKey={s.label}
+                stackId="sleep"
+                fill={s.color}
+                stroke="none"
+                isAnimationActive={false}
+              />
+            ))}
+          </BarChart>
         </ResponsiveContainer>
       </div>
     </div>

@@ -14,6 +14,7 @@ hausse, etc.) — signaux classiques de surentraînement.
 from __future__ import annotations
 
 import datetime as dt
+import json
 import sqlite3
 import statistics
 from pathlib import Path
@@ -73,6 +74,7 @@ def save_morning_entry(
     sleep_rem_min: int | None = None,
     sleep_light_min: int | None = None,
     sleep_awake_min: int | None = None,
+    sleep_stages: list[dict[str, Any]] | None = None,
     steps: int | None = None,
     active_calories: int | None = None,
     readiness_score: int | None = None,
@@ -103,8 +105,9 @@ def save_morning_entry(
         readiness_score,
         sleep_score_computed,
     )
-    if all(v is None for v in (*metric_values, notes)):
+    if all(v is None for v in (*metric_values, notes, sleep_stages)):
         return False
+    sleep_stages_json = json.dumps(sleep_stages, ensure_ascii=False) if sleep_stages else None
     path = Path(db_path) if db_path else get_db_path()
     init_db(path)
     conn = sqlite3.connect(path)
@@ -113,9 +116,9 @@ def save_morning_entry(
             "INSERT INTO morning_metrics (date, hrv_ms, resting_hr, "
             "sleep_hours, sleep_score, stress_score, notes, spo2_avg_pct, "
             "respiratory_rate_avg_bpm, skin_temp_delta_c, sleep_deep_min, "
-            "sleep_rem_min, sleep_light_min, sleep_awake_min, steps, "
-            "active_calories, readiness_score, sleep_score_computed) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+            "sleep_rem_min, sleep_light_min, sleep_awake_min, sleep_stages_json, "
+            "steps, active_calories, readiness_score, sleep_score_computed) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
             "ON CONFLICT(date) DO UPDATE SET "
             "hrv_ms = excluded.hrv_ms, "
             "resting_hr = excluded.resting_hr, "
@@ -130,6 +133,7 @@ def save_morning_entry(
             "sleep_rem_min = excluded.sleep_rem_min, "
             "sleep_light_min = excluded.sleep_light_min, "
             "sleep_awake_min = excluded.sleep_awake_min, "
+            "sleep_stages_json = excluded.sleep_stages_json, "
             "steps = excluded.steps, "
             "active_calories = excluded.active_calories, "
             "readiness_score = excluded.readiness_score, "
@@ -149,6 +153,7 @@ def save_morning_entry(
                 sleep_rem_min,
                 sleep_light_min,
                 sleep_awake_min,
+                sleep_stages_json,
                 steps,
                 active_calories,
                 readiness_score,
@@ -174,8 +179,8 @@ def fetch_morning_entry(
             "SELECT date, hrv_ms, resting_hr, sleep_hours, sleep_score, "
             "stress_score, notes, spo2_avg_pct, respiratory_rate_avg_bpm, "
             "skin_temp_delta_c, sleep_deep_min, sleep_rem_min, sleep_light_min, "
-            "sleep_awake_min, steps, active_calories, readiness_score, "
-            "sleep_score_computed "
+            "sleep_awake_min, sleep_stages_json, steps, active_calories, "
+            "readiness_score, sleep_score_computed "
             "FROM morning_metrics WHERE date = ?",
             (date,),
         ).fetchone()
@@ -203,8 +208,8 @@ def fetch_morning_history(
             "SELECT date, hrv_ms, resting_hr, sleep_hours, sleep_score, "
             "stress_score, notes, spo2_avg_pct, respiratory_rate_avg_bpm, "
             "skin_temp_delta_c, sleep_deep_min, sleep_rem_min, sleep_light_min, "
-            "sleep_awake_min, steps, active_calories, readiness_score, "
-            "sleep_score_computed "
+            "sleep_awake_min, sleep_stages_json, steps, active_calories, "
+            "readiness_score, sleep_score_computed "
             "FROM morning_metrics ORDER BY date ASC"
         ).fetchall()
     finally:
@@ -311,10 +316,11 @@ def _row_to_dict(row: tuple) -> dict[str, Any]:
         "sleep_rem_min": row[11],
         "sleep_light_min": row[12],
         "sleep_awake_min": row[13],
-        "steps": row[14],
-        "active_calories": row[15],
-        "readiness_score": row[16],
-        "sleep_score_computed": row[17],
+        "sleep_stages_json": row[14],
+        "steps": row[15],
+        "active_calories": row[16],
+        "readiness_score": row[17],
+        "sleep_score_computed": row[18],
     }
 
 

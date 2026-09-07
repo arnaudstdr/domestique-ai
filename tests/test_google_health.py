@@ -197,6 +197,28 @@ def test_fetch_morning_data_maps_values(client: GoogleHealthClient):
     assert day["sleep_rem_min"] == 120
     assert day["sleep_light_min"] == 240
     assert day["sleep_awake_min"] == 30
+    assert day["sleep_stages"] == [
+        {
+            "start": "2026-05-10T22:00:00+00:00",
+            "end": "2026-05-10T23:30:00+00:00",
+            "type": "DEEP",
+        },
+        {
+            "start": "2026-05-10T23:30:00+00:00",
+            "end": "2026-05-11T01:30:00+00:00",
+            "type": "REM",
+        },
+        {
+            "start": "2026-05-11T01:30:00+00:00",
+            "end": "2026-05-11T05:30:00+00:00",
+            "type": "LIGHT",
+        },
+        {
+            "start": "2026-05-11T05:30:00+00:00",
+            "end": "2026-05-11T06:00:00+00:00",
+            "type": "AWAKE",
+        },
+    ]
 
     day_before = data["2026-05-10"]
     assert day_before["hrv_ms"] == 62.0
@@ -211,6 +233,7 @@ def test_summarize_sleep_sessions_no_data():
         "sleep_rem_min": None,
         "sleep_light_min": None,
         "sleep_awake_min": None,
+        "sleep_stages": None,
     }
 
 

@@ -796,14 +796,53 @@ def _stage_seconds(stage: dict[str, Any]) -> int:
     return 0
 
 
+def _stage_timestamps(stage: dict[str, Any]) -> tuple[str | None, str | None]:
+    """Normalise les timestamps de début/fin d'un stade en ISO (string).
+
+    L'API fournit ``startTime``/``endTime`` par stade. Retourne
+    ``(start_iso, end_iso)``, ou ``(None, None)`` si non extractibles.
+    """
+    start = stage.get("startTime") or stage.get("start")
+    end = stage.get("endTime") or stage.get("end")
+    start_iso = _normalize_iso(start)
+    end_iso = _normalize_iso(end)
+    return start_iso, end_iso
+
+
+def _normalize_iso(value: Any) -> str | None:
+    """Convertit une valeur timestamp (ISO string ou seconds) en ISO string."""
+    if not isinstance(value, (str, int, float)):
+        return None
+    if isinstance(value, str):
+        try:
+            parsed = dt.datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except ValueError:
+            return None
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=dt.UTC)
+        return parsed.isoformat()
+    # Valeurs numériques : epoch seconds → ISO avec timezone UTC.
+    try:
+        parsed = dt.datetime.fromtimestamp(float(value), tz=dt.UTC)
+    except (OverflowError, OSError, ValueError):
+        return None
+    return parsed.isoformat()
+
+
 def _summarize_sleep_sessions(sessions: list[dict[str, Any]] | None) -> dict[str, Any]:
-    """Agrège une ou plusieurs sessions de sommeil en métriques journalières."""
+    """Agrège une ou plusieurs sessions de sommeil en métriques journalières.
+
+    Conserve en plus ``sleep_stages`` : la liste normalisée des stades
+    ``{"start": ISO, "end": ISO, "type": str}`` (triés par début), permettant
+    de tracer un hypnogramme. ``None`` si aucun stade horodaté n'est dispo.
+    """
     result: dict[str, Any] = {
         "sleep_hours": None,
         "sleep_deep_min": None,
         "sleep_rem_min": None,
         "sleep_light_min": None,
         "sleep_awake_min": None,
+        "sleep_stages": None,
     }
     if not sessions:
         return result
@@ -813,6 +852,7 @@ def _summarize_sleep_sessions(sessions: list[dict[str, Any]] | None) -> dict[str
     rem_sec = 0
     light_sec = 0
     awake_sec = 0
+    stages_out: list[dict[str, Any]] = []
 
     for session in sessions or []:
         payload = _point_payload(session)
@@ -830,6 +870,11 @@ def _summarize_sleep_sessions(sessions: list[dict[str, Any]] | None) -> dict[str
                 stage_type = (
                     stage.get("type") or stage.get("stage") or stage.get("sleepStageType") or ""
                 ).upper()
+                start_iso, end_iso = _stage_timestamps(stage)
+                if start_iso and end_iso:
+                    stages_out.append(
+                        {"start": start_iso, "end": end_iso, "type": stage_type or "UNKNOWN"}
+                    )
                 if stage_type in ("DEEP", "DEEP_SLEEP"):
                     s_deep += seconds
                 elif stage_type in ("REM", "REM_SLEEP"):
@@ -870,6 +915,10 @@ def _summarize_sleep_sessions(sessions: list[dict[str, Any]] | None) -> dict[str
         result["sleep_light_min"] = light_sec // 60
     if awake_sec > 0:
         result["sleep_awake_min"] = awake_sec // 60
+
+    if stages_out:
+        stages_out.sort(key=lambda s: s["start"])
+        result["sleep_stages"] = stages_out
 
     return result
 
@@ -965,6 +1014,7 @@ def sync_google_health_morning_metrics(
             "sleep_rem_min": data.get("sleep_rem_min"),
             "sleep_light_min": data.get("sleep_light_min"),
             "sleep_awake_min": data.get("sleep_awake_min"),
+            "sleep_stages": data.get("sleep_stages"),
             "steps": data.get("steps"),
             "active_calories": data.get("active_calories"),
             "readiness_score": readiness_score,
