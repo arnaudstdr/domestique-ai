@@ -199,9 +199,7 @@ def _build_user_prompt(
             lines.extend(constraints)
         prefs: list[str] = []
         if availability.intervals_day is not None:
-            prefs.append(
-                f"jour intervalles = {_WEEKDAY_BY_INDEX[availability.intervals_day]}"
-            )
+            prefs.append(f"jour intervalles = {_WEEKDAY_BY_INDEX[availability.intervals_day]}")
         if availability.long_endurance_day is not None:
             prefs.append(
                 f"jour sortie longue = {_WEEKDAY_BY_INDEX[availability.long_endurance_day]}"
@@ -209,7 +207,8 @@ def _build_user_prompt(
         if prefs:
             lines.append(
                 "Préférences de l'athlète — RESPECTE-LES pour placer les séances : "
-                + ", ".join(prefs) + "."
+                + ", ".join(prefs)
+                + "."
             )
 
     lines.append(
@@ -532,7 +531,9 @@ def build_context_from_app_state(
 
         history = fetch_morning_history(days=14, db_path=ctx.db_path)
         last_week = [e for e in history if e["date"] >= (today - _dt.timedelta(days=7)).isoformat()]
-        readiness_values = [e["readiness_score"] for e in last_week if e.get("readiness_score") is not None]
+        readiness_values = [
+            e["readiness_score"] for e in last_week if e.get("readiness_score") is not None
+        ]
         if readiness_values:
             readiness_median = round(statistics.median(readiness_values), 1)
         baseline = compute_baselines("hrv_ms", db_path=ctx.db_path)

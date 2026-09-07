@@ -102,9 +102,7 @@ _OBJECTIVE_FLAVORS: dict[str, dict[str, float]] = {
 
 def _objective_flavor(target_event_type: str | None) -> dict[str, float]:
     """Retourne le profil de périodisation du type d'objectif (défaut: cyclosportive)."""
-    return _OBJECTIVE_FLAVORS.get(
-        target_event_type or "cyclosportive", dict(_CYCLOSPORTIVE_FLAVOR)
-    )
+    return _OBJECTIVE_FLAVORS.get(target_event_type or "cyclosportive", dict(_CYCLOSPORTIVE_FLAVOR))
 
 
 def _training_emphasis(target_event_type: str | None) -> str:
@@ -121,9 +119,7 @@ def _training_emphasis(target_event_type: str | None) -> str:
             "Objectif : épreuve de longue distance. Le volume passe avant tout ; "
             "intervalles au plus une semaine sur deux."
         ),
-        "maintenance": (
-            "Objectif : maintien. Volume régulier et modéré, sans pic ni décharge."
-        ),
+        "maintenance": ("Objectif : maintien. Volume régulier et modéré, sans pic ni décharge."),
     }.get(target_event_type or "", "")
 
 
@@ -464,9 +460,7 @@ def build_training_plan(
         total_weeks = max(1, (days_to_event + 6) // 7)
 
     flavor = _objective_flavor(target_event_type)
-    taper_weeks = (
-        min(int(flavor["taper_weeks"]), total_weeks - 1) if total_weeks > 2 else 0
-    )
+    taper_weeks = min(int(flavor["taper_weeks"]), total_weeks - 1) if total_weeks > 2 else 0
 
     # Normaliser le début sur le lundi de la semaine de ``today`` pour aligner
     # les jours de séance sur le calendrier hebdo.

@@ -179,7 +179,9 @@ def _parse_exception_day(date_str: str, payload: Any) -> tuple[str, DayAvailabil
     try:
         parsed_date = _dt.date.fromisoformat(date_str)
     except ValueError as exc:
-        raise AvailabilityError(f"Date d'exception invalide: {date_str!r} (attendu YYYY-MM-DD)") from exc
+        raise AvailabilityError(
+            f"Date d'exception invalide: {date_str!r} (attendu YYYY-MM-DD)"
+        ) from exc
     if not isinstance(payload, dict):
         raise AvailabilityError(
             f"Exception {date_str!r} invalide: doit être un dict (max_duration_min, context)"

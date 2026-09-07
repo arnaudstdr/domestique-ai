@@ -278,9 +278,7 @@ def test_validator_combines_multiple_rules():
     output_tss = sum(w.estimated_tss for w in out)
     assert output_tss < input_tss / 2
     # Au moins 2 types de corrections (repos hebdo, plafond TSS, cadence type).
-    types = {
-        ("repos" in a or "plafond" in a or "cadence" in a) for a in adjustments
-    }
+    types = {("repos" in a or "plafond" in a or "cadence" in a) for a in adjustments}
     assert types == {True}
 
 
@@ -358,9 +356,7 @@ def test_validator_keeps_plan_within_cap_when_adding_intensity():
         _mk_workout("2026-05-27", kind="endurance", duration_min=120),
         _mk_workout("2026-05-29", kind="endurance", duration_min=120),
     ]
-    out, _ = validate_and_correct(
-        plan, ctl_current=10.0, target_event_type="forme", total_weeks=4
-    )
+    out, _ = validate_and_correct(plan, ctl_current=10.0, target_event_type="forme", total_weeks=4)
     assert sum(w.estimated_tss for w in out) <= 20 * 7 + 1e-3
 
 
@@ -384,8 +380,11 @@ def test_validator_moves_longest_endurance_to_long_day():
         _mk_workout("2026-05-31", kind="endurance", duration_min=60),
     ]
     out, adjustments = validate_and_correct(
-        plan, ctl_current=50.0, availability=_mk_avail_with_long_sunday(),
-        target_event_type="forme", total_weeks=4,
+        plan,
+        ctl_current=50.0,
+        availability=_mk_avail_with_long_sunday(),
+        target_event_type="forme",
+        total_weeks=4,
     )
     sunday = next(w for w in out if w.date == "2026-05-31")
     saturday = next(w for w in out if w.date == "2026-05-30")
@@ -403,8 +402,11 @@ def test_validator_lengthens_short_long_ride_when_cap_allows():
         _mk_workout("2026-05-31", kind="endurance", duration_min=75),
     ]
     out, adjustments = validate_and_correct(
-        plan, ctl_current=80.0, availability=_mk_avail_with_long_sunday(),
-        target_event_type="forme", total_weeks=4,
+        plan,
+        ctl_current=80.0,
+        availability=_mk_avail_with_long_sunday(),
+        target_event_type="forme",
+        total_weeks=4,
     )
     sunday = next(w for w in out if w.date == "2026-05-31")
     assert sunday.kind == "endurance"

@@ -102,8 +102,11 @@ def collect_week_report(today: _dt.date, ctx: AthleteContext) -> dict[str, Any]:
     try:
         history = fetch_morning_history(days=14, db_path=ctx.db_path)
         last_week = [
-            e for e in history
-            if _previous_week(today)[0].isoformat() <= e["date"] <= _previous_week(today)[1].isoformat()
+            e
+            for e in history
+            if _previous_week(today)[0].isoformat()
+            <= e["date"]
+            <= _previous_week(today)[1].isoformat()
         ]
         report["morning"] = {
             "entries_last_week": len(last_week),
@@ -140,7 +143,11 @@ def _fallback_decision(report: dict[str, Any]) -> tuple[str, float, str]:
     tsb = report.get("tsb")
 
     if planned == 0:
-        return "maintain", 1.0, "Aucune séance n'était planifiée la semaine écoulée — plan maintenu."
+        return (
+            "maintain",
+            1.0,
+            "Aucune séance n'était planifiée la semaine écoulée — plan maintenu.",
+        )
 
     if missed >= _MISSED_REDUCE or adherence < _ADHERENCE_REDUCE_PCT:
         return (
@@ -171,7 +178,11 @@ def _fallback_decision(report: dict[str, Any]) -> tuple[str, float, str]:
     ot = report.get("overtraining") or {}
     for alert in ot.get("alerts", []) or []:
         if alert.get("indicator") in ("tsb_chronic", "strain"):
-            return "reduce", _VOLUME_REDUCE, f"Alerte overtraining ({alert.get('indicator')}) — volume réduit."
+            return (
+                "reduce",
+                _VOLUME_REDUCE,
+                f"Alerte overtraining ({alert.get('indicator')}) — volume réduit.",
+            )
 
     if missed == 0 and adherence >= _PROGRESS_ADHERENCE_PCT:
         return (
@@ -197,10 +208,12 @@ def _llm_decision(report: dict[str, Any], base: tuple[str, float, str]) -> str:
         f"« {action} ». Rédige en français, une à deux phrases, pourquoi et ce "
         "qui change pour l'athlète. Données: compliance="
         f"{report.get('compliance')}, matin={report.get('morning')}, "
-        f"TSB={report.get('tsb')}. Retourne un JSON {{\"reason\": str}}."
+        f'TSB={report.get("tsb")}. Retourne un JSON {{"reason": str}}.'
     )
     try:
-        result = chat_structured_sync(prompt, schema, system="Coach cycliste — bref et concret.", timeout_s=15)
+        result = chat_structured_sync(
+            prompt, schema, system="Coach cycliste — bref et concret.", timeout_s=15
+        )
         if isinstance(result, dict) and result.get("reason"):
             return str(result["reason"])[:260]
     except Exception:  # noqa: BLE001 — jamais bloquant
@@ -268,7 +281,11 @@ def run_weekly_review(
     week_key = _iso_week_key(today)
 
     if not force and get_sync_meta(_WEEKLY_REVIEW_FLAG, ctx.db_path) == week_key:
-        return {"skipped": True, "week_key": week_key, "reason": "Revue déjà effectuée cette semaine."}
+        return {
+            "skipped": True,
+            "week_key": week_key,
+            "reason": "Revue déjà effectuée cette semaine.",
+        }
 
     report = collect_week_report(today, ctx)
     base = _fallback_decision(report)
@@ -336,7 +353,9 @@ def run_weekly_review(
             return result
 
         plan = _scale_plan(plan, volume_factor)
-        total_weeks = max(1, (len(plan) + max(1, sessions_per_week) - 1) // max(1, sessions_per_week))
+        total_weeks = max(
+            1, (len(plan) + max(1, sessions_per_week) - 1) // max(1, sessions_per_week)
+        )
         plan, adjustments = validate_and_correct(
             plan,
             ctl_current=ctl_current,

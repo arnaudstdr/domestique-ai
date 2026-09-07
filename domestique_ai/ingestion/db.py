@@ -204,9 +204,7 @@ def init_db(db_path: Path | None = None, *, ctx: AthleteContext | None = None) -
                 UNIQUE (plan_id, date)
             )
         """)
-        conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_plan_decisions_date ON plan_decisions(date)"
-        )
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_plan_decisions_date ON plan_decisions(date)")
         conn.execute("""
             CREATE TABLE IF NOT EXISTS prescriptions (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,

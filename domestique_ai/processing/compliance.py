@@ -42,7 +42,9 @@ def _planned_bucket(workout: Workout) -> str | None:
     return None
 
 
-def _match_activity(workout: Workout, day_activities: list[dict[str, Any]]) -> dict[str, Any] | None:
+def _match_activity(
+    workout: Workout, day_activities: list[dict[str, Any]]
+) -> dict[str, Any] | None:
     """Sélectionne l'activité du jour qui correspond à la séance planifiée.
 
     Filtre sur le bucket sport (indoor/outdoor cyclisme) quand il est déductible
@@ -50,7 +52,9 @@ def _match_activity(workout: Workout, day_activities: list[dict[str, Any]]) -> d
     """
     bucket = _planned_bucket(workout)
     if bucket is None:
-        candidates = [a for a in day_activities if _sport_bucket(a.get("sport_type")) in _CYCLING_BUCKETS]
+        candidates = [
+            a for a in day_activities if _sport_bucket(a.get("sport_type")) in _CYCLING_BUCKETS
+        ]
     else:
         candidates = [a for a in day_activities if _sport_bucket(a.get("sport_type")) == bucket]
     if not candidates:
@@ -76,9 +80,7 @@ def compute_week_compliance(
     TSS planifié vs réalisé) et le détail ``per_day``.
     """
     start, end = week_boundaries(week_start)
-    decisions_by_date: dict[str, dict[str, Any]] = {
-        d["date"]: d for d in (decisions or [])
-    }
+    decisions_by_date: dict[str, dict[str, Any]] = {d["date"]: d for d in (decisions or [])}
     planned_by_date: dict[str, Workout] = {
         w.date: w for w in plan if start.isoformat() <= w.date <= end.isoformat()
     }
@@ -138,6 +140,7 @@ def compute_week_compliance(
         if match is not None:
             duration_sec = match.get("duration") or 0
             planned_sec = (workout.duration_min or 0) * 60
+            # nosemgrep: hardcoded-password (faux positif : valeur d'état de compliance)
             status = "done" if duration_sec >= _PARTIAL_THRESHOLD * planned_sec else "partial"
             entry["status"] = status
             entry["realized"] = {
@@ -160,9 +163,7 @@ def compute_week_compliance(
     expected = planned_by_date and len(planned_by_date) - skipped
     adherence_pct = round((done / expected) * 100, 1) if expected and expected > 0 else 0.0
     tss_delta_pct = (
-        round(((realized_tss - planned_tss) / planned_tss) * 100, 1)
-        if planned_tss > 0
-        else None
+        round(((realized_tss - planned_tss) / planned_tss) * 100, 1) if planned_tss > 0 else None
     )
 
     return {

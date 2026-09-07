@@ -58,42 +58,63 @@ def _plan_covering(ctx: AthleteContext, start: _dt.date, weeks: int = 5) -> int:
     workouts = []
     for w in range(weeks):
         workouts.append(_workout((start + _dt.timedelta(days=w * 7 + 1)).isoformat()))
-        workouts.append(_workout((start + _dt.timedelta(days=w * 7 + 3)).isoformat(), kind="tempo", duration_min=60))
+        workouts.append(
+            _workout(
+                (start + _dt.timedelta(days=w * 7 + 3)).isoformat(), kind="tempo", duration_min=60
+            )
+        )
     return save_plan(workouts, db_path=ctx.db_path)
 
 
 def _seed_morning(ctx: AthleteContext, today: _dt.date, readiness: int = 80) -> None:
     for i in range(14, 0, -1):
         day = (today - _dt.timedelta(days=i)).isoformat()
-        save_morning_entry(day, hrv_ms=60.0, resting_hr=55.0, sleep_hours=7.5, readiness_score=readiness, db_path=ctx.db_path)
+        save_morning_entry(
+            day,
+            hrv_ms=60.0,
+            resting_hr=55.0,
+            sleep_hours=7.5,
+            readiness_score=readiness,
+            db_path=ctx.db_path,
+        )
 
 
 # --- Décision déterministe --------------------------------------------------
 
 
 def test_decision_reduce_when_missed() -> None:
-    action, factor, _ = _fallback_decision({"compliance": {"planned_sessions": 4, "missed": 2, "adherence_pct": 50.0}})
+    action, factor, _ = _fallback_decision(
+        {"compliance": {"planned_sessions": 4, "missed": 2, "adherence_pct": 50.0}}
+    )
     assert action == "reduce"
     assert factor == 0.85
 
 
 def test_decision_reduce_when_low_readiness() -> None:
     action, factor, _ = _fallback_decision(
-        {"compliance": {"planned_sessions": 4, "missed": 0, "adherence_pct": 100.0}, "morning": {"readiness_median": 45}}
+        {
+            "compliance": {"planned_sessions": 4, "missed": 0, "adherence_pct": 100.0},
+            "morning": {"readiness_median": 45},
+        }
     )
     assert action == "reduce"
 
 
 def test_decision_progress_when_conform() -> None:
     action, factor, _ = _fallback_decision(
-        {"compliance": {"planned_sessions": 4, "missed": 0, "adherence_pct": 100.0}, "morning": {"readiness_median": 80}}
+        {
+            "compliance": {"planned_sessions": 4, "missed": 0, "adherence_pct": 100.0},
+            "morning": {"readiness_median": 80},
+        }
     )
     assert action == "progress"
     assert factor == 1.05
 
 
 def test_decision_maintain_when_no_plan() -> None:
-    action, _, _ = _fallback_decision({"compliance": {"planned_sessions": 0, "missed": 0, "adherence_pct": 0.0}})
+    action, _, _ = _fallback_decision(
+        {"compliance": {"planned_sessions": 0, "missed": 0, "adherence_pct": 0.0}}
+    )
     assert action == "maintain"
 
 
@@ -161,6 +182,12 @@ def test_review_reduce_scales_durations(ctx: AthleteContext) -> None:
     new_plan = load_plan(result["new_plan_id"], ctx.db_path)
     assert new_plan is not None
     # Les durées de la 1re semaine sont réduites (~85 % de la base).
-    first_week = [w for w in new_plan if _next_monday(today).isoformat() <= w.date < (_next_monday(today) + _dt.timedelta(days=7)).isoformat()]
+    first_week = [
+        w
+        for w in new_plan
+        if _next_monday(today).isoformat()
+        <= w.date
+        < (_next_monday(today) + _dt.timedelta(days=7)).isoformat()
+    ]
     assert first_week
     assert all(w.duration_min < 100 for w in first_week if w.kind == "endurance")

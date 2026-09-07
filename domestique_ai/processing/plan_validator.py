@@ -401,12 +401,8 @@ def _enforce_long_ride(
         new_min = min(_LONG_RIDE_MIN, best.duration_min + max(0, extra_min))
         if new_min == best.duration_min:
             return week
-        new_week[best_idx] = _rebuild_at_date(
-            best, best.date, week_idx, duration_min=new_min
-        )
-        adjustments.append(
-            f"{best.date} : sortie longue portée à {new_min} min (jour long)"
-        )
+        new_week[best_idx] = _rebuild_at_date(best, best.date, week_idx, duration_min=new_min)
+        adjustments.append(f"{best.date} : sortie longue portée à {new_min} min (jour long)")
         return new_week
 
     long_day_session = next((w for w in week if _wd(w) == long_wd), None)
@@ -419,14 +415,11 @@ def _enforce_long_ride(
         ls_idx = next(i for i, w in enumerate(new_week) if w.uid == long_day_session.uid)
         new_week[best_idx] = _rebuild_at_date(best, long_day_date, week_idx)
         new_week[ls_idx] = _rebuild_at_date(long_day_session, best.date, week_idx)
-        adjustments.append(
-            f"{best.date} ↔ {long_day_date} : sortie longue déplacée au jour long"
-        )
+        adjustments.append(f"{best.date} ↔ {long_day_date} : sortie longue déplacée au jour long")
     else:
         new_week[best_idx] = _rebuild_at_date(best, long_day_date, week_idx)
         adjustments.append(
-            f"{best.date} : sortie longue déplacée au "
-            f"{_WEEKDAY_BY_INDEX.get(long_wd, long_wd)}"
+            f"{best.date} : sortie longue déplacée au {_WEEKDAY_BY_INDEX.get(long_wd, long_wd)}"
         )
 
     # Maintenant sur le jour long : rallonger vers 90 min si le plafond le permet.
@@ -440,9 +433,7 @@ def _enforce_long_ride(
             new_week[best_idx] = _rebuild_at_date(
                 placed, placed.date, week_idx, duration_min=new_min
             )
-            adjustments.append(
-                f"{placed.date} : sortie longue portée à {new_min} min (jour long)"
-            )
+            adjustments.append(f"{placed.date} : sortie longue portée à {new_min} min (jour long)")
     return new_week
 
 

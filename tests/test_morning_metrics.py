@@ -44,8 +44,16 @@ def test_save_and_fetch_full_entry(db_path: Path):
         sleep_light_min=240,
         sleep_awake_min=30,
         sleep_stages=[
-            {"start": "2026-05-01T01:00:00+00:00", "end": "2026-05-01T02:00:00+00:00", "type": "DEEP"},
-            {"start": "2026-05-01T02:00:00+00:00", "end": "2026-05-01T03:00:00+00:00", "type": "REM"},
+            {
+                "start": "2026-05-01T01:00:00+00:00",
+                "end": "2026-05-01T02:00:00+00:00",
+                "type": "DEEP",
+            },
+            {
+                "start": "2026-05-01T02:00:00+00:00",
+                "end": "2026-05-01T03:00:00+00:00",
+                "type": "REM",
+            },
         ],
         steps=8500,
         active_calories=420,
@@ -71,8 +79,16 @@ def test_save_and_fetch_full_entry(db_path: Path):
         "sleep_awake_min": 30,
         "sleep_stages_json": json.dumps(
             [
-                {"start": "2026-05-01T01:00:00+00:00", "end": "2026-05-01T02:00:00+00:00", "type": "DEEP"},
-                {"start": "2026-05-01T02:00:00+00:00", "end": "2026-05-01T03:00:00+00:00", "type": "REM"},
+                {
+                    "start": "2026-05-01T01:00:00+00:00",
+                    "end": "2026-05-01T02:00:00+00:00",
+                    "type": "DEEP",
+                },
+                {
+                    "start": "2026-05-01T02:00:00+00:00",
+                    "end": "2026-05-01T03:00:00+00:00",
+                    "type": "REM",
+                },
             ],
             ensure_ascii=False,
         ),

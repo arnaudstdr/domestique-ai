@@ -119,14 +119,20 @@ def test_forme_type_has_no_taper_but_course_does():
     target = today + dt.timedelta(weeks=8)
     forme = _weekly_volumes(
         build_training_plan(
-            target_date=target, ctl_current=60.0, sessions_per_week=4,
-            start_date=today, target_event_type="forme",
+            target_date=target,
+            ctl_current=60.0,
+            sessions_per_week=4,
+            start_date=today,
+            target_event_type="forme",
         )
     )
     course = _weekly_volumes(
         build_training_plan(
-            target_date=target, ctl_current=60.0, sessions_per_week=4,
-            start_date=today, target_event_type="course",
+            target_date=target,
+            ctl_current=60.0,
+            sessions_per_week=4,
+            start_date=today,
+            target_event_type="course",
         )
     )
     keys_forme = sorted(forme)
@@ -142,8 +148,11 @@ def test_forme_type_intervals_every_other_week():
     today = dt.date(2026, 5, 4)
     target = today + dt.timedelta(weeks=8)
     plan = build_training_plan(
-        target_date=target, ctl_current=60.0, sessions_per_week=4,
-        start_date=today, target_event_type="forme",
+        target_date=target,
+        ctl_current=60.0,
+        sessions_per_week=4,
+        start_date=today,
+        target_event_type="forme",
     )
     intervals_weeks: set[int] = set()
     for w in plan:
@@ -160,12 +169,18 @@ def test_cyclo_type_boosts_endurance_volume():
     today = dt.date(2026, 5, 4)
     target = today + dt.timedelta(weeks=6)
     plan_cyclo = build_training_plan(
-        target_date=target, ctl_current=60.0, sessions_per_week=4,
-        start_date=today, target_event_type="cyclo",
+        target_date=target,
+        ctl_current=60.0,
+        sessions_per_week=4,
+        start_date=today,
+        target_event_type="cyclo",
     )
     plan_base = build_training_plan(
-        target_date=target, ctl_current=60.0, sessions_per_week=4,
-        start_date=today, target_event_type="cyclosportive",
+        target_date=target,
+        ctl_current=60.0,
+        sessions_per_week=4,
+        start_date=today,
+        target_event_type="cyclosportive",
     )
     endurance_cyclo = sum(w.duration_min for w in plan_cyclo if w.kind == "endurance")
     endurance_base = sum(w.duration_min for w in plan_base if w.kind == "endurance")
@@ -176,12 +191,20 @@ def test_min_ctl_raises_tss_cap_for_low_ctl():
     """Le plancher configurable relève le plafond TSS à CTL très bas."""
     today = dt.date(2026, 5, 4)
     plan_low_floor = build_training_plan(
-        target_date=None, ctl_current=5.0, sessions_per_week=4,
-        start_date=today, target_event_type="forme", fallback_weeks=4,
+        target_date=None,
+        ctl_current=5.0,
+        sessions_per_week=4,
+        start_date=today,
+        target_event_type="forme",
+        fallback_weeks=4,
     )
     plan_raised_floor = build_training_plan(
-        target_date=None, ctl_current=5.0, sessions_per_week=4,
-        start_date=today, target_event_type="forme", fallback_weeks=4,
+        target_date=None,
+        ctl_current=5.0,
+        sessions_per_week=4,
+        start_date=today,
+        target_event_type="forme",
+        fallback_weeks=4,
         min_ctl=40.0,
     )
     tss_low = sum(w.estimated_tss for w in plan_low_floor)

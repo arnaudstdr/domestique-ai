@@ -138,7 +138,9 @@ def _collect_signals(today: _dt.date, ctx: AthleteContext) -> dict[str, Any]:
             if prior:
                 signals["sleep_baseline"] = round(statistics.median(prior), 2)
                 signals["sleep_delta_pct"] = round(
-                    (signals["sleep_hours"] - signals["sleep_baseline"]) / signals["sleep_baseline"] * 100,
+                    (signals["sleep_hours"] - signals["sleep_baseline"])
+                    / signals["sleep_baseline"]
+                    * 100,
                     1,
                 )
         for alert in detect_morning_alerts(db_path=ctx.db_path) or []:
@@ -243,10 +245,12 @@ def _refine_reason_with_llm(decision: str, reason: str, signals: dict[str, Any])
         "pour l'athlète (état + action). Données: "
         f"readiness={signals.get('readiness')}, sommeil={signals.get('sleep_hours')}h, "
         f"TSB={signals.get('tsb')}, alertes={[a['metric'] for a in signals.get('morning_alerts', [])]}. "
-        "Retourne un JSON {\"reason\": str}."
+        'Retourne un JSON {"reason": str}.'
     )
     try:
-        result = chat_structured_sync(prompt, schema, system="Coach cycliste — bref et concret.", timeout_s=15)
+        result = chat_structured_sync(
+            prompt, schema, system="Coach cycliste — bref et concret.", timeout_s=15
+        )
         if isinstance(result, dict) and result.get("reason"):
             return str(result["reason"])[:220]
     except Exception:  # noqa: BLE001 — jamais bloquant

@@ -24,7 +24,9 @@ def _workout(date: str, *, kind: str = "endurance", duration_min: int = 90) -> W
     )
 
 
-def _activity(date: str, *, duration_sec: int = 5400, tss: float = 80.0, sport: str = "Ride") -> dict:
+def _activity(
+    date: str, *, duration_sec: int = 5400, tss: float = 80.0, sport: str = "Ride"
+) -> dict:
     return {
         "date": date,
         "duration": duration_sec,

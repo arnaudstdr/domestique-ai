@@ -74,7 +74,10 @@ def _seed_morning(
     for i in range(14, 0, -1):
         day = (today - _dt.timedelta(days=i)).isoformat()
         save_morning_entry(
-            day, hrv_ms=60.0, resting_hr=55.0, sleep_hours=baseline_sleep,
+            day,
+            hrv_ms=60.0,
+            resting_hr=55.0,
+            sleep_hours=baseline_sleep,
             readiness_score=baseline_readiness,
             db_path=ctx.db_path,
         )
@@ -184,7 +187,9 @@ def test_rest_when_very_short_sleep_and_low_quality(ctx: AthleteContext) -> None
     _plan_for(ctx, _today())
     # Baseline 6h24 : une nuit à 5h12 n'est pas une « alerte critique » globale,
     # mais c'est très court + qualité mauvaise → repos par la règle qualité.
-    _seed_morning(ctx, _today(), baseline_sleep=6.4, sleep_hours=5.2, sleep_score=40, readiness_score=70)
+    _seed_morning(
+        ctx, _today(), baseline_sleep=6.4, sleep_hours=5.2, sleep_score=40, readiness_score=70
+    )
     result = evaluate_daily_decision(_today(), ctx=ctx, use_llm=False, persist=False)
     assert result["decision"] == "rest"
     assert "qualité" in result["reason"].lower()
@@ -215,6 +220,8 @@ def test_adjust_when_sleep_drops_vs_baseline(ctx: AthleteContext) -> None:
 def test_go_when_sleep_mildly_short_but_within_normal_variation(ctx: AthleteContext) -> None:
     _plan_for(ctx, _today())
     # Baseline 8h00, nuit à 7h20 (-7,5 %) : pas d'alerte, tout va bien → go.
-    _seed_morning(ctx, _today(), baseline_sleep=8.0, sleep_hours=7.3, sleep_score=80, readiness_score=75)
+    _seed_morning(
+        ctx, _today(), baseline_sleep=8.0, sleep_hours=7.3, sleep_score=80, readiness_score=75
+    )
     result = evaluate_daily_decision(_today(), ctx=ctx, use_llm=False, persist=False)
     assert result["decision"] == "go"
