@@ -196,6 +196,72 @@ def get_active_plan(
     return _detail_from_plan(plan_id, plan, ctx)
 
 
+@router.get("/feed.ics")
+def get_plan_feed(
+    key: str = "",
+    athlete: str | None = None,
+) -> Response:
+    """Flux d'abonnement iCalendar (webcal) — la semaine à venir du plan actif.
+
+    Consommé par Calendrier Apple / Google (abonnement à une URL) : le client
+    poll la même URL et voit la fenêtre évoluer. Les UID sont stables
+    (``domestique-ai-<date>@domestique-ai``) → pas de doublons quand le plan
+    change à chaque revue hebdo.
+
+    Auth : ce chemin est exempté du middleware Bearer (les clients calendrier
+    ne peuvent pas envoyer de header Authorization) — il est protégé par la
+    clé ``DOMESTIQUE_AI_CALENDAR_FEED_KEY`` passée en ``?key=``. Sans clé
+    configurée, le flux est désactivé (404).
+
+    ``?athlete=<public_id>`` permet de cibler un athlète du roster (défaut :
+    le propriétaire bootstrap / données legacy).
+    """
+    import hmac
+
+    from domestique_ai.config import get_calendar_feed_key
+    from domestique_ai.export.ics import plan_to_subscription_ics
+
+    expected = get_calendar_feed_key()
+    if not expected or not hmac.compare_digest(key, expected):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Introuvable.")
+
+    from domestique_ai.athlete_context import context_for_athlete, context_from_env
+    from domestique_ai.config import get_scheduler_timezone
+    from domestique_ai.export.ics import rolling_weeks_window, select_upcoming_workouts
+    from domestique_ai.llm.plan_storage import list_decisions, load_active_plan
+    from domestique_ai.platform_db import get_user_by_public_id
+
+    if athlete:
+        user = get_user_by_public_id(athlete)
+        if user is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Athlète inconnu.")
+        ctx = context_for_athlete(user)
+    else:
+        ctx = context_from_env()
+
+    plan_meta = load_active_plan(db_path=ctx.db_path)
+    if plan_meta is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Aucun plan actif.")
+    plan_id, workouts = plan_meta
+
+    start, end = rolling_weeks_window(_dt.date.today())
+    decisions = list_decisions(plan_id, db_path=ctx.db_path)
+    upcoming = select_upcoming_workouts(workouts, start, end, decisions)
+
+    payload = plan_to_subscription_ics(
+        upcoming,
+        tz_name=get_scheduler_timezone(),
+    )
+    return Response(
+        content=payload,
+        media_type="text/calendar; charset=utf-8",
+        headers={
+            "Content-Disposition": "inline",
+            "Cache-Control": "no-store, max-age=0",
+        },
+    )
+
+
 @router.get("/{plan_id}", response_model=PlanDetail)
 def get_plan(
     plan_id: int,

@@ -109,3 +109,32 @@ Tout l'état persistant tient dans `./data/` (DB SQLite + tokens Strava + object
 - **Ollama** : la coach LLM utilise `gemma4:31b-cloud` via Ollama Cloud — aucun service à héberger sur le RPi, juste une connexion Internet.
 - **Pas de TLS** : Tailscale chiffre déjà bout-en-bout entre tes appareils. Inutile de coller un reverse proxy devant pour un usage perso.
 - **Pas d'exposition publique** : le port `8501` n'est joignable que depuis ton tailnet (et le LAN du RPi). Pour exposer en clear sur Internet, ajouter un Tailscale Funnel — non recommandé ici (pas d'auth applicative).
+
+## Calendrier Apple — flux d'abonnement iCalendar (webcal)
+
+Le canal pour afficher les séances du plan dans Calendrier Apple/Google : un
+**flux ICS à URL stable** que l'appareil interroge directement (abonnement
+« webcal »). Aucun passage par le canal iCloud→appareils — robuste même quand
+la sync CalDAV d'iOS se comporte mal. La fenêtre servie est la **semaine en
+cours + la semaine à venir**, et elle évolue après chaque revue hebdo.
+
+1. Générer une clé et l'ajouter au `.env` :
+   ```
+   DOMESTIQUE_AI_CALENDAR_FEED_KEY=<openssl rand -hex 24>
+   ```
+2. Redémarrer le conteneur.
+3. Sur l'iPhone, **Réglages > Calendrier > Comptes > Ajouter un compte >
+   Autre > Calendrier d'abonnement**, puis coller :
+   ```
+   https://ai-stack.tail68aa7e.ts.net/api/plan/feed.ics?key=<CLÉ>
+   ```
+   (ou le hostname tailnet de ton RPi). Pour cibler un athlète du roster :
+   `&athlete=<public_id>`.
+
+Le calendrier se met à jour tout seul après chaque revue hebdo. La description
+de chaque séance (structure par zones + TSS) est visible en ouvrant
+l'événement. Le flux est désactivé (404) sans clé.
+
+Le calendrier se met à jour tout seul après chaque revue hebdo (fenêtre = la
+semaine à venir). La description de chaque séance (structure par zones + TSS)
+est visible en ouvrant l'événement. Le flux est désactivé (404) sans clé.

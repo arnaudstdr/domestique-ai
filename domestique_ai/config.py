@@ -500,3 +500,16 @@ def get_api_token() -> str | None:
     """
     raw = os.getenv("DOMESTIQUE_AI_API_TOKEN")
     return raw.strip() if raw and raw.strip() else None
+
+
+def get_calendar_feed_key() -> str | None:
+    """Clé secrète du flux d'abonnement iCalendar (``DOMESTIQUE_AI_CALENDAR_FEED_KEY``).
+
+    Le flux ``GET /api/plan/feed.ics`` est consommé par des clients calendrier
+    (Apple Calendar, Google Calendar) qui ne peuvent pas envoyer de header
+    Bearer — il est donc protégé par cette clé passée en query param
+    (``?key=...``). ``None`` → flux désactivé (404). Générer :
+    ``openssl rand -hex 24``.
+    """
+    raw = os.getenv("DOMESTIQUE_AI_CALENDAR_FEED_KEY")
+    return raw.strip() if raw and raw.strip() else None

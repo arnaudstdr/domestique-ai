@@ -405,6 +405,37 @@ Points à retenir :
 
 23 tests dans `tests/test_ics_export.py` couvrent folding, escaping (`;`, `,`, `\n`), UID stable, CRLF, durations multi-formats.
 
+### Flux d'abonnement iCalendar (webcal) — `GET /api/plan/feed.ics`
+
+Le canal privilégié pour mettre les séances dans le calendrier de l'utilisateur
+(Calendrier Apple/Google) : un **flux ICS à URL stable** que le client poll
+directement (abonnement « webcal »). L'appareil interroge notre serveur — aucun
+passage par le canal iCloud→APNs qui peut casser l'affichage côté Apple (bug
+iOS 26.4, sync périmée, etc.). Le push CalDAV a été **retiré** au profit de ce
+flux.
+
+- **Contenu** : les séances des **2 semaines à venir** (fenêtre
+  `rolling_weeks_window(today, weeks=2)` = semaine en cours + semaine suivante)
+  du plan actif, décisions du check du matin appliquées via
+  `select_upcoming_workouts`. Sérialisées par `plan_to_subscription_ics` (UID
+  stable `domestique-ai-<date>@domestique-ai`, `DTEND` explicite, heures UTC via
+  `get_scheduler_timezone`). La `DESCRIPTION` porte la structure par zones +
+  TSS + notes.
+- **Auth** : le chemin est exempté du middleware Bearer (`auth.py
+  _EXEMPT_API_PATHS`) car les clients calendrier ne peuvent pas envoyer de
+  header Authorization. Il est protégé par `DOMESTIQUE_AI_CALENDAR_FEED_KEY`
+  passé en `?key=` (404 si absent/incorrect, comme `/api/health`). Générer :
+  `openssl rand -hex 24`.
+- **Athlète** : défaut = bootstrap ; `?athlete=<public_id>` cible un athlète du
+  roster (ex. `?key=…&athlete=<public_id>`).
+- **URL d'abonnement** : `https://<hôte>/api/plan/feed.ics?key=<clé>` — à
+  ajouter comme « Calendrier d'abonnement » dans Calendrier Apple/Google. Le
+  client poll la même URL : la fenêtre évolue après chaque revue hebdo sans
+  doublons (UID stables).
+
+Tests : `tests/test_ics_export.py` (multi-VEVENT, UID stables, DESCRIPTION,
+exigence de clé, fenêtre 2 semaines, flux désactivé sans clé).
+
 ## Conventions
 
 - **Ruff** : `line-length = 100`, ignore `E501`. Règles activées : `E, F, I, UP, B, SIM` (voir `pyproject.toml`).

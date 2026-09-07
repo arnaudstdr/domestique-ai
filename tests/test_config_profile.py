@@ -127,3 +127,20 @@ def test_invalid_yaml_falls_back_to_env(tmp_path, monkeypatch):
     invalidate_profile_cache()
     monkeypatch.setenv("STRAVA_FTP", "260")
     assert get_ftp() == 260.0
+
+
+# ---------- Flux iCalendar (webcal) -----------------------------------------
+
+
+def test_calendar_feed_key_none_by_default(monkeypatch):
+    from domestique_ai.config import get_calendar_feed_key
+
+    monkeypatch.delenv("DOMESTIQUE_AI_CALENDAR_FEED_KEY", raising=False)
+    assert get_calendar_feed_key() is None
+
+
+def test_calendar_feed_key_from_env(monkeypatch):
+    from domestique_ai.config import get_calendar_feed_key
+
+    monkeypatch.setenv("DOMESTIQUE_AI_CALENDAR_FEED_KEY", "secret-abc")
+    assert get_calendar_feed_key() == "secret-abc"

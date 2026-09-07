@@ -196,6 +196,34 @@ def test_plan_to_ics_duration_matches_workout():
     assert "DURATION:PT1H15M" in text
 
 
+def test_workout_to_ics_emits_dtend_instead_of_duration():
+    """Le push CalDAV doit utiliser un DTEND explicite (pas DURATION) :
+    iCloud/Apple Calendar rend mal DURATION en CalDAV (durée nulle → invisible).
+    """
+    from domestique_ai.export.ics import workout_to_ics
+
+    workout = _make_workout(date="2026-05-25", duration_min=75)
+    text = workout_to_ics(workout, now=FIXED_NOW).decode("utf-8")
+    assert "DTSTART:20260525T180000" in text
+    # 18:00 + 75 min = 19:15.
+    assert "DTEND:20260525T191500" in text
+    assert "DURATION:" not in text
+
+
+def test_workout_to_ics_with_tz_emits_utc_timestamps():
+    """Avec un fuseau IANA, DTSTART/DTEND sont émis en UTC (suffixe Z) :
+    iCloud interprète mal le floating local time (événement décalé/masqué).
+    """
+    from domestique_ai.export.ics import workout_to_ics
+
+    workout = _make_workout(date="2026-05-25", duration_min=75)
+    text = workout_to_ics(workout, now=FIXED_NOW, tz_name="Europe/Paris").decode("utf-8")
+    # 18:00 heure d'été Paris (UTC+2) = 16:00 UTC ; +75 min = 17:15 UTC.
+    assert "DTSTART:20260525T160000Z" in text
+    assert "DTEND:20260525T171500Z" in text
+    assert "DURATION:" not in text
+
+
 def test_plan_to_ics_description_contains_structure_and_tss():
     plan = [_make_workout(estimated_tss=82.5)]
     text = plan_to_ics(plan, plan_id=1, now=FIXED_NOW).decode("utf-8")
@@ -278,6 +306,38 @@ def test_plan_to_ics_categories_include_kind():
     assert "CATEGORIES:Entrainement,intervals" in text
 
 
+def test_plan_to_subscription_ics_multiple_events_stable_uids():
+    """Le flux d'abonnement émet plusieurs événements avec UID stables (hors
+    plan_id) — le plan change à chaque revue hebdo, l'UID doit suivre la date.
+    """
+    from domestique_ai.export.ics import plan_to_subscription_ics
+
+    plan = [
+        _make_workout(date="2026-05-25"),
+        _make_workout(date="2026-05-27", name="Tempo", duration_min=60),
+    ]
+    text = plan_to_subscription_ics(plan, now=FIXED_NOW).decode("utf-8")
+    assert text.count("BEGIN:VEVENT") == 2
+    assert "UID:domestique-ai-2026-05-25@domestique-ai" in text
+    assert "UID:domestique-ai-2026-05-27@domestique-ai" in text
+    # Pas d'ancrage au plan_id (contrairement à plan_to_ics).
+    assert "plan-" not in text
+
+
+def test_plan_to_subscription_ics_emits_description_with_zones():
+    """La DESCRIPTION du flux doit contenir la structure par zones (le besoin
+    utilisateur : voir le détail de la séance dans le calendrier).
+    """
+    from domestique_ai.export.ics import plan_to_subscription_ics
+
+    plan = [_make_workout(date="2026-05-25", estimated_tss=82.5, notes="Vent fort")]
+    text = plan_to_subscription_ics(plan, now=FIXED_NOW).decode("utf-8")
+    assert "DESCRIPTION:" in text
+    assert "Z2" in text
+    assert "TSS" in text
+    assert "Vent fort" in text
+
+
 # ---------- Endpoint ---------------------------------------------------------
 
 
@@ -331,3 +391,72 @@ def test_default_hour_param_emits_correct_dtstart(hour: int):
     plan = [_make_workout()]
     text = plan_to_ics(plan, plan_id=1, default_hour=hour, now=FIXED_NOW).decode("utf-8")
     assert f"T{hour:02d}0000" in text
+
+
+# ---------- Flux d'abonnement (webcal) ---------------------------------------
+
+
+def _setup_feed_plan(tmp_path, monkeypatch, api_auth_headers):
+    """DB tmp avec un plan actif + clé de flux configurée. Retourne (client, key)."""
+    from fastapi.testclient import TestClient
+
+    from domestique_ai.api.main import app
+    from domestique_ai.export.ics import rolling_weeks_window
+    from domestique_ai.llm import plan_storage
+
+    monkeypatch.setenv("DOMESTIQUE_AI_DB_PATH", str(tmp_path / "feed.db"))
+    monkeypatch.setenv("DOMESTIQUE_AI_CALENDAR_FEED_KEY", "test-feed-key-123")
+    # Le plan couvre la semaine en cours + la suivante (fenêtre du flux).
+    start, _ = rolling_weeks_window(dt.date.today())
+    d1 = start.isoformat()
+    d2 = (start + dt.timedelta(days=2)).isoformat()
+    plan_storage.save_plan(
+        [
+            _make_workout(date=d1, name="Endurance"),
+            _make_workout(date=d2, name="Tempo"),
+        ],
+        target_date=dt.date(2026, 7, 1),
+        target_event_type="cyclosportive",
+        sessions_per_week=4,
+    )
+    return TestClient(app, headers=api_auth_headers), "test-feed-key-123"
+
+
+def test_feed_requires_key(tmp_path, monkeypatch, api_auth_headers):
+    client, _ = _setup_feed_plan(tmp_path, monkeypatch, api_auth_headers)
+    assert client.get("/api/plan/feed.ics").status_code == 404
+    assert client.get("/api/plan/feed.ics?key=wrong").status_code == 404
+
+
+def test_feed_returns_rolling_two_weeks(tmp_path, monkeypatch, api_auth_headers):
+    """Le flux contient les séances de la semaine en cours + la semaine à venir
+    (fenêtre de 14 jours à partir du lundi courant).
+    """
+    from domestique_ai.export.ics import rolling_weeks_window
+
+    client, key = _setup_feed_plan(tmp_path, monkeypatch, api_auth_headers)
+    response = client.get(f"/api/plan/feed.ics?key={key}")
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/calendar")
+    text = response.content.decode("utf-8")
+    start, _ = rolling_weeks_window(dt.date.today())
+    d1 = start.isoformat()
+    d2 = (start + dt.timedelta(days=2)).isoformat()
+    # Deux séances dans la fenêtre.
+    assert text.count("BEGIN:VEVENT") == 2
+    assert f"UID:domestique-ai-{d1}@domestique-ai" in text
+    assert f"UID:domestique-ai-{d2}@domestique-ai" in text
+    # La DESCRIPTION est bien présente (détail par zones).
+    assert "DESCRIPTION:" in text
+    assert "Z2" in text
+
+
+def test_feed_no_key_configured_returns_404(tmp_path, monkeypatch, api_auth_headers):
+    from fastapi.testclient import TestClient
+
+    from domestique_ai.api.main import app
+
+    monkeypatch.setenv("DOMESTIQUE_AI_DB_PATH", str(tmp_path / "feed_nokey.db"))
+    monkeypatch.delenv("DOMESTIQUE_AI_CALENDAR_FEED_KEY", raising=False)
+    client = TestClient(app, headers=api_auth_headers)
+    assert client.get("/api/plan/feed.ics?key=anything").status_code == 404

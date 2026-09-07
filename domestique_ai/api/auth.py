@@ -68,13 +68,16 @@ class BearerAuthMiddleware:
     """
 
     _LOG = get_logger("auth")
-    # Routes joignables sans session : accept-invite (entrée des comptes) et le
-    # callback OAuth Google Health (redirection navigateur, validée par son `state`).
+    # Routes joignables sans session : accept-invite (entrée des comptes), le
+    # callback OAuth Google Health (redirection navigateur, validée par son
+    # `state`), et le flux iCalendar (les clients calendrier ne peuvent pas
+    # envoyer de Bearer — il est protégé par sa propre clé `?key=`).
     _EXEMPT_API_PATHS = {
         "/api/health",
         "/api/auth/accept-invite",
         "/api/auth/reconnect",
         "/api/google-health/callback",
+        "/api/plan/feed.ics",
     }
 
     def __init__(
