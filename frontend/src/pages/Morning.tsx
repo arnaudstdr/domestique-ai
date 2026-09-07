@@ -499,27 +499,11 @@ interface SleepStagePoint {
 
 const HYPNO_COLORS: Record<string, string> = {
   DEEP: "#818cf8",
-  "DEEP_SLEEP": "#818cf8",
   REM: "#34d399",
-  "REM_SLEEP": "#34d399",
   LIGHT: "#fbbf24",
-  ASLEEP: "#fbbf24",
   AWAKE: "#f87171",
-  "AWAKE_SLEEP": "#f87171",
-  WAKE: "#f87171",
 };
 const HYPNO_FALLBACK_COLOR = "#6b7280";
-const HYPNO_STAGE_LABELS: Record<string, string> = {
-  DEEP: "Deep",
-  "DEEP_SLEEP": "Deep",
-  REM: "REM",
-  "REM_SLEEP": "REM",
-  LIGHT: "Light",
-  ASLEEP: "Light",
-  AWAKE: "Éveillé",
-  "AWAKE_SLEEP": "Éveillé",
-  WAKE: "Éveillé",
-};
 
 function parseSleepStages(entry: MorningEntry): SleepStagePoint[] | null {
   if (!entry.sleep_stages_json) return null;
@@ -550,6 +534,36 @@ function formatClock(iso: string): string {
   });
 }
 
+const HYPNO_ROW_ORDER = ["AWAKE", "REM", "LIGHT", "DEEP", "OTHER"] as const;
+
+function normalizeStageType(type: string): string {
+  switch (type) {
+    case "DEEP":
+    case "DEEP_SLEEP":
+      return "DEEP";
+    case "REM":
+    case "REM_SLEEP":
+      return "REM";
+    case "LIGHT":
+    case "ASLEEP":
+      return "LIGHT";
+    case "AWAKE":
+    case "AWAKE_SLEEP":
+    case "WAKE":
+      return "AWAKE";
+    default:
+      return "OTHER";
+  }
+}
+
+const HYPNO_ROW_LABELS: Record<string, string> = {
+  AWAKE: "Éveillé",
+  REM: "REM",
+  LIGHT: "Light",
+  DEEP: "Deep",
+  OTHER: "Autre",
+};
+
 function SleepHypnogram({ entry }: { entry: MorningEntry }) {
   const stages = parseSleepStages(entry);
   if (!stages) {
@@ -571,9 +585,17 @@ function SleepHypnogram({ entry }: { entry: MorningEntry }) {
   const tEnd = new Date(stages[stages.length - 1].end).getTime();
   const totalMs = Math.max(1, tEnd - t0);
 
+  const rows = HYPNO_ROW_ORDER.map((key) => ({
+    key,
+    label: HYPNO_ROW_LABELS[key],
+    color: key === "OTHER" ? HYPNO_FALLBACK_COLOR : HYPNO_COLORS[key],
+    segments: stages.filter((s) => normalizeStageType(s.type) === key),
+  })).filter((row) => row.segments.length > 0);
+
+  const HOUR_MS = 60 * 60 * 1000;
   const ticks: { time: string; posPct: number }[] = [];
-  const tickStepMs = 2 * 60 * 60 * 1000;
-  for (let t = t0; t <= tEnd; t += tickStepMs) {
+  const firstHour = Math.ceil(t0 / HOUR_MS) * HOUR_MS;
+  for (let t = firstHour; t <= tEnd; t += HOUR_MS) {
     ticks.push({
       time: formatClock(new Date(t).toISOString()),
       posPct: ((t - t0) / totalMs) * 100,
@@ -586,26 +608,35 @@ function SleepHypnogram({ entry }: { entry: MorningEntry }) {
         <BedDouble className="h-4 w-4 text-accent" strokeWidth={1.75} />
         Hypnogramme (dernière nuit)
       </h4>
-      <div className="relative">
-        <div className="flex h-14 w-full overflow-hidden rounded-lg bg-white/[0.03]">
-          {stages.map((s, i) => {
-            const startMs = new Date(s.start).getTime();
-            const endMs = new Date(s.end).getTime();
-            const durPct = Math.max(0.4, ((endMs - startMs) / totalMs) * 100);
-            const color = HYPNO_COLORS[s.type] ?? HYPNO_FALLBACK_COLOR;
-            const label = HYPNO_STAGE_LABELS[s.type] ?? s.type;
-            const durMin = Math.round((endMs - startMs) / 60000);
-            return (
-              <div
-                key={i}
-                title={`${label} · ${formatClock(s.start)} → ${formatClock(s.end)} (${formatMin(durMin)})`}
-                className="h-full border-r border-black/30 first:rounded-l-lg last:rounded-r-lg"
-                style={{ width: `${durPct}%`, backgroundColor: color }}
-              />
-            );
-          })}
-        </div>
-        <div className="relative mt-1 h-4">
+      <div className="space-y-1">
+        {rows.map((row) => (
+          <div key={row.key} className="flex items-center gap-2">
+            <span className="w-12 shrink-0 text-right text-[10px] uppercase tracking-wide text-muted">
+              {row.label}
+            </span>
+            <div className="relative h-6 flex-1 overflow-hidden rounded-md bg-white/[0.03]">
+              {row.segments.map((s, i) => {
+                const startMs = new Date(s.start).getTime();
+                const endMs = new Date(s.end).getTime();
+                const leftPct = ((startMs - t0) / totalMs) * 100;
+                const widthPct = Math.max(0.5, ((endMs - startMs) / totalMs) * 100);
+                const durMin = Math.round((endMs - startMs) / 60000);
+                return (
+                  <div
+                    key={i}
+                    title={`${row.label} · ${formatClock(s.start)} → ${formatClock(s.end)} (${formatMin(durMin)})`}
+                    className="absolute top-0 h-full rounded-sm"
+                    style={{ left: `${leftPct}%`, width: `${widthPct}%`, backgroundColor: row.color }}
+                  />
+                );
+              })}
+            </div>
+          </div>
+        ))}
+      </div>
+      <div className="flex items-center gap-2">
+        <span className="w-12 shrink-0" />
+        <div className="relative h-4 flex-1">
           {ticks.map((tk, i) => (
             <span
               key={i}
@@ -618,16 +649,12 @@ function SleepHypnogram({ entry }: { entry: MorningEntry }) {
         </div>
       </div>
       <div className="flex flex-wrap gap-3 text-xs text-muted">
-        {(["DEEP", "REM", "LIGHT", "AWAKE"] as const).map((k) => (
-          <span key={k} className="inline-flex items-center gap-1.5">
-            <span className="inline-block h-2 w-2 rounded-full" style={{ backgroundColor: HYPNO_COLORS[k] }} />
-            {HYPNO_STAGE_LABELS[k]}
+        {rows.map((row) => (
+          <span key={row.key} className="inline-flex items-center gap-1.5">
+            <span className="inline-block h-2 w-2 rounded-full" style={{ backgroundColor: row.color }} />
+            {row.label}
           </span>
         ))}
-        <span className="inline-flex items-center gap-1.5">
-          <span className="inline-block h-2 w-2 rounded-full" style={{ backgroundColor: HYPNO_FALLBACK_COLOR }} />
-          Autre
-        </span>
       </div>
     </div>
   );
