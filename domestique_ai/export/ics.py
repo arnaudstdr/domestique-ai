@@ -87,7 +87,9 @@ def _format_dt_floating(date_iso: str, hour: int, minute: int = 0) -> str:
     return f"{d:%Y%m%d}T{hour:02d}{minute:02d}00"
 
 
-def _format_dt_utc_for(date_iso: str, hour: int, duration_min: int, tz_name: str) -> tuple[str, str]:
+def _format_dt_utc_for(
+    date_iso: str, hour: int, duration_min: int, tz_name: str
+) -> tuple[str, str]:
     """`DTSTART`/`DTEND` en UTC pour une séance à ``hour`` locale dans ``tz_name``.
 
     L'heure locale (18 h) est convertie en UTC via le fuseau ``tz_name``, et les
@@ -99,9 +101,7 @@ def _format_dt_utc_for(date_iso: str, hour: int, duration_min: int, tz_name: str
     Retourne ``(dtstart, dtend)`` formatés (``"20260521T160000Z"``, …).
     """
     tz = ZoneInfo(tz_name)
-    start = _dt.datetime.combine(
-        _dt.date.fromisoformat(date_iso), _dt.time(hour, 0), tzinfo=tz
-    )
+    start = _dt.datetime.combine(_dt.date.fromisoformat(date_iso), _dt.time(hour, 0), tzinfo=tz)
     end = start + _dt.timedelta(minutes=max(0, int(duration_min)))
     return start.astimezone(_dt.UTC).strftime("%Y%m%dT%H%M%SZ"), end.astimezone(_dt.UTC).strftime(
         "%Y%m%dT%H%M%SZ"
@@ -188,7 +188,9 @@ def _build_event(
     ``DURATION`` (export de fichier ``plan_to_ics``).
     """
     if tz_name:
-        dtstart, dtend = _format_dt_utc_for(workout.date, default_hour, workout.duration_min, tz_name)
+        dtstart, dtend = _format_dt_utc_for(
+            workout.date, default_hour, workout.duration_min, tz_name
+        )
         time_line = f"DTEND:{dtend}"
     else:
         dtstart = _format_dt_floating(workout.date, default_hour, 0)
@@ -239,7 +241,11 @@ def plan_to_ics(
         "METHOD:PUBLISH",
     ]
     for workout in plan:
-        lines.extend(_build_event(workout, workout_uid(workout, prefix=f"plan-{plan_id}-"), default_hour, dtstamp))
+        lines.extend(
+            _build_event(
+                workout, workout_uid(workout, prefix=f"plan-{plan_id}-"), default_hour, dtstamp
+            )
+        )
     lines.append("END:VCALENDAR")
     folded = [_fold_line(line) for line in lines]
     # RFC 5545 § 3.1 : terminer chaque ligne par CRLF + un dernier CRLF final.
@@ -275,7 +281,9 @@ def workout_to_ics(
         "METHOD:PUBLISH",
     ]
     lines.extend(
-        _build_event(workout, workout_uid(workout), default_hour, dtstamp, use_dtend=True, tz_name=tz_name)
+        _build_event(
+            workout, workout_uid(workout), default_hour, dtstamp, use_dtend=True, tz_name=tz_name
+        )
     )
     lines.append("END:VCALENDAR")
     folded = [_fold_line(line) for line in lines]
@@ -308,7 +316,14 @@ def plan_to_subscription_ics(
     ]
     for workout in plan:
         lines.extend(
-            _build_event(workout, workout_uid(workout), default_hour, dtstamp, use_dtend=True, tz_name=tz_name)
+            _build_event(
+                workout,
+                workout_uid(workout),
+                default_hour,
+                dtstamp,
+                use_dtend=True,
+                tz_name=tz_name,
+            )
         )
     lines.append("END:VCALENDAR")
     folded = [_fold_line(line) for line in lines]
@@ -366,7 +381,5 @@ def select_upcoming_workouts(
     merged = _apply_decisions(workouts, decisions or [])
     start_iso, end_iso = start.isoformat(), end.isoformat()
     return [
-        w
-        for date, w in sorted(merged.items())
-        if w is not None and start_iso <= date <= end_iso
+        w for date, w in sorted(merged.items()) if w is not None and start_iso <= date <= end_iso
     ]
