@@ -248,13 +248,14 @@ def _enforce_intensity_ceiling(
     target_for = {CEILING_BASE: "endurance", CEILING_TEMPO: "tempo"}[ceiling]
     new_week: list[Workout] = []
     for w in week:
-        downgrade = (
-            (ceiling == CEILING_BASE and w.kind in ("intervals", "tempo"))
-            or (ceiling == CEILING_TEMPO and w.kind == "intervals")
+        downgrade = (ceiling == CEILING_BASE and w.kind in ("intervals", "tempo")) or (
+            ceiling == CEILING_TEMPO and w.kind == "intervals"
         )
         if downgrade:
             new_week.append(_rebuild_workout(w, target_for, w.duration_min, week_idx))
-            adjustments.append(f"{w.date} : {w.kind} → {target_for} (reprise — plafond d'intensité)")
+            adjustments.append(
+                f"{w.date} : {w.kind} → {target_for} (reprise — plafond d'intensité)"
+            )
         else:
             new_week.append(w)
     return new_week

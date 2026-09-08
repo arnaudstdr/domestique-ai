@@ -494,7 +494,11 @@ def test_validator_downgrades_llm_intervals_in_base_week():
         ),
     ]
     out, adjustments = validate_and_correct(
-        plan, ctl_current=9.0, target_event_type="cyclosportive", total_weeks=6, level="intermediate"
+        plan,
+        ctl_current=9.0,
+        target_event_type="cyclosportive",
+        total_weeks=6,
+        level="intermediate",
     )
     kinds = {w.kind for w in out}
     assert "intervals" not in kinds

@@ -355,9 +355,7 @@ def run_weekly_review(
     # réévalué aux revues suivantes). week_idx repart à 0 → la rampe de reprise
     # et le plafond de progression se mesurent depuis le CTL *actuel*.
     total_weeks = (
-        max(1, (target_date - next_monday).days // 7 + 1)
-        if target_date is not None
-        else 4
+        max(1, (target_date - next_monday).days // 7 + 1) if target_date is not None else 4
     )
 
     try:
@@ -405,7 +403,9 @@ def run_weekly_review(
         # par le LLM ; progress/maintain laissent le coach libre dans les bornes.
         new_week = _scale_plan(generated.workouts, volume_factor)
         kept = [
-            w for w in existing_plan if not (next_monday <= _dt.date.fromisoformat(w.date) < week_end)
+            w
+            for w in existing_plan
+            if not (next_monday <= _dt.date.fromisoformat(w.date) < week_end)
         ]
         merged = sorted(kept + list(new_week), key=lambda w: w.date)
         plan_start = min(_dt.date.fromisoformat(w.date) for w in merged)

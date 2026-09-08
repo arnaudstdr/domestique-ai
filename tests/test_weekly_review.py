@@ -217,7 +217,11 @@ def test_review_window_sliding_keeps_history(ctx: AthleteContext) -> None:
     # Des séances planifiées avant la semaine à venir sont conservées…
     assert dates[0] < next_monday
     # …et la semaine à venir est bien représentée.
-    upcoming = [w for w in new_plan if next_monday <= _dt.date.fromisoformat(w.date) < next_monday + _dt.timedelta(days=7)]
+    upcoming = [
+        w
+        for w in new_plan
+        if next_monday <= _dt.date.fromisoformat(w.date) < next_monday + _dt.timedelta(days=7)
+    ]
     assert upcoming
     # Chaîne de versionnement préservée.
     assert get_plan_meta(result["new_plan_id"], ctx.db_path)["parent_plan_id"] == parent_id

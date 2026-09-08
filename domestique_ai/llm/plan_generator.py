@@ -432,9 +432,8 @@ def _decision_text(ctx: GenerationContext) -> str:
     """Une seule ligne : l'ajustement de volume décidé par la revue hebdo."""
     if not ctx.adapt_decision:
         return ""
-    return (
-        f"Ajustement décidé par la revue hebdo : {ctx.adapt_decision.upper()}"
-        + (f" — {ctx.adapt_reason}" if ctx.adapt_reason else "")
+    return f"Ajustement décidé par la revue hebdo : {ctx.adapt_decision.upper()}" + (
+        f" — {ctx.adapt_reason}" if ctx.adapt_reason else ""
     )
 
 
