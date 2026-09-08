@@ -98,3 +98,31 @@ def test_sex_lowercase_is_coerced(tmp_path, monkeypatch):
     loaded = load_profile()
     assert loaded is not None
     assert loaded.sex == "F"
+
+
+def test_level_roundtrip(tmp_path, monkeypatch):
+    _patch_path(tmp_path, monkeypatch)
+    save_profile(Profile(ftp=250, level="ex_competitor"))
+    loaded = load_profile()
+    assert loaded is not None
+    assert loaded.level == "ex_competitor"
+
+
+def test_level_defaults_to_intermediate(tmp_path, monkeypatch):
+    _patch_path(tmp_path, monkeypatch, content="ftp: 230\n")
+    loaded = load_profile()
+    assert loaded is not None
+    assert loaded.level == "intermediate"
+
+
+def test_level_invalid_rejected(tmp_path, monkeypatch):
+    _patch_path(tmp_path, monkeypatch, content="level: olympien\n")
+    with pytest.raises(ProfileError, match="level invalide"):
+        load_profile()
+
+
+def test_level_case_is_normalized(tmp_path, monkeypatch):
+    _patch_path(tmp_path, monkeypatch, content="level: Advanced\n")
+    loaded = load_profile()
+    assert loaded is not None
+    assert loaded.level == "advanced"

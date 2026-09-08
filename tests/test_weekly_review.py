@@ -141,10 +141,16 @@ def test_review_replans_creates_version(ctx: AthleteContext) -> None:
     assert get_plan_meta(new_id, ctx.db_path)["parent_plan_id"] == parent_id
     assert get_plan_meta(new_id, ctx.db_path)["adapt_reason"]
 
-    # Le nouveau plan commence lundi prochain.
+    # Fenêtre glissante : la semaine à venir est re-composée et présente.
     new_plan = load_plan(new_id, ctx.db_path)
     assert new_plan is not None
-    assert _dt.date.fromisoformat(new_plan[0].date) >= _next_monday(today)
+    next_monday = _next_monday(today)
+    upcoming = [
+        w
+        for w in new_plan
+        if next_monday.isoformat() <= w.date < (next_monday + _dt.timedelta(days=7)).isoformat()
+    ]
+    assert upcoming
 
     # Flag d'idempotence posé.
     assert get_sync_meta("weekly_review_last_week", ctx.db_path) == _iso_week_key(today)
@@ -191,3 +197,27 @@ def test_review_reduce_scales_durations(ctx: AthleteContext) -> None:
     ]
     assert first_week
     assert all(w.duration_min < 100 for w in first_week if w.kind == "endurance")
+
+
+def test_review_window_sliding_keeps_history(ctx: AthleteContext) -> None:
+    """Fenêtre glissante : on re-compose la semaine à venir mais l'historique
+    antérieur (séances déjà planifiées) reste présent dans la nouvelle version."""
+    today = _dt.date.today()
+    last_monday = today - _dt.timedelta(days=today.weekday() + 7)
+    parent_id = _plan_covering(ctx, last_monday, weeks=6)
+    _seed_morning(ctx, today)
+
+    result = run_weekly_review(today, ctx=ctx, use_llm=False, force=True)
+    assert result["replanned"] is True
+    new_plan = load_plan(result["new_plan_id"], ctx.db_path)
+    assert new_plan is not None
+
+    next_monday = _next_monday(today)
+    dates = sorted(_dt.date.fromisoformat(w.date) for w in new_plan)
+    # Des séances planifiées avant la semaine à venir sont conservées…
+    assert dates[0] < next_monday
+    # …et la semaine à venir est bien représentée.
+    upcoming = [w for w in new_plan if next_monday <= _dt.date.fromisoformat(w.date) < next_monday + _dt.timedelta(days=7)]
+    assert upcoming
+    # Chaîne de versionnement préservée.
+    assert get_plan_meta(result["new_plan_id"], ctx.db_path)["parent_plan_id"] == parent_id

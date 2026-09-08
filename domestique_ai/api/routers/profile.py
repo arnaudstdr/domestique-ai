@@ -30,6 +30,7 @@ def _to_schema(model: ProfileModel) -> ProfileSchema:
         hr_max=model.hr_max,
         sex=model.sex,  # type: ignore[arg-type]
         lthr_pct=model.lthr_pct,
+        level=model.level,  # type: ignore[arg-type]
     )
 
 
@@ -82,6 +83,7 @@ def put_profile(
                 hr_max=payload.hr_max,
                 sex=payload.sex,
                 lthr_pct=payload.lthr_pct,
+                level=payload.level,
             ),
             ctx.profile_path,
         )

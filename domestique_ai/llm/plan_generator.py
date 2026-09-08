@@ -36,6 +36,11 @@ from pydantic import BaseModel, Field, ValidationError, field_validator
 from domestique_ai.athlete_context import AthleteContext
 from domestique_ai.llm.availability import _WEEKDAY_BY_INDEX, Availability
 from domestique_ai.llm.ollama_client import chat_structured
+from domestique_ai.processing.athlete_state import (
+    CEILING_FULL,
+    format_state_block,
+    intensity_ceiling,
+)
 from domestique_ai.processing.plan_builder import (
     _BASE_DURATION_MIN,
     _TARGET_ZONE,
@@ -152,8 +157,12 @@ def _build_user_prompt(
     availability: Availability | None,
     adaptation: str = "",
     emphasis: str = "",
+    state_text: str = "",
+    ceiling: str = "full",
 ) -> str:
     """Prompt utilisateur : contexte chiffré + contraintes hebdo + intentions."""
+    from domestique_ai.processing.athlete_state import CEILING_BASE, CEILING_TEMPO
+
     lines: list[str] = []
     lines.append(
         f"Semaine {week_index + 1} sur {total_weeks}. "
@@ -166,17 +175,35 @@ def _build_user_prompt(
         lines.append(f"Pas d'objectif daté — mode {objective_type}.")
     lines.append(f"CTL courant : {ctl_current:.1f} pts.")
 
-    phase = (
-        "TAPER (volume réduit, intensité maintenue, fraîcheur)"
-        if is_taper
-        else "RÉCUPÉRATION (volume −35 %, pas d'intervalles)"
-        if is_recovery_week
-        else "CHARGE (progression progressive du volume)"
-    )
+    if ceiling == CEILING_BASE:
+        phase = (
+            "REPRISE / FONDATION — cette semaine est consacrée à la base : "
+            "uniquement Z1-Z2 et récupération active. AUCUNE séance tempo (Z3) "
+            "ni intervalles (Z4-Z5)."
+        )
+    elif ceiling == CEILING_TEMPO:
+        phase = (
+            "REPRISE / TRANSITION — réintroduction progressive : au plus une "
+            "séance tempo/sweetspot courte, AUCUNE séance intervalles (Z4-Z5)."
+        )
+    elif is_taper:
+        phase = "TAPER (volume réduit, intensité maintenue, fraîcheur)"
+    elif is_recovery_week:
+        phase = "RÉCUPÉRATION (volume −35 %, pas d'intervalles)"
+    else:
+        phase = "CHARGE (progression progressive du volume)"
     lines.append(f"Phase : {phase}.")
 
+    if state_text:
+        lines.append("")
+        lines.append(state_text)
+        lines.append(
+            "Raisonner uniquement sur ces faits (charge, tendance, récupération, "
+            "niveau, semaine écoulée) — n'invente aucun chiffre, n'ajoute pas "
+            "d'intensité que l'état ne permet pas."
+        )
+
     if adaptation:
-        lines.append("État réel de l'athlète (données calculées, fiables) :")
         lines.append(adaptation)
 
     if emphasis:
@@ -211,11 +238,22 @@ def _build_user_prompt(
                 + "."
             )
 
-    lines.append(
-        "Respecte la polarisation 80/20 : au plus une séance Z4-Z5 par semaine, "
-        "et au moins un jour de récupération ou d'endurance facile encadrant. "
-        "Pas plus de 6 séances par semaine."
-    )
+    if ceiling == CEILING_BASE:
+        lines.append(
+            "Types autorisés cette semaine : recovery, endurance uniquement. "
+            "Pas plus de 6 séances par semaine."
+        )
+    elif ceiling == CEILING_TEMPO:
+        lines.append(
+            "Types autorisés cette semaine : recovery, endurance, tempo (jamais "
+            "intervals). Pas plus de 6 séances par semaine."
+        )
+    else:
+        lines.append(
+            "Respecte la polarisation 80/20 : au plus une séance Z4-Z5 par semaine, "
+            "et au moins un jour de récupération ou d'endurance facile encadrant. "
+            "Pas plus de 6 séances par semaine."
+        )
     return "\n".join(lines)
 
 
@@ -232,6 +270,8 @@ async def _generate_week_with_llm(
     availability: Availability | None,
     adaptation: str = "",
     emphasis: str = "",
+    state_text: str = "",
+    ceiling: str = "full",
 ) -> list[Workout] | None:
     """Tente une génération LLM avec retry. Retourne ``None`` si échec définitif."""
     system = _build_system_prompt()
@@ -248,6 +288,8 @@ async def _generate_week_with_llm(
         availability,
         adaptation,
         emphasis,
+        state_text,
+        ceiling,
     )
     messages = [
         {"role": "system", "content": system},
@@ -290,14 +332,19 @@ def _fallback_week(
     focus: str | None,
     sessions_per_week: int,
     min_ctl: float = 20.0,
+    level: str | None = None,
+    ctl_trend: str | None = None,
+    chronic_tsb: float | None = None,
+    plan_start: _dt.date | None = None,
 ) -> list[Workout]:
     """Fallback déterministe pour une seule semaine.
 
-    Génère le plan complet puis isole les séances tombant dans la fenêtre
-    ``[week_start, week_start + 7j)``. C'est inefficace en théorie mais le
-    builder est rapide (~ms) et cela garantit une cohérence parfaite avec le
-    reste du plan déterministe.
+    On construit le plan complet depuis le **vrai** début de plan (``plan_start``)
+    puis on isole la semaine ``week_start``. Ainsi la rampe de reprise et le
+    plafond de progression sont mesurés à la bonne position (sinon chaque semaine
+    isolée repartirait en « semaine 0 » et resterait bloquée en base).
     """
+    anchor = plan_start or week_start
     plan = build_training_plan(
         target_date=target_date,
         ctl_current=ctl_current,
@@ -305,9 +352,12 @@ def _fallback_week(
         availability=availability,
         target_event_type=target_event_type,
         focus=focus,
-        start_date=week_start,
-        fallback_weeks=max(1, total_weeks - week_index),
+        start_date=anchor,
+        fallback_weeks=max(1, total_weeks),
         min_ctl=min_ctl,
+        level=level,
+        ctl_trend=ctl_trend,
+        chronic_tsb=chronic_tsb,
     )
     week_end = week_start + _dt.timedelta(days=7)
     return [w for w in plan if week_start <= _dt.date.fromisoformat(w.date) < week_end]
@@ -332,10 +382,31 @@ class GenerationContext:
     compliance: dict[str, Any] | None = None
     adapt_decision: str | None = None  # "reduce" | "maintain" | "progress"
     adapt_reason: str | None = None
+    # État physiologique complet (faits sur lesquels le coach raisonne).
+    atl_current: float | None = None
+    ctl_trend: str | None = None  # "rising" | "falling" | "flat"
+    chronic_tsb: float | None = None  # moyenne TSB 7 j
+    level: str | None = None  # niveau/expérience de l'athlète
+    coach_state: dict[str, Any] | None = None  # dict agrégé (athlete_state)
+
+    def ceiling_for(self, week_index: int) -> str:
+        """Plafond d'intensité de la semaine ``week_index`` (reprise graduée)."""
+        from domestique_ai.processing.athlete_state import intensity_ceiling
+
+        return intensity_ceiling(
+            week_index,
+            ctl_current=self.ctl_current,
+            level=self.level,
+            ctl_trend=self.ctl_trend,
+            chronic_tsb=self.chronic_tsb,
+            threshold=self.min_ctl,
+        )
 
 
 def _build_adaptation_text(ctx: GenerationContext) -> str:
-    """Bloc texte décrivant l'état réel (semaine écoulée + récupération)."""
+    """Bloc texte (repli) : TSB/récup/compliance — utilisé quand l'état
+    consolidé ``coach_state`` est indisponible. Quand le bloc « État réel » est
+    présent, on ne garde que la décision de volume (voir ``_decision_text``)."""
     lines: list[str] = []
     if ctx.tsb is not None:
         lines.append(f"TSB courant : {ctx.tsb:.1f} pts.")
@@ -353,12 +424,18 @@ def _build_adaptation_text(ctx: GenerationContext) -> str:
             f"TSS planifié {compliance.get('planned_tss', 0.0)} vs réalisé "
             f"{compliance.get('realized_tss', 0.0)}."
         )
-    if ctx.adapt_decision:
-        lines.append(
-            f"Ajustement décidé par la revue hebdo : {ctx.adapt_decision.upper()}"
-            + (f" — {ctx.adapt_reason}" if ctx.adapt_reason else "")
-        )
-    return "\n".join(lines)
+    lines.append(_decision_text(ctx))
+    return "\n".join(x for x in lines if x)
+
+
+def _decision_text(ctx: GenerationContext) -> str:
+    """Une seule ligne : l'ajustement de volume décidé par la revue hebdo."""
+    if not ctx.adapt_decision:
+        return ""
+    return (
+        f"Ajustement décidé par la revue hebdo : {ctx.adapt_decision.upper()}"
+        + (f" — {ctx.adapt_reason}" if ctx.adapt_reason else "")
+    )
 
 
 def _resolve_total_weeks(ctx: GenerationContext) -> int:
@@ -368,43 +445,57 @@ def _resolve_total_weeks(ctx: GenerationContext) -> int:
     return max(1, (days + 6) // 7)
 
 
-async def generate_plan_stream(
+async def _compose_one_week(
     ctx: GenerationContext,
-) -> AsyncIterator[GeneratedWeek]:
-    """Génère le plan semaine par semaine en streamant chaque semaine validée.
+    *,
+    week_index: int,
+    total_weeks: int,
+    cur_week_start: _dt.date,
+    plan_start: _dt.date,
+    min_ctl: float,
+    use_llm: bool = True,
+) -> GeneratedWeek | None:
+    """Compose et valide UNE semaine du plan (LLM borné, fallback déterministe).
 
-    Pour chaque semaine, on tente la génération LLM ; si elle échoue, on
-    bascule sur le builder déterministe pour cette semaine *uniquement*.
-    Chaque semaine est validée par ``validate_and_correct`` avant d'être
-    yieldée.
+    Partie commune entre la génération initiale (boucle sur toutes les
+    semaines) et la revue hebdomadaire (re-composition de la semaine à venir).
+    Retourne ``None`` si la semaine ne contient aucun jour à venir.
     """
-    total_weeks = _resolve_total_weeks(ctx)
-    week_start = ctx.today - _dt.timedelta(days=ctx.today.weekday())
-    adaptation = _build_adaptation_text(ctx)
     flavor = _objective_flavor(ctx.target_event_type)
-    emphasis = _training_emphasis(ctx.target_event_type)
     taper_weeks = int(flavor["taper_weeks"])
+    emphasis = _training_emphasis(ctx.target_event_type)
+    state_text = format_state_block(ctx.coach_state) if ctx.coach_state else ""
 
-    for week_index in range(total_weeks):
-        cur_week_start = week_start + _dt.timedelta(days=week_index * 7)
-        cur_week_end = cur_week_start + _dt.timedelta(days=7)
-        # On ne génère pas pour des jours déjà passés (utile en semaine 0).
-        future_dates = [
-            d
-            for d in _week_dates(cur_week_start, ctx.availability)
-            if d >= ctx.today and d < cur_week_end
-        ]
-        if not future_dates:
-            continue
+    cur_week_end = cur_week_start + _dt.timedelta(days=7)
+    future_dates = [
+        d
+        for d in _week_dates(cur_week_start, ctx.availability)
+        if d >= ctx.today and d < cur_week_end
+    ]
+    if not future_dates:
+        return None
 
-        weeks_to_event = (
-            (ctx.target_date - cur_week_start).days // 7 if ctx.target_date is not None else None
-        )
-        is_taper = weeks_to_event is not None and taper_weeks > 0 and weeks_to_event < taper_weeks
-        is_recovery_week = (week_index % 4 == 3) and not is_taper
+    weeks_to_event = (
+        (ctx.target_date - cur_week_start).days // 7 if ctx.target_date is not None else None
+    )
+    is_taper = weeks_to_event is not None and taper_weeks > 0 and weeks_to_event < taper_weeks
+    is_recovery_week = (week_index % 4 == 3) and not is_taper
+    ceiling = intensity_ceiling(
+        week_index,
+        ctl_current=ctx.ctl_current,
+        level=ctx.level,
+        ctl_trend=ctx.ctl_trend,
+        chronic_tsb=ctx.chronic_tsb,
+        threshold=min_ctl,
+    )
+    # En reprise, la consigne de phase prime : on retire l'emphase "intensité".
+    week_emphasis = emphasis if ceiling == CEILING_FULL else ""
+    # Faits déjà portés par le bloc « État réel » → on n'évite la duplication.
+    adaptation = _decision_text(ctx) if state_text else _build_adaptation_text(ctx)
 
-        try:
-            llm_workouts = await _generate_week_with_llm(
+    try:
+        llm_workouts = (
+            await _generate_week_with_llm(
                 week_index=week_index,
                 total_weeks=total_weeks,
                 dates=future_dates,
@@ -416,49 +507,117 @@ async def generate_plan_stream(
                 is_recovery_week=is_recovery_week,
                 availability=ctx.availability,
                 adaptation=adaptation,
-                emphasis=emphasis,
+                emphasis=week_emphasis,
+                state_text=state_text,
+                ceiling=ceiling,
             )
-        except asyncio.CancelledError:
-            raise
-        except Exception:  # noqa: BLE001 — best-effort, fallback couvre
-            llm_workouts = None
+            if use_llm
+            else None
+        )
+    except asyncio.CancelledError:
+        raise
+    except Exception:  # noqa: BLE001 — best-effort, fallback couvre
+        llm_workouts = None
 
-        if llm_workouts:
-            source: Literal["llm", "fallback"] = "llm"
-            workouts = llm_workouts
-        else:
-            source = "fallback"
-            workouts = _fallback_week(
-                week_index=week_index,
-                total_weeks=total_weeks,
-                week_start=cur_week_start,
-                target_date=ctx.target_date,
-                ctl_current=ctx.ctl_current,
-                availability=ctx.availability,
-                target_event_type=ctx.target_event_type,
-                focus=ctx.focus,
-                sessions_per_week=ctx.sessions_per_week,
-                min_ctl=ctx.min_ctl,
-            )
-
-        # Validation déterministe avant émission. Le week_idx est ancré sur le
-        # vrai début du plan (sinon, semaine validée isolément → week_idx 0 →
-        # plafonds TSS plats et pas de progression).
-        corrected, adjustments = validate_and_correct(
-            workouts,
+    if llm_workouts:
+        source: Literal["llm", "fallback"] = "llm"
+        workouts = llm_workouts
+    else:
+        source = "fallback"
+        workouts = _fallback_week(
+            week_index=week_index,
+            total_weeks=total_weeks,
+            week_start=cur_week_start,
+            target_date=ctx.target_date,
             ctl_current=ctx.ctl_current,
             availability=ctx.availability,
             target_event_type=ctx.target_event_type,
-            total_weeks=total_weeks,
-            min_ctl=ctx.min_ctl,
-            plan_start_iso=week_start.isoformat(),
+            focus=ctx.focus,
+            sessions_per_week=ctx.sessions_per_week,
+            min_ctl=min_ctl,
+            level=ctx.level,
+            ctl_trend=ctx.ctl_trend,
+            chronic_tsb=ctx.chronic_tsb,
+            plan_start=plan_start,
         )
-        yield GeneratedWeek(
+
+    corrected, adjustments = validate_and_correct(
+        workouts,
+        ctl_current=ctx.ctl_current,
+        availability=ctx.availability,
+        target_event_type=ctx.target_event_type,
+        total_weeks=total_weeks,
+        min_ctl=min_ctl,
+        plan_start_iso=plan_start.isoformat(),
+        level=ctx.level,
+        ctl_trend=ctx.ctl_trend,
+        chronic_tsb=ctx.chronic_tsb,
+    )
+    return GeneratedWeek(
+        week_index=week_index,
+        workouts=corrected,
+        source=source,
+        adjustments=adjustments,
+    )
+
+
+async def generate_plan_stream(
+    ctx: GenerationContext,
+    *,
+    use_llm: bool = True,
+) -> AsyncIterator[GeneratedWeek]:
+    """Génère le plan semaine par semaine en streamant chaque semaine validée.
+
+    Pour chaque semaine, on tente la génération LLM ; si elle échoue, on
+    bascule sur le builder déterministe pour cette semaine *uniquement*.
+    Chaque semaine est validée par ``validate_and_correct`` avant d'être
+    yieldée. ``use_llm=False`` force le déterminisme (tests, sans réseau).
+    """
+    total_weeks = _resolve_total_weeks(ctx)
+    week_start = ctx.today - _dt.timedelta(days=ctx.today.weekday())
+
+    for week_index in range(total_weeks):
+        cur_week_start = week_start + _dt.timedelta(days=week_index * 7)
+        generated = await _compose_one_week(
+            ctx,
             week_index=week_index,
-            workouts=corrected,
-            source=source,
-            adjustments=adjustments,
+            total_weeks=total_weeks,
+            cur_week_start=cur_week_start,
+            plan_start=week_start,
+            min_ctl=ctx.min_ctl,
+            use_llm=use_llm,
         )
+        if generated is not None:
+            yield generated
+
+
+async def compose_upcoming_week(
+    ctx: GenerationContext,
+    *,
+    next_monday: _dt.date,
+    plan_start: _dt.date,
+    target_date: _dt.date | None,
+    total_weeks: int,
+    use_llm: bool = True,
+) -> GeneratedWeek | None:
+    """Re-compose la semaine à venir (fenêtre glissante) pour la revue hebdo.
+
+    ``ctx`` doit être fraîchement alimenté avec l'état réel (CTL/ATL/TSB,
+    compliance de la semaine écoulée, niveau). Le résultat est une seule
+    semaine validée, prête à remplacer la semaine correspondante du plan actif.
+    ``use_llm=False`` force le builder déterministe (tests, sans réseau).
+    """
+    week_index = max(0, (next_monday - plan_start).days // 7)
+    ctx.target_date = target_date
+    return await _compose_one_week(
+        ctx,
+        week_index=week_index,
+        total_weeks=total_weeks,
+        cur_week_start=next_monday,
+        plan_start=plan_start,
+        min_ctl=ctx.min_ctl,
+        use_llm=use_llm,
+    )
 
 
 async def collect_plan(ctx: GenerationContext) -> tuple[list[Workout], list[GeneratedWeek]]:
@@ -555,6 +714,32 @@ def build_context_from_app_state(
     except Exception:  # noqa: BLE001 — contexte enrichi best-effort
         pass
 
+    # État physiologique complet (CTL/ATL/TSB + tendance + niveau) pour que le
+    # coach raisonne sur des faits cohérents avec la revue hebdo / le check matin.
+    from domestique_ai.processing.athlete_state import (
+        build_coach_state,
+        summarize_load_state,
+    )
+
+    load = summarize_load_state(curves)
+    atl_current = load.get("atl")
+    ctl_trend = load.get("ctl_trend")
+    chronic_tsb = load.get("chronic_tsb")
+    level = getattr(ctx, "level", None)
+
+    coach_state: dict[str, Any] | None = None
+    try:
+        coach_state = build_coach_state(
+            ctx=ctx,
+            today=today,
+            activities=activities,
+            availability=availability,
+            compliance=compliance,
+            threshold=get_plan_min_ctl(),
+        )
+    except Exception:  # noqa: BLE001 — l'état enrichi reste optionnel
+        coach_state = None
+
     return GenerationContext(
         sessions_per_week=sessions_per_week,
         focus=focus,
@@ -568,6 +753,11 @@ def build_context_from_app_state(
         readiness_median=readiness_median,
         hrv_delta_pct=hrv_delta_pct,
         compliance=compliance,
+        atl_current=atl_current,
+        ctl_trend=ctl_trend,
+        chronic_tsb=chronic_tsb,
+        level=level,
+        coach_state=coach_state,
     )
 
 

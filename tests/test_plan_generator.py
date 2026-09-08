@@ -374,3 +374,90 @@ def test_fallback_default_duration_known_kinds():
     assert pg.fallback_default_duration("intervals") == 60
     assert pg.fallback_default_duration("recovery") == 45
     assert pg.fallback_default_duration("unknown") == 60
+
+
+# ---------- Reprise : prompt + génération bornée par l'état réel --------------
+
+
+def _prompt(week_index: int = 0, ctl: float = 9.0, **kw) -> str:
+    return pg._build_user_prompt(
+        week_index,
+        4,
+        [dt.date(2026, 9, 7) + dt.timedelta(days=i) for i in (0, 2, 4, 6)],
+        "forme",
+        None,
+        ctl,
+        None,
+        False,
+        False,
+        None,
+        **kw,
+    )
+
+
+def test_prompt_base_ceiling_forbids_intensity():
+    text = _prompt(ceiling="base")
+    assert "REPRISE / FONDATION" in text
+    assert "recovery, endurance uniquement" in text
+    assert "AUCUN" in text.upper()
+
+
+def test_prompt_tempo_ceiling_forbids_intervals():
+    text = _prompt(ceiling="tempo")
+    assert "REPRISE / TRANSITION" in text
+    assert "jamais intervals" in text
+
+
+def test_prompt_includes_state_block_facts():
+    state = (
+        "État réel de l'athlète (données calculées, fiables) :\n"
+        "- Charge : CTL 9.0 · ATL 12.0 · TSB -3.0 ; CTL en baisse."
+    )
+    text = _prompt(state_text=state)
+    assert "État réel" in text
+    assert "CTL en baisse" in text
+    assert "Raisonner uniquement sur ces faits" in text
+
+
+def test_context_ceiling_for_reflects_reprise():
+    ctx = pg.GenerationContext(
+        sessions_per_week=4,
+        focus=None,
+        target_date=None,
+        target_event_type="forme",
+        ctl_current=9.0,
+        availability=None,
+        today=dt.date(2026, 9, 7),
+        level="beginner",
+    )
+    assert ctx.ceiling_for(0) == "base"
+
+
+def test_reprise_fallback_week_has_no_intervals(monkeypatch):
+    """Génération (fallback LLM KO) à CTL 9 → aucune séance Z4 la semaine 1."""
+    _patch_chat_structured(monkeypatch, [None, None, None, None])
+    ctx = pg.GenerationContext(
+        sessions_per_week=4,
+        focus=None,
+        target_date=None,
+        target_event_type="forme",
+        ctl_current=9.0,
+        availability=None,
+        today=dt.date(2026, 9, 7),
+        min_ctl=20.0,
+        level="intermediate",
+    )
+    weeks: list[pg.GeneratedWeek] = []
+
+    async def _collect():
+        async for w in pg.generate_plan_stream(ctx):
+            weeks.append(w)
+
+    _run(_collect())
+    wk0 = [w for w in weeks if w.week_index == 0]
+    assert wk0
+    kinds0 = {w.kind for w in wk0[0].workouts}
+    assert "intervals" not in kinds0
+    # …mais revient plus tard dans le plan.
+    later = {w.kind for week in weeks for w in week.workouts if week.week_index >= 2}
+    assert "intervals" in later

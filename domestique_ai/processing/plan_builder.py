@@ -17,6 +17,11 @@ Périodisation appliquée :
   ``data/availability.yaml`` et l'allocation type→jour devient dynamique
   (endurance longue → outdoor le plus dispo, intervalles → indoor, etc.).
 - Z4-Z5 borné à ≤ 25 % du temps hebdomadaire (polarisation 80/20).
+- **Reprise graduée** pilotée par l'état réel (``processing.athlete_state``) :
+  quand l'athlète est déconditionné (CTL sous le plancher, CTL en baisse, ou
+  fatigue chronique), les premières semaines plafonnent l'intensité
+  (semaine 0 = Z1-Z2, puis tempo, puis cadence normale), calibré par le niveau
+  de l'athlète. La reconstruction de la base prime avant de re-stimuler.
 """
 
 from __future__ import annotations
@@ -28,6 +33,7 @@ from typing import Any
 
 from domestique_ai.llm.availability import Availability, DayAvailability
 from domestique_ai.processing.analyzer import HR_ZONE_KEYS
+from domestique_ai.processing.athlete_state import CEILING_BASE, CEILING_TEMPO, intensity_ceiling
 
 # Indices de jour (0 = lundi … 6 = dimanche). On précise un jour par séance pour
 # que le plan tombe sur des journées cohérentes ; l'utilisateur reste libre de
@@ -109,11 +115,11 @@ def _training_emphasis(target_event_type: str | None) -> str:
     """Consigne d'intention courte pour le générateur LLM (phase non contrainte)."""
     return {
         "forme": (
-            "Objectif : reconstruction de volume (retour en forme). Endurance "
-            "Z2 et sortie longue en priorité, MAIS garde une séance d'intensité "
-            "chaque semaine de charge (tempo/sweetspot), et une séance "
-            "d'intervalles/sweetspot soutenu une semaine sur deux — pour "
-            "réveiller le moteur sans le surcharger."
+            "Objectif : reconstruction de volume (retour en forme). La base "
+            "(endurance Z2, sortie longue) passe avant tout : on reconstruit la "
+            "caisse par le volume, puis on réintroduit l'intensité "
+            "progressivement selon l'état réel (tempo/sweetspot d'abord, "
+            "intervalles ensuite) — jamais au détriment de la base."
         ),
         "cyclo": (
             "Objectif : épreuve de longue distance. Le volume passe avant tout ; "
@@ -434,6 +440,9 @@ def build_training_plan(
     start_date: _dt.date | None = None,
     fallback_weeks: int = 4,
     min_ctl: float = 20.0,
+    level: str | None = None,
+    ctl_trend: str | None = None,
+    chronic_tsb: float | None = None,
 ) -> list[Workout]:
     """Construit la liste des séances entre ``start_date`` et ``target_date``.
 
@@ -473,6 +482,16 @@ def build_training_plan(
         weekly_tss_cap = _ctl_progression_cap(ctl_current, weeks_into_plan, min_ctl)
         # Semaine d'intervalles ? (profil : chaque semaine ou une semaine sur deux).
         intervals_week = (week_idx % int(flavor["intervals_freq"])) == 0
+        # Plafond d'intensité : en reprise, on reconstruit la base avant de
+        # re-stimuler (semaine 0 = Z1-Z2, puis tempo, puis rythme normal).
+        ceiling = intensity_ceiling(
+            week_idx,
+            ctl_current=ctl_current,
+            level=level,
+            ctl_trend=ctl_trend,
+            chronic_tsb=chronic_tsb,
+            threshold=min_ctl,
+        )
 
         sessions_this_week: list[Workout] = []
         weekly_tss = 0.0
@@ -490,6 +509,11 @@ def build_training_plan(
             kind = base_kind
             # Récup / taper / semaine sans intervalles → tempo léger.
             if kind == "intervals" and (is_recovery or is_taper or not intervals_week):
+                kind = "tempo"
+            # Reprise : on rabote l'intensité selon le plafond de la semaine.
+            if ceiling == CEILING_BASE and kind in ("intervals", "tempo"):
+                kind = "endurance"
+            elif ceiling == CEILING_TEMPO and kind == "intervals":
                 kind = "tempo"
             base_min = _BASE_DURATION_MIN[kind]
             # Endurance progresse plus vite avec les semaines de charge ; le type

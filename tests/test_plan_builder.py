@@ -467,3 +467,63 @@ def test_availability_with_fewer_days_than_sessions_caps_silently():
     )
     # 2 séances par semaine sur 2 semaines = 4 séances max (et probablement 4).
     assert 0 < len(plan) <= 4
+
+
+def _week0(plan: list[Workout], start: dt.date) -> list[Workout]:
+    end = start + dt.timedelta(days=7)
+    return [w for w in plan if start <= dt.date.fromisoformat(w.date) < end]
+
+
+@pytest.mark.parametrize("etype", ["forme", "cyclosportive", "course", "maintenance"])
+def test_reprise_low_ctl_first_week_has_no_intensity(etype: str):
+    """À CTL très bas (reprise), la semaine 1 reste Z1-Z2 (aucun tempo, aucun Z4)."""
+    today = dt.date(2026, 9, 7)
+    plan = build_training_plan(
+        target_date=None,
+        ctl_current=9.0,
+        sessions_per_week=4,
+        target_event_type=etype,
+        start_date=today,
+        fallback_weeks=6,
+        level="intermediate",
+    )
+    wk0 = _week0(plan, today - dt.timedelta(days=today.weekday()))
+    kinds = {w.kind for w in wk0}
+    assert "intervals" not in kinds
+    assert "tempo" not in kinds
+    assert kinds <= {"endurance", "recovery"}
+
+
+def test_reprise_reintroduces_intensity_after_ramp():
+    """Après la rampe de reprise, l'intensité revient (forme : intervalles 1 sem/2)."""
+    today = dt.date(2026, 9, 7)
+    week_start = today - dt.timedelta(days=today.weekday())
+    plan = build_training_plan(
+        target_date=None,
+        ctl_current=9.0,
+        sessions_per_week=4,
+        target_event_type="forme",
+        start_date=today,
+        fallback_weeks=6,
+        level="advanced",  # rampe courte (1 semaine)
+    )
+    wk0 = {w.kind for w in _week0(plan, week_start)}
+    wk1 = {w.kind for w in _week0(plan, week_start + dt.timedelta(days=7))}
+    assert "intervals" not in wk0  # semaine de base
+    assert "intervals" in wk1 or "tempo" in wk1  # reprise de l'intensité ensuite
+
+
+def test_normal_ctl_keeps_intervals_week0():
+    """Un athlète entraîné (CTL élevé) garde son intervalle dès la semaine 1."""
+    today = dt.date(2026, 9, 7)
+    week_start = today - dt.timedelta(days=today.weekday())
+    plan = build_training_plan(
+        target_date=None,
+        ctl_current=70.0,
+        sessions_per_week=4,
+        target_event_type="cyclosportive",
+        start_date=today,
+        fallback_weeks=4,
+    )
+    wk0 = {w.kind for w in _week0(plan, week_start)}
+    assert "intervals" in wk0

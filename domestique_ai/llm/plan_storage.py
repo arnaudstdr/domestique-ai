@@ -368,6 +368,10 @@ def build_and_save_plan(
     curves = calculate_ctl_atl_tsb(activities, end_date=today)
     ctl_current = float(curves[-1]["CTL"]) if curves else 0.0
 
+    from domestique_ai.processing.athlete_state import summarize_load_state
+
+    load = summarize_load_state(curves)
+
     objective = load_objective(ctx.objective_path)
     target_date: _dt.date | None = None
     target_event_type = "cyclosportive"
@@ -392,6 +396,9 @@ def build_and_save_plan(
         focus=focus,
         start_date=today,
         min_ctl=get_plan_min_ctl(),
+        level=ctx.level,
+        ctl_trend=load.get("ctl_trend"),
+        chronic_tsb=load.get("chronic_tsb"),
     )
 
     if not plan:

@@ -358,6 +358,7 @@ class ProfileSchema(BaseModel):
     hr_max: float | None = Field(default=None, gt=0)
     sex: Literal["M", "F"] = "M"
     lthr_pct: float = Field(default=0.88, ge=0.5, le=1.0)
+    level: Literal["beginner", "intermediate", "advanced", "ex_competitor"] = "intermediate"
 
 
 # ---- Disponibilité hebdomadaire ----------------------------------------------

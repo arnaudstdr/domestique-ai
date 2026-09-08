@@ -33,6 +33,7 @@ from domestique_ai.config import (
     get_ftp,
     get_hr_max,
     get_hr_rest,
+    get_level,
     get_lthr_pct,
     get_objective_path,
     get_profile_path,
@@ -53,6 +54,7 @@ class AthleteContext:
     hr_max: float | None
     sex: str
     lthr_pct: float
+    level: str = "intermediate"
 
 
 def context_from_env() -> AthleteContext:
@@ -71,6 +73,7 @@ def context_from_env() -> AthleteContext:
         hr_max=get_hr_max(),
         sex=get_sex(),
         lthr_pct=get_lthr_pct(),
+        level=get_level(),
     )
 
 
@@ -107,4 +110,5 @@ def context_for_athlete(user: dict) -> AthleteContext:
         hr_max=profile.hr_max if profile else None,
         sex=(profile.sex if profile else None) or "M",
         lthr_pct=profile.lthr_pct if profile else 0.88,
+        level=profile.level if profile else "intermediate",
     )

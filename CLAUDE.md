@@ -298,10 +298,17 @@ Chaque correction émet une chaîne descriptive dans `adjustments`, ce qui perme
 
 Il y a en réalité **6 garde-fous** : aux 4 ci-dessus s'ajoutent la **cadence d'intensité par type** (`_enforce_intensity_cadence`) — sur les semaines de charge (≥ 3 séances, hors récup/taper), le plan doit contenir l'intensité attendue par le type (intervalles chaque semaine pour course/cyclosportive/maintenance ; intervalles 1 sem sur 2 et tempo sinon pour cyclo/forme). Conversion de l'endurance la plus longue — hors jour long — uniquement si le plafond TSS le permet — et la **sortie longue sur le jour dédié** (`_enforce_long_ride`) : la plus longue endurance des semaines de charge est placée sur `long_endurance_day` et portée à ≥ 90 min si le plafond le permet. Le plafond TSS respecte aussi le plancher configurable `DOMESTIQUE_AI_PLAN_MIN_CTL` (défaut 20 — relever à 30-40 pour des semaines plus consistantes à la reprise).
 
+**Reprise graduée (`processing/athlete_state.py`)** — la source de faits du coach. L'intensité n'est plus jamais imposée quand l'athlète est déconditionné :
+- `is_deconditioned(ctl, ctl_trend, chronic_tsb, threshold)` : règle composite — `CTL < threshold` (réutilise `DOMESTIQUE_AI_PLAN_MIN_CTL`), **ou** CTL en baisse (7j vs 14j, sortie de coupure), **ou** TSB chronique 7j ≤ −20 (aligné sur `overtraining`).
+- `intensity_ceiling(week_idx, ...)` : plafond d'intensité par semaine de reprise — semaine 0 = `base` (Z1-Z2 seulement), semaines de rampe suivantes = `tempo`, puis `full` (cadence normale) une fois la rampe franchie. Longueur de rampe selon le **niveau** de l'athlète (`beginner` 3, `intermediate`/`ex_competitor` 2, `advanced` 1).
+- Le **builder** rabote les slots selon le plafond (`plan_builder`), le **validator** ne force plus d'intensité quand `ceiling != full` (`_enforce_intensity_cadence`), et le **prompt LLM** reçoit le bloc `format_state_block` (CTL/ATL/TSB + trajectoire + niveau + compliance + récup) + la consigne de phase pour raisonner sur des faits.
+- Le niveau vient du profil athlète (`Profile.level` : `beginner|intermediate|advanced|ex_competitor`, getter `config.get_level`, champ `AthleteContext.level`) — un `ex_competitor` qui reprend garde une rampe mais revient plus vite à l'intensité qu'un débutant, sans jamais sauter les garde-fous.
+- `build_coach_state(ctx, today, ...)` agrège l'état réel (best-effort, ne lève jamais) pour alimenter le prompt, la revue hebdo et, à terme, le check du matin sur les mêmes faits.
+
 **Périodisation pilotée par le type d'objectif** — `processing/plan_builder._OBJECTIVE_FLAVORS` : `target_event_type` actionne 3 leviers (fenêtre de taper, fréquence des intervalles, surpondération de l'endurance longue) :
 - `course` / `cyclosportive` : taper 2 sem, intervalles chaque semaine, endurance neutre.
 - `cyclo` : taper 1 sem, intervalles 1 sem sur 2, endurance ×1.2 (volume avant tout).
-- `forme` (retour en forme / base, sans échéance de course) : **pas de taper**, intervalles 1 sem sur 2, endurance ×1.15 — volume progressif.
+- `forme` (retour en forme / base, sans échéance de course) : **pas de taper**, volume Z2 prioritaire, intensité réintroduite progressivement selon l'état réel (tempo puis intervalles), pas de décharge finale.
 - `maintenance` : pas de taper, intervalles chaque semaine, endurance ×0.95 (routine allégée).
 
 Le générateur LLM (`plan_generator`) reçoit le même profil (fenêtre de taper + consigne d'intention dans le prompt via `_training_emphasis`).
@@ -348,10 +355,17 @@ idempotent) + **pre-sync Garmin** pour garantir des données fraîches, puis
 2. Décision `_fallback_decision()` : **reduce** si ≥ 2 manquées / adhérence < 50 % /
    readiness < 50 / sommeil < 6 h / TSB < −15 / alerte chronique ; **progress** si
    semaine conforme (facteur 1.05) ; **maintain** sinon.
-3. Re-génération **du prochain lundi à l'objectif** (taper préservé) via
-   `build_training_plan` avec le CTL réel, mise à l'échelle par le facteur volume,
-   garde-fous `validate_and_correct()` rejoués, puis `save_plan` en **nouvelle
-   version** (`parent_plan_id` + `adapt_reason`, l'ancien passe en `superseded`).
+3. **Fenêtre glissante** : le coach **re-compose la semaine à venir uniquement**
+   (à partir du prochain lundi, ancrée sur l'état réel du jour) via le LLM du
+   `plan_generator` (`compose_upcoming_week` → `_compose_one_week`), borné par
+   `validate_and_correct()` (les faits — CTL/ATL/TSB, compliance, niveau — sont
+   injectés dans le prompt, l'intensité est plafonnée en reprise). Le facteur
+   volume déterministe borne la semaine (reduce), `progress`/`maintain` laissent
+   le LLM libre dans les bornes. Le **reste du plan actif est conservé** et sera
+   réévalué aux revues suivantes (le plan « roule » semaine après semaine). Puis
+   `save_plan` en **nouvelle version** (`parent_plan_id` + `adapt_reason`,
+   l'ancien passe en `superseded`). Fallback déterministe si Ollama injoignable
+   (`use_llm=False` ou échec LLM).
 4. Idempotence : flag `weekly_review_last_week` dans `sync_meta` (une revue par
    semaine ISO). Pushover « Plan adapté » si re-plan effectué.
 
@@ -364,13 +378,21 @@ rétro-compatible via `from_dict`).
 
 **Génération LLM enrichie** : `GenerationContext` (plan_generator) porte
 désormais TSB, readiness médiane, dérive HRV et compliance de la semaine écoulée
-— injectés dans `_build_user_prompt` (bloc « État réel »). Le tool LLM
-`review_week` expose le rapport de semaine en lecture (le coach explique un
-ajustement sans inventer de chiffres).
++ **ATL, trajectoire CTL (7j vs 14j), TSB chronique, niveau (`level`) et
+`coach_state`** (l'agrégat `athlete_state.build_coach_state`) — injectés dans
+`_build_user_prompt` (bloc « État réel ») pour que le LLM **raisonne sur des
+faits**. `ceiling_for(week_idx)` décide du plafond d'intensité de chaque semaine
+(reprise → base/tempo → normal). Le tool LLM `review_week` expose le rapport de
+semaine en lecture (le coach explique un ajustement sans inventer de chiffres).
+`compose_upcoming_week` expose la composition d'une seule semaine (réutilisée
+par la revue hebdo).
 
 **Tests** : `test_compliance.py` (8), `test_daily_decision.py` (8),
-`test_weekly_review.py` (8) + extensions `test_plan_api.py` (active/versions/
-weekly-review/decision).
+`test_weekly_review.py` (9), `test_athlete_state.py` (règle composite + plafond
+gradué + bloc d'état) + extensions `test_plan_builder.py`/`test_plan_validator.py`
+(reprise = pas de Z4 semaine 1, cadence non forcée à CTL bas) et
+`test_plan_generator.py` (prompt état réel, ceiling reprise) et
+`test_profile.py` (champ `level`).
 
 ### Comparateur d'activités (`processing/similar.py`)
 

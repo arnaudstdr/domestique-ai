@@ -47,6 +47,21 @@ const OBJECTIVE_TYPE_HINTS: Record<Objective["type"], string> = {
   maintenance: "Entretenir la forme : volume régulier et modéré, ni pic ni décharge.",
 };
 
+const LEVELS: { value: Profile["level"]; label: string }[] = [
+  { value: "beginner", label: "Débutant" },
+  { value: "intermediate", label: "Intermédiaire" },
+  { value: "advanced", label: "Avancé" },
+  { value: "ex_competitor", label: "Ancien compétiteur (reprise)" },
+];
+
+const LEVEL_HINTS: Record<Profile["level"], string> = {
+  beginner: "Peu d'historique d'entraînement : progression lente, base d'abord.",
+  intermediate: "Base correcte : le coach équilibre volume et intensité.",
+  advanced: "Entraîné régulier : l'intensité peut être soutenue rapidement.",
+  ex_competitor:
+    "Historique de compétiteur qui reprend : la caisse revient vite, mais le coach reste prudent sur les charges.",
+};
+
 const EMPTY_OBJECTIVE: Objective = {
   type: "maintenance",
   date: null,
@@ -63,6 +78,7 @@ const EMPTY_PROFILE: Profile = {
   hr_max: null,
   sex: "M",
   lthr_pct: 0.88,
+  level: "intermediate",
 };
 
 export default function Profil() {
@@ -354,6 +370,29 @@ function ProfileSection() {
             }
             className="mt-2 w-full accent-accent"
           />
+        </label>
+        <label className="col-span-2 block">
+          <span className="text-xs text-muted">Niveau / expérience</span>
+          <select
+            value={form.level}
+            onChange={(e) =>
+              update(
+                "level",
+                e.target.value as Profile["level"],
+              )
+            }
+            className="input mt-1"
+          >
+            {LEVELS.map((l) => (
+              <option key={l.value} value={l.value}>
+                {l.label}
+              </option>
+            ))}
+          </select>
+          <span className="mt-1 block text-[11px] text-muted">
+            {LEVEL_HINTS[form.level] ??
+              "Aide le coach à calibrer la reprise (volume, intensité)."}
+          </span>
         </label>
       </div>
       <button

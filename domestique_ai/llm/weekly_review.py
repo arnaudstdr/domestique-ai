@@ -1,17 +1,21 @@
 """
-Revue hebdomadaire — le plan s'adapte aux données réelles.
+Revue hebdomadaire — le plan s'adapte aux données réelles, semaine après semaine.
 
-Chaque semaine (job scheduler ou déclencheur manuel), le module :
+Chaque semaine (job scheduler ou déclencheur manuel), le coach :
 
 1. Collecte un rapport de la semaine écoulée : compliance plan vs réalisé
    (``processing/compliance``), tendances matin 14 j (HRV, sommeil, readiness),
-   alertes overtraining, TSB courant.
-2. Décide de l'ajustement (``maintain`` / ``reduce`` / ``progress``) — règles
-   déterministes d'abord, le LLM peut rédiger la raison dans les bornes.
-3. Re-génère le plan depuis le prochain lundi jusqu'à l'objectif (taper
-   préservé), les garde-fous de ``plan_validator`` sont rejoués avec le CTL
-   **réel**, et le résultat est persisté comme nouvelle version
-   (``parent_plan_id`` + ``adapt_reason``).
+   alertes overtraining, TSB/CTL/ATL courants.
+2. Arrête un ajustement de volume (``maintain`` / ``reduce`` / ``progress``)
+   — règles déterministes d'abord ; le LLM ne fait que rédiger la raison.
+3. **Re-compose la semaine à venir** (fenêtre glissante) via le LLM du
+   ``plan_generator``, en raisonnant sur l'état réel consolidé
+   (``processing.athlete_state``), borné par les garde-fous de
+   ``plan_validator``. Le reste du plan actif est conservé et sera réévalué aux
+   revues suivantes ; la semaine réduite l'est par le facteur de volume
+   déterministe. Le résultat est persisté comme **nouvelle version**
+   (``parent_plan_id`` + ``adapt_reason``), l'ancien plan passant en
+   ``superseded``. Fallback déterministe si Ollama est injoignable.
 
 Idempotence : un flag ``weekly_review_last_week`` (table ``sync_meta``) évite
 de rejouer deux fois la revue la même semaine ISO.
@@ -266,15 +270,21 @@ def run_weekly_review(
 
     ``force=True`` ignore le flag d'idempotence (revue manuelle / test).
     """
+    import asyncio
+
     from domestique_ai.llm.availability import load_availability
-    from domestique_ai.llm.plan_storage import get_plan_meta, save_plan
+    from domestique_ai.llm.plan_generator import (
+        build_context_from_app_state,
+        compose_upcoming_week,
+    )
+    from domestique_ai.llm.plan_storage import get_plan_meta, load_plan, save_plan
     from domestique_ai.llm.today_cache import invalidate as invalidate_today_cache
     from domestique_ai.processing.analyzer import (
         calculate_ctl_atl_tsb,
         fetch_activities_from_db,
     )
-    from domestique_ai.processing.plan_builder import build_training_plan, days_used
-    from domestique_ai.processing.plan_validator import validate_and_correct
+    from domestique_ai.processing.athlete_state import build_coach_state
+    from domestique_ai.processing.plan_builder import days_used
 
     ctx = ctx or context_from_env()
     today = today or _dt.date.today()
@@ -335,38 +345,72 @@ def run_weekly_review(
 
     availability = load_availability(ctx.availability_path)
     min_ctl = get_plan_min_ctl()
+    next_monday = _next_monday(today)
+
+    existing_plan = load_plan(parent_id, db_path=ctx.db_path) or []
+    week_end = next_monday + _dt.timedelta(days=7)
+
+    # Fenêtre glissante : on ne re-compose QUE la semaine à venir, ancrée sur
+    # l'état réel de ce jour (le reste du plan actif est conservé et sera
+    # réévalué aux revues suivantes). week_idx repart à 0 → la rampe de reprise
+    # et le plafond de progression se mesurent depuis le CTL *actuel*.
+    total_weeks = (
+        max(1, (target_date - next_monday).days // 7 + 1)
+        if target_date is not None
+        else 4
+    )
 
     try:
-        plan = build_training_plan(
-            target_date=target_date,
-            ctl_current=ctl_current,
-            sessions_per_week=sessions_per_week,
-            availability=availability,
-            target_event_type=target_event_type,
-            focus=None,
-            start_date=_next_monday(today),
-            min_ctl=min_ctl,
+        gen_ctx = build_context_from_app_state(
+            sessions_per_week=sessions_per_week, focus=None, today=next_monday, ctx=ctx
         )
-        if not plan:
-            result["reason"] = "Aucune séance générée pour le re-plan."
-            set_sync_meta(_WEEKLY_REVIEW_FLAG, week_key, ctx.db_path)
-            return result
+        gen_ctx.target_event_type = target_event_type
+        gen_ctx.compliance = report.get("compliance")
+        gen_ctx.adapt_decision = action
+        gen_ctx.adapt_reason = reason
+        gen_ctx.coach_state = build_coach_state(
+            ctx=ctx,
+            today=today,
+            activities=activities,
+            availability=availability,
+            compliance=report.get("compliance"),
+            threshold=min_ctl,
+        )
+    except Exception:  # noqa: BLE001 — contexte d'état réel indisponible
+        result["reason"] = "Contexte d'état réel indisponible — plan inchangé."
+        set_sync_meta(_WEEKLY_REVIEW_FLAG, week_key, ctx.db_path)
+        return result
 
-        plan = _scale_plan(plan, volume_factor)
-        total_weeks = max(
-            1, (len(plan) + max(1, sessions_per_week) - 1) // max(1, sessions_per_week)
+    try:
+        generated = asyncio.run(
+            compose_upcoming_week(
+                gen_ctx,
+                next_monday=next_monday,
+                plan_start=next_monday,
+                target_date=target_date,
+                total_weeks=total_weeks,
+                use_llm=use_llm,
+            )
         )
-        plan, adjustments = validate_and_correct(
-            plan,
-            ctl_current=ctl_current,
-            availability=availability,
-            target_event_type=target_event_type,
-            total_weeks=total_weeks,
-            min_ctl=min_ctl,
-        )
-        plan_start = min(_dt.date.fromisoformat(w.date) for w in plan)
+    except Exception:  # noqa: BLE001 — jamais bloquant, on garde le plan tel quel
+        generated = None
+
+    if generated is None or not generated.workouts:
+        result["reason"] = "Semaine à venir inchangée (aucun jour disponible)."
+        set_sync_meta(_WEEKLY_REVIEW_FLAG, week_key, ctx.db_path)
+        return result
+
+    try:
+        # Le facteur de volume déterministe (reduce) borne la semaine composée
+        # par le LLM ; progress/maintain laissent le coach libre dans les bornes.
+        new_week = _scale_plan(generated.workouts, volume_factor)
+        kept = [
+            w for w in existing_plan if not (next_monday <= _dt.date.fromisoformat(w.date) < week_end)
+        ]
+        merged = sorted(kept + list(new_week), key=lambda w: w.date)
+        plan_start = min(_dt.date.fromisoformat(w.date) for w in merged)
         new_id = save_plan(
-            plan,
+            merged,
             target_date=target_date,
             target_event_type=target_event_type,
             sessions_per_week=sessions_per_week,
@@ -380,15 +424,16 @@ def run_weekly_review(
                 "replanned": True,
                 "new_plan_id": new_id,
                 "parent_plan_id": parent_id,
-                "sessions_count": len(plan),
-                "days_used": days_used(plan),
-                "adjustments": adjustments,
+                "sessions_count": len(merged),
+                "days_used": days_used(merged),
+                "adjustments": generated.adjustments,
                 "ctl_current": round(ctl_current, 1),
+                "source": generated.source,
             }
         )
         # Le plan a changé : on invalide le cache de la séance du jour.
         with contextlib.suppress(Exception):
-            for w in plan:
+            for w in merged:
                 invalidate_today_cache(w.date, db_path=ctx.db_path)
     except Exception:  # noqa: BLE001
         result["reason"] = "Échec du re-plan hebdomadaire."

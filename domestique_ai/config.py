@@ -246,6 +246,18 @@ def get_lthr_pct() -> float:
     return value
 
 
+def get_level() -> str:
+    """Niveau/expérience de l'athlète (beginner|intermediate|advanced|ex_competitor).
+
+    Priorité : profile.yaml > 'intermediate'. Lu par le coach pour calibrer la
+    prudence d'une reprise.
+    """
+    profile = _profile_or_none()
+    if profile is not None and profile.level:
+        return profile.level
+    return "intermediate"
+
+
 def get_app_base_url() -> str:
     """Base URL publique de l'app, pour la redirection post-OAuth.
 

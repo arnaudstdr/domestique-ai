@@ -447,3 +447,56 @@ def test_weekly_high_intensity_share_is_zero_when_no_z4_z5():
     ]
     shares = weekly_high_intensity_share(plan)
     assert all(s == 0.0 for s in shares.values())
+
+
+# ---------- Reprise : la cadence ne force pas de Z4 à CTL bas ----------------
+
+
+def test_validator_does_not_add_intervals_in_reprise_base_week():
+    """Semaine 100 % endurance à CTL très bas : pas de conversion en intervalles."""
+    plan = [
+        _mk_workout("2026-05-25", kind="endurance", duration_min=60),
+        _mk_workout("2026-05-27", kind="endurance", duration_min=60),
+        _mk_workout("2026-05-29", kind="endurance", duration_min=60),
+    ]
+    out, adjustments = validate_and_correct(
+        plan, ctl_current=9.0, target_event_type="course", total_weeks=4, level="intermediate"
+    )
+    kinds = {w.kind for w in out}
+    assert "intervals" not in kinds
+    assert not any("cadence" in a for a in adjustments)
+
+
+def test_validator_still_forces_intensity_at_normal_ctl():
+    """À CTL normal, la cadence d'intensité s'applique toujours (non-régression)."""
+    plan = [
+        _mk_workout("2026-05-25", kind="endurance", duration_min=90),
+        _mk_workout("2026-05-27", kind="endurance", duration_min=90),
+        _mk_workout("2026-05-29", kind="endurance", duration_min=120),
+    ]
+    out, adjustments = validate_and_correct(
+        plan, ctl_current=60.0, target_event_type="course", total_weeks=4
+    )
+    assert "intervals" in {w.kind for w in out}
+    assert any("cadence" in a for a in adjustments)
+
+
+def test_validator_downgrades_llm_intervals_in_base_week():
+    """Un LLM qui met du Z4 en semaine de fondation est raboté (plafond imposé)."""
+    plan = [
+        _mk_workout("2026-05-25", kind="endurance", duration_min=60),
+        _mk_workout("2026-05-27", kind="tempo", duration_min=60),
+        _mk_workout(
+            "2026-05-29",
+            kind="intervals",
+            duration_min=60,
+            high_intensity_sec=1800,
+        ),
+    ]
+    out, adjustments = validate_and_correct(
+        plan, ctl_current=9.0, target_event_type="cyclosportive", total_weeks=6, level="intermediate"
+    )
+    kinds = {w.kind for w in out}
+    assert "intervals" not in kinds
+    assert "tempo" not in kinds  # semaine 0 = base → tempo aussi raboté
+    assert any("plafond d'intensité" in a for a in adjustments)

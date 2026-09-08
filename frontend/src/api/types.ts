@@ -411,6 +411,7 @@ export interface Profile {
   hr_max: number | null;
   sex: "M" | "F";
   lthr_pct: number;
+  level: "beginner" | "intermediate" | "advanced" | "ex_competitor";
 }
 
 // ---- Disponibilité hebdomadaire ---------------------------------------------

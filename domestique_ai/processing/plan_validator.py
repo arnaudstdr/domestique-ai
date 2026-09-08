@@ -14,19 +14,28 @@ Règles appliquées, dans cet ordre, semaine par semaine :
 2. **Repos hebdomadaire** : au moins 1 jour sans séance par semaine. Si la
    semaine LLM contient 7 séances, on supprime celle de plus faible priorité
    (récup > tempo > intervals > endurance long).
-3. **Polarisation 80/20** : la part Z4-Z5 ne doit pas dépasser 25 % du temps
+3. **Plafond d'intensité (reprise)** : quand la semaine est en phase de reprise
+   (``athlete_state.intensity_ceiling``), on rabote l'intensité réellement
+   présente — ``base`` → tout Z3/Z4 devient endurance Z2, ``tempo`` → les
+   intervalles deviennent du tempo. Ce plafond est une ceinture : il s'applique
+   même si le LLM a placé du Z4 dans une semaine de fondation.
+4. **Polarisation 80/20** : la part Z4-Z5 ne doit pas dépasser 25 % du temps
    actif hebdo. Au-dessus, on convertit progressivement les ``intervals`` en
    ``tempo`` jusqu'à respecter la borne.
-4. **Plafond TSS hebdo** : ne pas dépasser le cap ``_ctl_progression_cap`` qui
+5. **Plafond TSS hebdo** : ne pas dépasser le cap ``_ctl_progression_cap`` qui
    borne la progression de CTL à +5 points par semaine. En cas de
    dépassement, on raccourcit l'endurance (la sortie longue garde un plancher
    plus haut, 60 min).
-5. **Cadence d'intensité par type d'objectif** : sur les semaines de charge,
+6. **Cadence d'intensité par type d'objectif** : sur les semaines de charge,
    le plan doit contenir une séance d'intensité conforme au type (``intervals``
    chaque semaine pour course/cyclosportive/maintenance ; ``intervals`` une
    semaine sur deux et tempo sinon pour cyclo/forme). Conversion de l'endurance
    la plus longue — hors jour long — uniquement si le plafond TSS le permet.
-6. **Sortie longue sur le jour dédié** : la plus longue endurance des semaines
+   **Exception reprise** : quand l'athlète est déconditionné (``ceiling`` !=
+   ``full``), on ne force aucune intensité — reconstruire la base prime sur la
+   cadence, et convertir une endurance en Z4 serait justement l'incohérence
+   visée à CTL très bas.
+7. **Sortie longue sur le jour dédié** : la plus longue endurance des semaines
    de charge est placée sur ``long_endurance_day`` et portée à ≥ 90 min si le
    plafond le permet (échange de dates si le jour est occupé).
 
@@ -42,6 +51,12 @@ from collections import defaultdict
 from typing import Any
 
 from domestique_ai.llm.availability import _WEEKDAY_BY_INDEX, Availability
+from domestique_ai.processing.athlete_state import (
+    CEILING_BASE,
+    CEILING_FULL,
+    CEILING_TEMPO,
+    intensity_ceiling,
+)
 from domestique_ai.processing.plan_builder import (
     _BASE_DURATION_MIN,
     _TARGET_ZONE,
@@ -215,6 +230,36 @@ def _enforce_polarization(
     return new_week
 
 
+def _enforce_intensity_ceiling(
+    week: list[Workout],
+    week_idx: int,
+    ceiling: str,
+    adjustments: list[str],
+) -> list[Workout]:
+    """Rabote l'intensité au plafond de la semaine (reprise graduée).
+
+    Le plafond est une **ceinture**, pas une simple suggestion : si le LLM (ou
+    une saisie) place du Z4-Z5 dans une semaine de fondation, on le convertit
+    quand même. ``base`` → tout Z3/Z4 devient endurance Z2 ; ``tempo`` → les
+    intervalles deviennent du tempo.
+    """
+    if ceiling == CEILING_FULL:
+        return week
+    target_for = {CEILING_BASE: "endurance", CEILING_TEMPO: "tempo"}[ceiling]
+    new_week: list[Workout] = []
+    for w in week:
+        downgrade = (
+            (ceiling == CEILING_BASE and w.kind in ("intervals", "tempo"))
+            or (ceiling == CEILING_TEMPO and w.kind == "intervals")
+        )
+        if downgrade:
+            new_week.append(_rebuild_workout(w, target_for, w.duration_min, week_idx))
+            adjustments.append(f"{w.date} : {w.kind} → {target_for} (reprise — plafond d'intensité)")
+        else:
+            new_week.append(w)
+    return new_week
+
+
 def _enforce_tss_cap(
     week: list[Workout],
     week_idx: int,
@@ -263,6 +308,7 @@ def _enforce_intensity_cadence(
     min_ctl: float,
     availability: Availability | None,
     adjustments: list[str],
+    ceiling: str = CEILING_FULL,
 ) -> list[Workout]:
     """Garantit la cadence d'intensité du type d'objectif, sans dépasser le plafond.
 
@@ -276,7 +322,13 @@ def _enforce_intensity_cadence(
     uniquement si la conversion reste dans le plafond TSS (une intensité de
     25 min ne vaut rien, on laisse la semaine telle quelle plutôt que de
     casser la structure).
+
+    En **reprise** (``ceiling`` != ``full``), on ne force aucune intensité : la
+    reconstruction de la base prime, et convertir une endurance en Z4 serait
+    justement l'incohérence qu'on veut éviter à CTL très bas.
     """
+    if ceiling != CEILING_FULL:
+        return week
     taper_weeks = int(flavor["taper_weeks"])
     if total_weeks is not None and week_idx >= total_weeks - taper_weeks:
         return week
@@ -453,6 +505,9 @@ def validate_and_correct(
     total_weeks: int | None = None,
     min_ctl: float = 20.0,
     plan_start_iso: str | None = None,
+    level: str | None = None,
+    ctl_trend: str | None = None,
+    chronic_tsb: float | None = None,
 ) -> tuple[list[Workout], list[str]]:
     """Applique les garde-fous au plan et retourne ``(plan_corrigé, ajustements)``.
 
@@ -470,6 +525,11 @@ def validate_and_correct(
         plan_start_iso : début du plan (ISO) pour ancrer le ``week_idx`` — à
             fournir quand on valide une seule semaine isolée (flux LLM), sinon
             le week_idx repart à 0 et les plafonds de progression ne montent pas.
+        level : niveau/expérience de l'athlète (voir ``athlete_state``) —
+            module la longueur de la rampe de reprise.
+        ctl_trend / chronic_tsb : signaux de la règle composite de reprise
+            (trajectoire CTL 7j vs 14j, TSB moyen 7 j). Optionnels : sans eux,
+            seule la valeur absolue du CTL déclenche la reprise.
 
     Returns:
         Un tuple ``(plan, adjustments)`` où ``plan`` est l'ensemble corrigé et
@@ -490,15 +550,32 @@ def validate_and_correct(
     for week_key in sorted(by_week):
         week = by_week[week_key]
         week_idx = _weeks_since_plan_start(week[0].date, plan_start_iso)
+        ceiling = intensity_ceiling(
+            week_idx,
+            ctl_current=ctl_current,
+            level=level,
+            ctl_trend=ctl_trend,
+            chronic_tsb=chronic_tsb,
+            threshold=min_ctl,
+        )
 
         week = _enforce_availability(week, availability, adjustments)
         if not week:
             continue
         week = _enforce_rest_day(week, adjustments)
+        week = _enforce_intensity_ceiling(week, week_idx, ceiling, adjustments)
         week = _enforce_polarization(week, week_idx, adjustments)
         week = _enforce_tss_cap(week, week_idx, ctl_current, adjustments, min_ctl)
         week = _enforce_intensity_cadence(
-            week, week_idx, ctl_current, flavor, total_weeks, min_ctl, availability, adjustments
+            week,
+            week_idx,
+            ctl_current,
+            flavor,
+            total_weeks,
+            min_ctl,
+            availability,
+            adjustments,
+            ceiling,
         )
         week = _enforce_long_ride(
             week, week_idx, availability, flavor, total_weeks, ctl_current, min_ctl, adjustments

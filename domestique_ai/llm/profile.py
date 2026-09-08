@@ -21,6 +21,11 @@ from domestique_ai.config import get_profile_path
 
 VALID_SEX = {"M", "F"}
 
+# Niveau/expérience de l'athlète — lu par le coach pour modérer la prudence de
+# la reprise (un ancien compétiteur peut reprendre plus vite qu'un débutant,
+# tout en restant borné par les garde-fous de sécurité du plan).
+VALID_LEVELS = {"beginner", "intermediate", "advanced", "ex_competitor"}
+
 
 class ProfileError(ValueError):
     """Erreur de validation ou de lecture du profil utilisateur."""
@@ -39,6 +44,7 @@ class Profile:
     hr_max: float | None = None
     sex: str = "M"
     lthr_pct: float = 0.88
+    level: str = "intermediate"
 
     def to_dict(self) -> dict[str, Any]:
         data = asdict(self)
@@ -74,6 +80,14 @@ def _validate(payload: dict[str, Any]) -> dict[str, Any]:
     if not 0.5 <= lthr_pct <= 1.0:
         raise ProfileError(f"lthr_pct hors borne [0.5, 1.0], reçu {lthr_pct}")
     payload["lthr_pct"] = lthr_pct
+
+    level = payload.get("level", "intermediate")
+    if not isinstance(level, str):
+        raise ProfileError(f"level invalide: {level!r}. Attendu: {sorted(VALID_LEVELS)}")
+    level_lower = level.strip().lower()
+    if level_lower not in VALID_LEVELS:
+        raise ProfileError(f"level invalide: {level!r}. Attendu: {sorted(VALID_LEVELS)}")
+    payload["level"] = level_lower
     return payload
 
 
@@ -92,6 +106,7 @@ def load_profile(path: Path | None = None) -> Profile | None:
         hr_max=payload.get("hr_max"),
         sex=payload.get("sex", "M"),
         lthr_pct=payload.get("lthr_pct", 0.88),
+        level=payload.get("level", "intermediate"),
     )
 
 

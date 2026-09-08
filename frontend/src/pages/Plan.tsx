@@ -126,6 +126,7 @@ export default function Plan() {
   const [reviewing, setReviewing] = useState(false);
   const [reviewResult, setReviewResult] = useState<WeeklyReviewResult | null>(null);
   const [decisions, setDecisions] = useState<PlanDecision[]>([]);
+  const [versions, setVersions] = useState<PlanSummary[]>([]);
   const { push } = useToast();
   const viewing = useViewing();
 
@@ -196,6 +197,25 @@ export default function Plan() {
       })
       .catch(() => {
         if (!cancelled) setDecisions([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedId]);
+
+  useEffect(() => {
+    if (selectedId == null) {
+      setVersions([]);
+      return;
+    }
+    let cancelled = false;
+    api.plan
+      .versions(selectedId)
+      .then((v) => {
+        if (!cancelled) setVersions(v);
+      })
+      .catch(() => {
+        if (!cancelled) setVersions([]);
       });
     return () => {
       cancelled = true;
@@ -679,6 +699,40 @@ export default function Plan() {
             {detail?.adapt_reason && (
               <div className="rounded-xl border border-yellow-500/20 bg-yellow-500/[0.06] px-3 py-2 text-xs text-yellow-200/90">
                 <span className="font-semibold">Ajusté :</span> {detail.adapt_reason}
+              </div>
+            )}
+            {versions.length > 1 && (
+              <div className="space-y-1.5">
+                <span className="flex items-center gap-1.5 text-xs text-muted">
+                  <RefreshCw className="h-3.5 w-3.5" strokeWidth={1.75} aria-hidden="true" />
+                  Suivi du coach (évolution semaine après semaine)
+                </span>
+                <ol className="space-y-1.5 border-l border-white/10 pl-3">
+                  {versions.map((v, i) => (
+                    <li key={v.id} className="relative text-[11px]">
+                      <span
+                        className={`absolute -left-[17px] top-1.5 h-2 w-2 rounded-full ${
+                          v.status === "active" ? "bg-accent" : "bg-white/20"
+                        }`}
+                        aria-hidden="true"
+                      />
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-gray-200">
+                          {v.start_date ?? formatCreatedAt(v.created_at)}
+                          {v.status === "active" ? (
+                            <span className="ml-1 pill bg-accent/15 text-accent">actif</span>
+                          ) : null}
+                        </span>
+                        {i > 0 && (
+                          <span className="text-muted">v#{v.id}</span>
+                        )}
+                      </div>
+                      {v.adapt_reason && (
+                        <p className="mt-0.5 text-muted">{v.adapt_reason}</p>
+                      )}
+                    </li>
+                  ))}
+                </ol>
               </div>
             )}
             {decisions.length > 0 && (
