@@ -236,6 +236,8 @@ export default function ActivityDetail() {
         </p>
       </div>
 
+      {s.latlng && <ActivityMap latlng={s.latlng} />}
+
       <div className="grid grid-cols-3 gap-3">
         <MetricCard label="Distance" value={`${a.distance_km.toFixed(1)} km`} />
         <MetricCard label="Durée" value={formatHms(a.duration_sec)} />
@@ -335,8 +337,6 @@ export default function ActivityDetail() {
         </div>
       )}
 
-      {s.latlng && <ActivityMap latlng={s.latlng} />}
-
       <StreamChart
         title="Fréquence cardiaque (bpm)"
         time={s.time}
@@ -344,6 +344,10 @@ export default function ActivityDetail() {
         color={CHART.atl}
         yKey="hr"
       />
+
+      {detail.hr_zones && (
+        <ZoneBar zones={detail.hr_zones as Record<string, number>} />
+      )}
       <StreamChart
         title="Altitude (m)"
         time={s.time}
@@ -372,10 +376,6 @@ export default function ActivityDetail() {
         color={CHART.tsbNeg}
         yKey="temp"
       />
-
-      {detail.hr_zones && (
-        <ZoneBar zones={detail.hr_zones as Record<string, number>} />
-      )}
 
       {similar && <SimilarActivities data={similar} />}
 
