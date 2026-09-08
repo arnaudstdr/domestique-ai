@@ -526,6 +526,16 @@ def get_sentry_dsn() -> str | None:
     return raw.strip() if raw and raw.strip() else None
 
 
+def get_sentry_enabled() -> bool:
+    """Autorise l'initialisation Sentry (``SENTRY_ENABLED``).
+
+    Défaut ``True``. Mettre à ``0`` pour désactiver Sentry même si un ``SENTRY_DSN``
+    est présent — utilisé par la suite de tests (``tests/conftest.py``) pour éviter
+    que les exceptions volontaires levées par les tests ne polluent Sentry.
+    """
+    return os.getenv("SENTRY_ENABLED", "1").strip().lower() not in {"0", "false", "no"}
+
+
 def get_sentry_send_pii() -> bool:
     """Joindre les données PII (headers, IP) aux événements Sentry.
 

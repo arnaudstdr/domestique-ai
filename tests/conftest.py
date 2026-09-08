@@ -19,6 +19,10 @@ def _isolate_platform_db(tmp_path, monkeypatch):
     """
     monkeypatch.setenv("DOMESTIQUE_AI_PLATFORM_DB_PATH", str(tmp_path / "platform.db"))
     monkeypatch.setenv("DOMESTIQUE_AI_ATHLETES_ROOT", str(tmp_path / "athletes"))
+    # Sentry désactivé sous pytest : les exceptions volontairement levées par
+    # les tests (swallow tests) ne doivent jamais polluer Sentry, même si un
+    # SENTRY_DSN est présent dans l'environnement du runner.
+    monkeypatch.setenv("SENTRY_ENABLED", "0")
     # Les tests qui montent `TestClient(app)` sans `with` ne déclenchent pas le
     # lifespan (donc pas l'init plateforme) ; on l'initialise ici pour tous.
     from domestique_ai.platform_db import init_platform_db

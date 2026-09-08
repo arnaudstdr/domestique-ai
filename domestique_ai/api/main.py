@@ -61,6 +61,7 @@ from domestique_ai.config import (
     REPO_ROOT,
     get_api_token,
     get_sentry_dsn,
+    get_sentry_enabled,
     get_sentry_send_pii,
 )
 from domestique_ai.platform_db import init_platform_db
@@ -142,6 +143,9 @@ def _init_sentry() -> None:
     package ``sentry-sdk[fastapi]``. ``send_default_pii`` expose headers/IP —
     activé par défaut, désactivable via ``SENTRY_SEND_PII=0``.
     """
+    if not get_sentry_enabled():
+        log.info("Sentry désactivé (SENTRY_ENABLED=0).")
+        return
     dsn = get_sentry_dsn()
     if not dsn:
         log.info("Sentry désactivé (aucun SENTRY_DSN).")
