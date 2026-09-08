@@ -532,4 +532,3 @@ def get_sentry_send_pii() -> bool:
     Défaut ``True`` (comportement demandé). Désactivable via ``SENTRY_SEND_PII=0``.
     """
     return os.getenv("SENTRY_SEND_PII", "1").strip().lower() not in {"0", "false", "no"}
-
