@@ -57,7 +57,12 @@ from domestique_ai.api.routers import (
     roster as roster_router,
 )
 from domestique_ai.api.scheduler import start_scheduler, stop_scheduler
-from domestique_ai.config import REPO_ROOT, get_api_token
+from domestique_ai.config import (
+    REPO_ROOT,
+    get_api_token,
+    get_sentry_dsn,
+    get_sentry_send_pii,
+)
 from domestique_ai.platform_db import init_platform_db
 
 _FRONTEND_DIST = REPO_ROOT / "frontend" / "dist"
@@ -128,6 +133,33 @@ app = FastAPI(
     ),
     lifespan=lifespan,
 )
+
+
+def _init_sentry() -> None:
+    """Initialise Sentry si un DSN est configuré (best-effort, jamais bloquant).
+
+    L'integrations FastAPI/Starlette sont activées automatiquement via le
+    package ``sentry-sdk[fastapi]``. ``send_default_pii`` expose headers/IP —
+    activé par défaut, désactivable via ``SENTRY_SEND_PII=0``.
+    """
+    dsn = get_sentry_dsn()
+    if not dsn:
+        log.info("Sentry désactivé (aucun SENTRY_DSN).")
+        return
+    try:
+        import sentry_sdk
+
+        sentry_sdk.init(
+            dsn=dsn,
+            send_default_pii=get_sentry_send_pii(),
+            traces_sample_rate=1.0,
+        )
+        log.info("Sentry initialisé (DSN configuré).")
+    except Exception:  # noqa: BLE001 — ne doit jamais empêcher le démarrage
+        log.exception("Échec de l'initialisation Sentry — poursuite sans supervision.")
+
+
+_init_sentry()
 
 
 def _cors_origins() -> list[str]:

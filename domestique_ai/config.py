@@ -513,3 +513,23 @@ def get_calendar_feed_key() -> str | None:
     """
     raw = os.getenv("DOMESTIQUE_AI_CALENDAR_FEED_KEY")
     return raw.strip() if raw and raw.strip() else None
+
+
+def get_sentry_dsn() -> str | None:
+    """DSN Sentry pour la supervision des erreurs (``SENTRY_DSN``).
+
+    ``None`` → Sentry désactivé (mode dev local / tests). Le ``send_default_pii``
+    est activé pour joindre headers/IP aux événements (configurable via
+    ``SENTRY_SEND_PII``).
+    """
+    raw = os.getenv("SENTRY_DSN")
+    return raw.strip() if raw and raw.strip() else None
+
+
+def get_sentry_send_pii() -> bool:
+    """Joindre les données PII (headers, IP) aux événements Sentry.
+
+    Défaut ``True`` (comportement demandé). Désactivable via ``SENTRY_SEND_PII=0``.
+    """
+    return os.getenv("SENTRY_SEND_PII", "1").strip().lower() not in {"0", "false", "no"}
+
