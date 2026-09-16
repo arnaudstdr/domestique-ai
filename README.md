@@ -6,9 +6,10 @@
 
 ### A self-hosted, privacy-first training companion for cyclists — powered by a local LLM coach that *never makes up a number.*
 
-It ingests your rides, computes the same training-load metrics the pros use
-(CTL / ATL / TSB, hr-TSS, HR zones), flags overtraining before you feel it,
-and lets you *talk* to a coach that grounds every claim in your real data.
+It ingests your rides and recovery data, computes the same training-load metrics the
+pros use (CTL / ATL / TSB, hr-TSS, HR zones), flags overtraining before you feel it,
+lets you *talk* to a coach that grounds every claim in your real data, and
+**rewrites your plan week after week** as your body responds.
 
 <br/>
 
@@ -21,7 +22,7 @@ and lets you *talk* to a coach that grounds every claim in your real data.
 <br/>
 ![CI](https://github.com/arnaudstdr/domestique-ai/actions/workflows/ci.yml/badge.svg)
 [![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
-![Tests](https://img.shields.io/badge/tests-500%2B-success)
+![Tests](https://img.shields.io/badge/tests-630%2B-success)
 ![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)
 
 <br/>
@@ -84,7 +85,7 @@ interchangeable with power-based TSS. CTL / ATL / TSB are EMAs computed over
 <td width="50%" valign="top">
 
 ### 🤖 An agentic coach with guardrails
-The LLM runs a **tool-calling loop** over 8 typed tools. A golden rule in the
+The LLM runs a **tool-calling loop** over 13 typed tools. A golden rule in the
 system prompt forbids any unsourced figure. `thinking` mode is toggled per turn
 to balance reliability and latency. Responses **stream over SSE**, token by token.
 
@@ -96,17 +97,19 @@ to balance reliability and latency. Responses **stream over SSE**, token by toke
 ### 🩺 Overtraining detection
 Four automatic indicators grounded in the physiology literature
 (**Foster 2001, Banister**): chronic TSB, Monotony, Strain, weekly volume jump —
-plus an optional morning-metrics module (HRV, resting HR, sleep) with a
-14-day rolling baseline and drift alerts.
+plus a **health module** (HRV, resting HR, sleep + stages, SpO₂, skin temp)
+auto-imported from the **Google Health API** (Fitbit / Pixel Watch), with a
+14-day rolling baseline, drift alerts and local sleep / readiness scores.
 
 </td>
 <td width="50%" valign="top">
 
 ### 🛡️ LLM output you can trust
 Plan generation is **two-stage**: the LLM only picks high-level choices, then
-*deterministic validators* enforce availability, weekly rest, 80/20 polarization
-and a CTL-based TSS ceiling. If the model fails, a deterministic builder takes
-over — week by week.
+*six deterministic guardrails* enforce availability, weekly rest, 80/20
+polarization, a CTL-based TSS ceiling, intensity cadence per goal type and the
+long ride. On a comeback, intensity is capped while fitness rebuilds. If the
+model fails, a deterministic builder takes over — week by week.
 
 </td>
 </tr>
@@ -115,16 +118,19 @@ over — week by week.
 
 ### 📲 Installable PWA
 React 18 + Vite + Tailwind, offline-aware service worker (NetworkFirst on `/api/`).
-Interactive GPS maps (react-leaflet), live charts (recharts), `.ICS` / `.FIT` export,
-and a one-click **push to Garmin Connect** (also streamed over SSE).
+Interactive GPS maps (react-leaflet), live charts (recharts), `.ZIP` (FIT) / `.ICS`
+export, and a **webcal subscription feed** that lands every session in Apple /
+Google Calendar and updates itself after each weekly review.
 
 </td>
 <td width="50%" valign="top">
 
 ### 🔁 An idempotent, resilient pipeline
-Incremental Garmin Connect sync derived from `MAX(date)`, soft schema migrations,
-a background scheduler with anti-overlap claims, **Pushover** notifications and a
-**Healthchecks.io dead-man's-switch** so a crash on the Pi notifies *you*.
+Incremental Garmin Connect sync (sole source, legacy rides de-duplicated) derived
+from `MAX(date)`, enriched fields + activity streams + weather, soft schema
+migrations, and a background scheduler with anti-overlap claims, **Pushover**
+notifications, **Sentry** error tracking and a **Healthchecks.io dead-man's-switch**
+so a crash on the Pi notifies *you*.
 
 </td>
 </tr>
@@ -136,12 +142,12 @@ a background scheduler with anti-overlap claims, **Pushover** notifications and 
 
 | Layer | Choice | Why |
 |---|---|---|
-| **Backend** | FastAPI · Pydantic v2 · APScheduler · `sse-starlette` | Async, typed, one router per domain (12 of them) |
+| **Backend** | FastAPI · Pydantic v2 · APScheduler · `sse-starlette` | Async, typed, one router per domain (13 of them) |
 | **Frontend** | React 18 · Vite · TypeScript · Tailwind · recharts · react-leaflet | Installable PWA, manual service worker |
 | **LLM** | Ollama (local) · agentic tool-calling loop | Privacy, zero API cost, no hallucinated metrics |
 | **Data** | SQLite (single source of truth) | Idempotent on external activity ids, soft migrations |
-| **Integrations** | Garmin Connect · Google Health · Pushover · Healthchecks.io | Real third-party APIs, real failure handling |
-| **Quality** | pytest (500+ tests) · Ruff · GitHub Actions CI | Tested, linted, green on every push |
+| **Integrations** | Garmin Connect · Google Health · Pushover · Healthchecks.io · Sentry | Real third-party APIs, real failure handling |
+| **Quality** | pytest (630+ tests) · Ruff · Semgrep · GitHub Actions CI | Tested, linted, green on every push |
 | **Deploy** | Docker · Raspberry Pi 5 · Tailscale Funnel | Self-hosted, reachable anywhere |
 
 ### Architecture
@@ -194,7 +200,7 @@ the model never *computes*, it only *explains* numbers produced by tested Python
 <br/>
 
 A model handed a table of metrics will still paraphrase, round, or invent values under
-pressure. By exposing **8 typed tools** and a system prompt that forbids any quantitative
+pressure. By exposing **13 typed tools** and a system prompt that forbids any quantitative
 claim without a tool call, the source of truth stays in code. The tools return
 JSON-serializable dicts computed by the same functions that power the dashboard — so the
 chat and the charts can never disagree.
@@ -227,10 +233,33 @@ produced the load.
 
 Free-form LLM output can produce dangerous training (e.g. 20 min of Z5 back-to-back).
 Instead, the LLM only picks high-level choices (`kind`, `duration`, `notes`); the code
-rebuilds the structure and then runs **four ordered guardrails**: availability, weekly
-rest cap, 80/20 polarization, and a CTL-based TSS ceiling. Each correction is surfaced in
-the UI as an "adjusted" badge. If validation fails twice, that week falls back to a fully
-deterministic builder — the others can stay LLM-generated.
+rebuilds the structure and then runs **six ordered guardrails**: availability, weekly
+rest cap, 80/20 polarization, a CTL-based TSS ceiling, intensity cadence per goal type,
+and the dedicated long ride. Each correction is surfaced in the UI as an "adjusted" badge.
+If validation fails twice, that week falls back to a fully deterministic builder — the
+others can stay LLM-generated.
+
+</details>
+
+<details>
+<summary><b>Why does the plan rewrite itself every week?</b></summary>
+
+<br/>
+
+A fixed 4-week block is wrong the moment real life — or real fatigue — intervenes. Two
+loops keep the plan honest, both with a deterministic fallback so the LLM only *writes the
+rationale*, never decides out of bounds:
+
+- **Daily morning check** (08:00, after a fresh Google Health + Garmin pre-sync): if
+  readiness is low or sleep is short, the day's session becomes `go` / `adjust` / `rest`,
+  and the change is persisted and shown on the Plan as "coach rest".
+- **Weekly review** (Sunday 18:00): a compliance report (planned vs. done, morning trends,
+  overtraining alerts, TSB) drives a `reduce` / `maintain` / `progress` decision, then the
+  coach **re-composes only the upcoming week** on top of real fitness — the rest of the
+  plan stays and gets re-evaluated next week. Each re-plan is saved as a new version.
+
+When the athlete is deconditioned (`athlete_state.py`), intensity is capped by a graduated
+ceiling: base-only first, then tempo, then full — ramp length scaled to the athlete's level.
 
 </details>
 
@@ -251,10 +280,11 @@ benefit at this scale.
 
 ## Quality &amp; rigor
 
-- **500+ tests** across **37 modules** — load math, HR zones, Garmin ingestion (mocked,
-  no network), ICS/FIT export, conversations, coach tools, morning metrics, overtraining,
-  trends, plan generation and its validators.
-- **Ruff** (`E, F, I, UP, B, SIM`) and **GitHub Actions CI** green on every push.
+- **630+ tests** across **43 modules** — load math, HR zones, Garmin ingestion (mocked,
+  no network), Google Health, source de-duplication, ICS/FIT export, webcal feed,
+  conversations, coach tools, health metrics, overtraining, trends, plan generation, its
+  validators and the adaptive daily/weekly decision loops.
+- **Ruff** (`E, F, I, UP, B, SIM`), **Semgrep** scans and **GitHub Actions CI** green on every push.
 - Tests isolate state with `tmp_path` fixtures — **no shared DB, no flakiness**.
 
 ```bash
@@ -281,15 +311,25 @@ pip install -e ".[dev]"
 cp .env.example .env   # fill in the values
 ```
 
-### Garmin Connect (activity ingestion + plan push)
+### Garmin Connect (activity ingestion)
 
 1. Set `GARMIN_EMAIL` / `GARMIN_PASSWORD` in `.env`.
 2. Seed the token cache once (interactive, handles MFA):
    ```bash
    python -m domestique_ai.export.garmin_connect
    ```
-3. Activities sync every 30 minutes (auto-sync scheduler), and plans can be
-   pushed back to the calendar with one click.
+3. Activities sync every 30 minutes (auto-sync scheduler), enriched with fields,
+   GPS traces and weather. The plan is exported as a **`.ZIP` of `.FIT` files** or an
+   **`.ICS`** file — and a **webcal feed** keeps Apple / Google Calendar in sync as
+   the plan adapts (`/api/plan/feed.ics?key=<DOMESTIQUE_AI_CALENDAR_FEED_KEY>`).
+
+### Google Health (recovery data — Fitbit / Pixel Watch)
+
+1. Create a Google Cloud project, enable the **Google Health API** and add the five
+   read-only health scopes to the OAuth consent screen.
+2. Set `GOOGLE_HEALTH_CLIENT_ID` / `GOOGLE_HEALTH_CLIENT_SECRET` in `.env`, then run
+   the OAuth flow from the **Santé** page (or `GET /api/google-health/auth`).
+3. HRV, resting HR, sleep + stages, SpO₂ and skin temperature sync every 6 hours.
 
 ### Ollama (LLM coach)
 
@@ -311,10 +351,12 @@ cd frontend && npm run build
 uvicorn domestique_ai.api.main:app --port 8501   # → http://localhost:8501
 ```
 
-The PWA exposes five tabs: **Dashboard** (fitness state, alerts, HR zones, clickable
-activity table), **Activities** (paginated history), **Morning** (HRV / resting HR /
-sleep entry, baselines, 90-day charts), **Plan** (multi-week generation, `.FIT` export,
-Garmin push), and **Coach** (the conversational LLM).
+The PWA is organised around a bottom nav: **Dashboard** (fitness state, proactive daily
+brief, alerts, HR zones), **Activités** (paginated history + rich detail), **Santé**
+(HRV / resting HR / sleep with a 90-day breakdown and an Apple-style hypnogram),
+**Plan** (adaptive multi-week plan, coach decisions, `.ZIP` / `.ICS` export) and
+**Coach** (the conversational LLM). Coaches also get **Tendances**, **Prescrire** and
+**Roster** views.
 
 ### Deploy (Docker / Raspberry Pi)
 
@@ -332,10 +374,16 @@ See [DEPLOY.md](DEPLOY.md) for the Pi 5 + Tailscale setup.
 
 - [x] Automatic overtraining detection (HRV, resting HR, Foster Monotony/Strain)
 - [x] LLM-generated training plans with deterministic guardrails
+- [x] Adaptive rolling plan — daily morning check + weekly review
+- [x] Graduated return when deconditioned (graduated intensity ceiling)
+- [x] Google Health ingestion (HRV, sleep + stages, SpO₂, skin temp)
+- [x] Garmin Connect as sole source (Strava API retired after its paid-only policy)
+- [x] Enriched activities — streams, GPS, weather, source de-duplication
 - [x] Similar-activity comparison ("how many times have I climbed this?")
-- [x] iCalendar export of the training plan
+- [x] iCalendar export + webcal subscription feed
+- [x] Sleep analytics (90-day breakdown, Apple-style hypnogram)
 - [x] Multi-athlete roster view for coaches
-- [x] Garmin Connect activity ingestion (Strava API retired after its paid-only policy)
+- [x] Error supervision (Sentry) + Healthchecks.io heartbeat
 - [ ] Per-activity HR profile to freeze historical CTL/ATL/TSB
 
 ---
