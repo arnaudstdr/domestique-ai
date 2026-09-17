@@ -4,6 +4,9 @@
 !.env.example
 .vscode/
 
+# Override compose local (dev macOS : réseau bridge + port mapping)
+docker-compose.override.yml
+
 # Données locales (DB, tokens, exports)
 data/
 !data/.gitkeep
