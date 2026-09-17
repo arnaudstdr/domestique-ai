@@ -9,11 +9,13 @@ from domestique_ai import platform_db as pdb
 
 
 def test_list_users_runs(capsys: pytest.CaptureFixture) -> None:
-    pdb.get_or_create_bootstrap_coach()
+    bootstrap = pdb.get_or_create_bootstrap_coach()
     auth_cli.main(["list-users"])
     out = capsys.readouterr().out
     assert "coach" in out
     assert "bootstrap" in out
+    # Le public_id complet doit être affiché (utilisable pour `--user`).
+    assert bootstrap["public_id"] in out
 
 
 def test_set_credentials_then_lookup() -> None:

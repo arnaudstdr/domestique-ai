@@ -68,8 +68,9 @@ def cmd_list_users(_args: argparse.Namespace) -> None:
         if user["is_bootstrap"]:
             flags.append("bootstrap")
         flags.append("2FA" if creds.get("totp_enabled") else "sans-2FA")
+        # public_id complet (32 car.) : nécessaire pour `--user <public_id>`.
         print(
-            f"{user['public_id'][:8]}  {user['role']:<8}  "
+            f"{user['public_id']}  {user['role']:<8}  "
             f"{user['email'] or '—':<28}  {', '.join(flags)}"
         )
 

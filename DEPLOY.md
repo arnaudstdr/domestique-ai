@@ -100,6 +100,62 @@ email + mot de passe et activent la 2FA eux-mêmes. Les sessions historiques
 (déjà connectées) ne sont pas déconnectées — elles définissent leurs identifiants
 à la prochaine connexion.
 
+### 3.2 — Mettre à jour un déploiement existant (coach + athlète déjà présents)
+
+Si le RPi tourne déjà avec des données (DB activités du coach et d'un athlète),
+la montée de version est **additive** : seules des colonnes sont ajoutées à
+`data/platform.db`. Les DB d'activités — `data/strava_activities.db` (coach) et
+`data/athletes/<public_id>/strava_activities.db` (athlète) — ne sont **pas
+touchées**.
+
+```bash
+cd ~/domestique-ai
+
+# 0) Sauvegarde complète AVANT tout (DB plateforme + activités + tokens)
+tar czf ~/domestique-ai-backup-$(date +%F-%H%M).tgz data/
+
+# 1) Récupérer le nouveau code puis reconstruire
+git pull
+docker compose up -d --build
+docker compose logs -f --tail=50      # doit afficher le démarrage sans erreur
+
+# 2) Vérifier que les comptes existants sont bien là (public_id COMPLET affiché)
+docker compose exec app python -m domestique_ai.auth_cli list-users
+```
+
+Tu dois voir au minimum le `coach` (bootstrap) et l'athlète, tous deux en
+`sans-2FA`. Ensuite :
+
+```bash
+# 3) Coach : définir email + mot de passe, puis activer la 2FA
+#    (sans --user, la commande cible le coach bootstrap)
+docker compose exec app python -m domestique_ai.auth_cli set-credentials \
+    --email coach@exemple.com
+docker compose exec app python -m domestique_ai.auth_cli enroll-totp
+
+# 4) Athlète : récupérer son public_id via `list-users`, puis :
+docker compose exec app python -m domestique_ai.auth_cli \
+    --user <public_id_complet> set-credentials --email athlete@exemple.com
+docker compose exec app python -m domestique_ai.auth_cli \
+    --user <public_id_complet> enroll-totp
+```
+
+> Ordre important : l'option `--user` se place **avant** la sous-commande.
+
+Variante self-service (sans CLI pour l'athlète) : le coach ouvre le **Roster →
+« Reconnexion »** et transmet le lien à l'athlète ; celui-ci l'ouvre, va dans
+**Profil → Sécurité → Activer la 2FA**, renseigne son email + mot de passe puis
+scanne le QR. Ses données (`data/athletes/<public_id>/`) restent identiques.
+
+Points de contrôle après migration :
+
+- `list-users` montre `2FA` pour les comptes configurés.
+- Connexion OK (email + mot de passe + code TOTP) pour le coach **et** l'athlète.
+- Les activités du coach et de l'athlète sont toujours visibles (dashboard).
+- En cas de problème, restauration : `docker compose down` puis
+  `tar xzf ~/domestique-ai-backup-*.tgz` (remet `data/` en l'état), puis relancer
+  l'ancienne image.
+
 ## Étape 4 — Accès depuis le tailnet
 
 Depuis n'importe quel appareil connecté au même tailnet (laptop, téléphone, tablette) :
