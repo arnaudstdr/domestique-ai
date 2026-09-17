@@ -21,24 +21,29 @@ cd domestique-ai
 
 ## Étape 2 — Préparer la configuration et les données
 
-### 2.1 — Générer un token API
+### 2.1 — Générer les secrets
 
-L'API n'a pas d'auth utilisateur — le port `8501` est joignable depuis le LAN
-du RPi (cf. `network_mode: host` du compose). On protège donc tous les
-endpoints `/api/*` par un token Bearer applicatif.
+L'API est protégée par une authentification **email + mot de passe + 2FA**
+(TOTP) par compte. Le token `DOMESTIQUE_AI_API_TOKEN` est conservé comme
+**break-glass** : il résout vers le coach propriétaire si tu es verrouillé
+dehors, et protège aussi les endpoints en cas d'auth désactivée.
 
 ```bash
-# Sur la machine de dev — générer un secret cryptographique
-openssl rand -hex 32
+# Sur la machine de dev — générer les secrets
+openssl rand -hex 32   # DOMESTIQUE_AI_API_TOKEN
+openssl rand -hex 32   # DOMESTIQUE_AI_SESSION_SECRET
 ```
 
 Ajouter dans `.env` (côté dev **ET** côté RPi) :
 
 ```
-DOMESTIQUE_AI_API_TOKEN=<le hash généré>
+DOMESTIQUE_AI_API_TOKEN=<hex>
+DOMESTIQUE_AI_SESSION_SECRET=<hex>
 ```
 
-Sans cette variable, l'auth est désactivée (un warning est loggé au boot).
+Le token API reste **obligatoire en prod** (le port `8501` est joignable depuis
+le LAN du RPi, cf. `network_mode: host`). Sans lui, l'auth est désactivée.
+
 
 ### 2.2 — Copier `.env` et les données
 
@@ -68,6 +73,33 @@ docker compose logs -f          # vérifier que FastAPI démarre (port 8501)
 
 Le premier build prend quelques minutes (compilation pandas/pyarrow en ARM64).
 
+### 3.1 — Créer le compte coach (bootstrap)
+
+La base `platform.db` est migrée automatiquement et **sans perte** au démarrage
+(colonnes additives). Le coach propriétaire n'a pas d'identifiants par défaut :
+crée-les via la CLI locale (dans le conteneur), puis active la 2FA.
+
+```bash
+# Depuis le RPi
+cd ~/domestique-ai
+
+# 1) Email + mot de passe (saisie sans écho)
+docker compose exec app python -m domestique_ai.auth_cli set-credentials \
+    --email moi@exemple.com
+
+# 2) Active la 2FA : affiche un QR code + la clé manuelle + les codes de secours
+docker compose exec app python -m domestique_ai.auth_cli enroll-totp
+
+# En cas de pépin : lister les comptes ou réinitialiser la 2FA
+docker compose exec app python -m domestique_ai.auth_cli list-users
+docker compose exec app python -m domestique_ai.auth_cli reset-2fa
+```
+
+Les athlètes, eux, passent par le lien d'invitation du roster : ils créent leur
+email + mot de passe et activent la 2FA eux-mêmes. Les sessions historiques
+(déjà connectées) ne sont pas déconnectées — elles définissent leurs identifiants
+à la prochaine connexion.
+
 ## Étape 4 — Accès depuis le tailnet
 
 Depuis n'importe quel appareil connecté au même tailnet (laptop, téléphone, tablette) :
@@ -78,10 +110,11 @@ http://<rpi-tailnet-hostname>:8501
 
 Le hostname est celui affiché par `tailscale status` côté RPi (ex. `raspberrypi.tail-scale.ts.net` ou simplement `raspberrypi`).
 
-Au premier chargement, la PWA redirige vers `/login` (mini-page) où il faut
-saisir le token configuré à l'étape 2.1. Le token est ensuite stocké en
-`localStorage` du navigateur — pas besoin de le ressaisir tant qu'on ne change
-pas d'appareil ou de profil.
+Au premier chargement, la PWA redirige vers `/login` : saisis ton **email**, ton
+**mot de passe**, puis le **code à 6 chiffres** de ton application
+d'authentification. La session est ensuite stockée en `localStorage` du
+navigateur. Le token `DOMESTIQUE_AI_API_TOKEN` reste utilisable en dépannage
+(break-glass) si tu perds tes identifiants.
 
 ## Maintenance
 
@@ -108,7 +141,7 @@ Tout l'état persistant tient dans `./data/` (DB SQLite + tokens Strava + object
 
 - **Ollama** : la coach LLM utilise `gemma4:31b-cloud` via Ollama Cloud — aucun service à héberger sur le RPi, juste une connexion Internet.
 - **Pas de TLS** : Tailscale chiffre déjà bout-en-bout entre tes appareils. Inutile de coller un reverse proxy devant pour un usage perso.
-- **Pas d'exposition publique** : le port `8501` n'est joignable que depuis ton tailnet (et le LAN du RPi). Pour exposer en clear sur Internet, ajouter un Tailscale Funnel — non recommandé ici (pas d'auth applicative).
+- **Pas d'exposition publique** : le port `8501` n'est joignable que depuis ton tailnet (et le LAN du RPi). L'app dispose désormais d'une auth par compte (mot de passe + 2FA) ; pour une exposition publique, ajouter tout de même un Tailscale Funnel + TLS.
 
 ## Calendrier Apple — flux d'abonnement iCalendar (webcal)
 

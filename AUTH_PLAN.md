@@ -95,15 +95,19 @@ athlètes, sans perdre les données du Raspberry Pi.
 - [x] `npm run build` (tsc + vite) OK
 
 ### Lot 7 — Tests
-- [ ] `test_platform_db.py` : migration additive, hash, email unique, lockout
-- [ ] `test_auth_password.py` : login, challenge, recovery, enrôlement imposé
-- [ ] `test_auth_api.py` : exempations, enforcement, break-glass
-- [ ] Test migration : ancien schéma → colonnes présentes, données intactes
+- [x] `test_platform_db.py` : migration additive, hash, email unique, lockout
+- [x] `test_auth_password.py` : login, challenge, recovery, enrôlement imposé
+- [x] `test_auth_api.py` : exempations, enforcement, break-glass
+- [x] Test migration : ancien schéma → colonnes présentes, données intactes
+- [x] `test_security.py` : argon2, TOTP, recovery, challenge signé
+- [x] `test_auth_cli.py` : list/set-credentials/enroll-totp/reset-2fa
 
 ### Lot 8 — Déploiement RPi + docs
-- [ ] CLI `python -m domestique_ai.auth_cli` (`set-credentials`, `enroll-totp`)
-- [ ] `DEPLOY.md` : backup, migration, bootstrap coach
-- [ ] `.env.example` : TTL session, `DOMESTIQUE_AI_SESSION_SECRET`
+- [x] CLI `python -m domestique_ai.auth_cli` (`list-users`, `set-credentials`,
+      `enroll-totp`, `reset-2fa`)
+- [x] `DEPLOY.md` : backup, migration, bootstrap coach, login 2FA
+- [x] `.env.example` : `DOMESTIQUE_AI_SESSION_SECRET`,
+      `DOMESTIQUE_AI_SESSION_TTL_DAYS`
 
 ## Déploiement Raspberry Pi (zéro perte)
 
