@@ -22,9 +22,18 @@ import uuid
 from pathlib import Path
 from typing import Any
 
-from domestique_ai.config import get_platform_db_path, get_session_secret
+from domestique_ai.config import (
+    get_platform_db_path,
+    get_session_secret,
+    get_session_ttl_days,
+)
 
 VALID_ROLES = ("coach", "athlete")
+
+# Nombre d'échecs de login consécutifs avant verrouillage temporaire du compte.
+MAX_FAILED_ATTEMPTS = 5
+# Durée du verrouillage après dépassement du seuil (minutes).
+LOCKOUT_MINUTES = 15
 
 
 class InvitationError(RuntimeError):
@@ -60,6 +69,18 @@ def _connect(path: Path | None = None) -> sqlite3.Connection:
     return conn
 
 
+def _ensure_column(conn: sqlite3.Connection, table: str, column: str, ddl: str) -> None:
+    """Ajoute ``column`` à ``table`` si absente — migration douce idempotente.
+
+    ``ddl`` est le type/contraintes SQL (ex. ``"TEXT"`` ou
+    ``"INTEGER NOT NULL DEFAULT 0"``). SQLite ne supporte pas
+    ``ADD COLUMN IF NOT EXISTS``, d'où le test via ``PRAGMA table_info``.
+    """
+    existing = {row["name"] for row in conn.execute(f"PRAGMA table_info({table})")}
+    if column not in existing:
+        conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {ddl}")
+
+
 def _hash_token(plaintext: str) -> str:
     """HMAC-SHA256 du token (pepper = secret applicatif). Hex."""
     return hmac.new(get_session_secret(), plaintext.encode("utf-8"), hashlib.sha256).hexdigest()
@@ -82,7 +103,14 @@ def init_platform_db(path: Path | None = None) -> None:
                 role TEXT NOT NULL CHECK (role IN ('coach', 'athlete')),
                 display_name TEXT,
                 is_bootstrap INTEGER NOT NULL DEFAULT 0,
-                created_at TEXT NOT NULL
+                created_at TEXT NOT NULL,
+                email TEXT,
+                password_hash TEXT,
+                totp_secret TEXT,
+                totp_enabled INTEGER NOT NULL DEFAULT 0,
+                password_changed_at TEXT,
+                failed_attempts INTEGER NOT NULL DEFAULT 0,
+                locked_until TEXT
             )
         """)
         conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_users_public_id ON users(public_id)")
@@ -90,6 +118,31 @@ def init_platform_db(path: Path | None = None) -> None:
         conn.execute(
             "CREATE UNIQUE INDEX IF NOT EXISTS idx_users_bootstrap "
             "ON users(is_bootstrap) WHERE is_bootstrap = 1"
+        )
+        # Colonnes d'auth (mot de passe + 2FA TOTP) — migration additive sur les
+        # bases existantes (les comptes créés avant n'ont ni email ni password).
+        _ensure_column(conn, "users", "email", "TEXT")
+        _ensure_column(conn, "users", "password_hash", "TEXT")
+        _ensure_column(conn, "users", "totp_secret", "TEXT")
+        _ensure_column(conn, "users", "totp_enabled", "INTEGER NOT NULL DEFAULT 0")
+        _ensure_column(conn, "users", "password_changed_at", "TEXT")
+        _ensure_column(conn, "users", "failed_attempts", "INTEGER NOT NULL DEFAULT 0")
+        _ensure_column(conn, "users", "locked_until", "TEXT")
+        conn.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email "
+            "ON users(email) WHERE email IS NOT NULL"
+        )
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS recovery_codes (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                code_hash TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                used_at TEXT
+            )
+        """)
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_recovery_codes_user ON recovery_codes(user_id)"
         )
         conn.execute("""
             CREATE TABLE IF NOT EXISTS sessions (
@@ -170,6 +223,8 @@ def _user_dict(row: sqlite3.Row) -> dict[str, Any]:
         "display_name": row["display_name"],
         "is_bootstrap": bool(row["is_bootstrap"]),
         "created_at": row["created_at"],
+        "email": row["email"],
+        "totp_enabled": bool(row["totp_enabled"]),
     }
 
 
@@ -247,6 +302,231 @@ def list_users(role: str | None = None, path: Path | None = None) -> list[dict[s
         conn.close()
 
 
+# ---------------------------------------------------------------------------
+# Credentials (email + mot de passe) et 2FA TOTP
+# ---------------------------------------------------------------------------
+
+
+def get_user_by_email(email: str, path: Path | None = None) -> dict[str, Any] | None:
+    """Cherche un utilisateur par email (insensible à la casse). ``None`` si absent."""
+    normalized = (email or "").strip().lower()
+    if not normalized:
+        return None
+    conn = _connect(path)
+    try:
+        row = conn.execute(
+            "SELECT * FROM users WHERE lower(email) = ?", (normalized,)
+        ).fetchone()
+        return _user_dict(row) if row else None
+    finally:
+        conn.close()
+
+
+def get_user_credentials(user_id: int, path: Path | None = None) -> dict[str, Any] | None:
+    """Renvoie les champs sensibles d'un user (password_hash, totp_secret, lockout).
+
+    Séparé de ``_user_dict`` exprès : ces champs ne doivent jamais partir dans les
+    payloads API. ``None`` si l'utilisateur n'existe pas.
+    """
+    conn = _connect(path)
+    try:
+        row = conn.execute(
+            "SELECT id, email, password_hash, totp_secret, totp_enabled, "
+            "password_changed_at, failed_attempts, locked_until FROM users WHERE id = ?",
+            (user_id,),
+        ).fetchone()
+        if row is None:
+            return None
+        return {
+            "id": row["id"],
+            "email": row["email"],
+            "password_hash": row["password_hash"],
+            "totp_secret": row["totp_secret"],
+            "totp_enabled": bool(row["totp_enabled"]),
+            "password_changed_at": row["password_changed_at"],
+            "failed_attempts": row["failed_attempts"],
+            "locked_until": row["locked_until"],
+        }
+    finally:
+        conn.close()
+
+
+def set_user_credentials(
+    user_id: int,
+    email: str,
+    password_hash: str,
+    path: Path | None = None,
+) -> None:
+    """Pose/remplace l'email + le hash de mot de passe d'un utilisateur.
+
+    ``email`` est normalisé en minuscules (unicité portée par l'index partiel).
+    Lève ``sqlite3.IntegrityError`` si l'email est déjà pris par un autre compte.
+    """
+    conn = _connect(path)
+    try:
+        conn.execute(
+            "UPDATE users SET email = ?, password_hash = ?, password_changed_at = ? "
+            "WHERE id = ?",
+            (
+                (email or "").strip().lower(),
+                password_hash,
+                _now(),
+                user_id,
+            ),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def set_totp_secret(user_id: int, secret: str, path: Path | None = None) -> None:
+    """Enregistre un secret TOTP non encore confirmé (``totp_enabled`` reste 0)."""
+    conn = _connect(path)
+    try:
+        conn.execute(
+            "UPDATE users SET totp_secret = ?, totp_enabled = 0 WHERE id = ?",
+            (secret, user_id),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def enable_totp(user_id: int, path: Path | None = None) -> bool:
+    """Marque la 2FA comme active. ``False`` si aucun secret n'est enregistré."""
+    conn = _connect(path)
+    try:
+        cur = conn.execute(
+            "UPDATE users SET totp_enabled = 1 "
+            "WHERE id = ? AND totp_secret IS NOT NULL AND totp_secret != ''",
+            (user_id,),
+        )
+        conn.commit()
+        return cur.rowcount > 0
+    finally:
+        conn.close()
+
+
+def disable_totp(user_id: int, path: Path | None = None) -> None:
+    """Désactive la 2FA et efface le secret + les codes de secours."""
+    conn = _connect(path)
+    try:
+        conn.execute(
+            "UPDATE users SET totp_secret = NULL, totp_enabled = 0 WHERE id = ?",
+            (user_id,),
+        )
+        conn.execute("DELETE FROM recovery_codes WHERE user_id = ?", (user_id,))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def replace_recovery_codes(
+    user_id: int, code_hashes: list[str], path: Path | None = None
+) -> None:
+    """Remplace l'ensemble des codes de secours d'un utilisateur (les anciens sont purgés)."""
+    conn = _connect(path)
+    try:
+        conn.execute("DELETE FROM recovery_codes WHERE user_id = ?", (user_id,))
+        now = _now()
+        conn.executemany(
+            "INSERT INTO recovery_codes (user_id, code_hash, created_at) VALUES (?, ?, ?)",
+            [(user_id, h, now) for h in code_hashes],
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def list_recovery_codes(
+    user_id: int, include_used: bool = False, path: Path | None = None
+) -> list[dict[str, Any]]:
+    """Codes de secours d'un utilisateur (hashés). Par défaut, seuls les non utilisés."""
+    conn = _connect(path)
+    try:
+        if include_used:
+            rows = conn.execute(
+                "SELECT id, code_hash, created_at, used_at FROM recovery_codes "
+                "WHERE user_id = ? ORDER BY id",
+                (user_id,),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT id, code_hash, created_at, used_at FROM recovery_codes "
+                "WHERE user_id = ? AND used_at IS NULL ORDER BY id",
+                (user_id,),
+            ).fetchall()
+        return [
+            {
+                "id": r["id"],
+                "code_hash": r["code_hash"],
+                "created_at": r["created_at"],
+                "used_at": r["used_at"],
+            }
+            for r in rows
+        ]
+    finally:
+        conn.close()
+
+
+def mark_recovery_code_used(code_id: int, path: Path | None = None) -> bool:
+    """Marque un code de secours comme consommé. ``False`` s'il était déjà utilisé."""
+    conn = _connect(path)
+    try:
+        cur = conn.execute(
+            "UPDATE recovery_codes SET used_at = ? WHERE id = ? AND used_at IS NULL",
+            (_now(), code_id),
+        )
+        conn.commit()
+        return cur.rowcount > 0
+    finally:
+        conn.close()
+
+
+def record_failed_login(user_id: int, path: Path | None = None) -> dict[str, Any]:
+    """Incrémente le compteur d'échecs et verrouille le compte au-delà du seuil.
+
+    Retourne ``{"failed_attempts", "locked_until"}`` après mise à jour.
+    """
+    conn = _connect(path)
+    try:
+        row = conn.execute(
+            "SELECT failed_attempts FROM users WHERE id = ?", (user_id,)
+        ).fetchone()
+        attempts = (row["failed_attempts"] if row else 0) + 1
+        locked_until: str | None = None
+        if attempts >= MAX_FAILED_ATTEMPTS:
+            locked_until = (
+                dt.datetime.now(dt.UTC) + dt.timedelta(minutes=LOCKOUT_MINUTES)
+            ).isoformat()
+        conn.execute(
+            "UPDATE users SET failed_attempts = ?, locked_until = ? WHERE id = ?",
+            (attempts, locked_until, user_id),
+        )
+        conn.commit()
+        return {"failed_attempts": attempts, "locked_until": locked_until}
+    finally:
+        conn.close()
+
+
+def clear_failed_login(user_id: int, path: Path | None = None) -> None:
+    """Remet à zéro le compteur d'échecs et lève le verrou (après login réussi)."""
+    conn = _connect(path)
+    try:
+        conn.execute(
+            "UPDATE users SET failed_attempts = 0, locked_until = NULL WHERE id = ?",
+            (user_id,),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def user_is_locked(locked_until: str | None) -> bool:
+    """True tant que le verrou de login est actif (``locked_until`` non expiré)."""
+    return bool(locked_until) and not _is_expired(locked_until)
+
+
 def get_bootstrap_coach(path: Path | None = None) -> dict[str, Any] | None:
     conn = _connect(path)
     try:
@@ -276,17 +556,34 @@ def get_or_create_bootstrap_coach(path: Path | None = None) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 
+def _default_session_expiry() -> str | None:
+    """Expiration par défaut d'une session (``get_session_ttl_days``). ``None`` si TTL désactivé."""
+    days = get_session_ttl_days()
+    if days <= 0:
+        return None
+    return (dt.datetime.now(dt.UTC) + dt.timedelta(days=days)).isoformat()
+
+
 def create_session(
     user_id: int, expires_at: str | None = None, path: Path | None = None
 ) -> tuple[dict[str, Any], str]:
-    """Crée une session pour ``user_id``. Retourne (dict, token_clair)."""
+    """Crée une session pour ``user_id``. Retourne (dict, token_clair).
+
+    Si ``expires_at`` est ``None``, la TTL par défaut s'applique
+    (``DOMESTIQUE_AI_SESSION_TTL_DAYS``, 30 j ; ``0`` → pas d'expiration).
+    """
     conn = _connect(path)
     try:
         token = _generate_token()
         cur = conn.execute(
             "INSERT INTO sessions (user_id, token_hash, created_at, expires_at) "
             "VALUES (?, ?, ?, ?)",
-            (user_id, _hash_token(token), _now(), expires_at),
+            (
+                user_id,
+                _hash_token(token),
+                _now(),
+                expires_at if expires_at is not None else _default_session_expiry(),
+            ),
         )
         conn.commit()
         row = conn.execute(
@@ -474,8 +771,9 @@ def accept_invitation(
 
         token = _generate_token()
         conn.execute(
-            "INSERT INTO sessions (user_id, token_hash, created_at) VALUES (?, ?, ?)",
-            (user_id, _hash_token(token), now),
+            "INSERT INTO sessions (user_id, token_hash, created_at, expires_at) "
+            "VALUES (?, ?, ?, ?)",
+            (user_id, _hash_token(token), now, _default_session_expiry()),
         )
         conn.execute(
             "UPDATE invitations SET status = 'accepted', accepted_user_id = ?, "

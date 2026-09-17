@@ -85,6 +85,24 @@ def get_session_secret() -> bytes:
     return b"domestique-ai-dev-session-secret"
 
 
+def get_session_ttl_days() -> int:
+    """Durée de vie d'une session issue d'un login (jours).
+
+    Depuis l'auth par mot de passe + 2FA, une session est émise à chaque login
+    et doit expirer. Override via ``DOMESTIQUE_AI_SESSION_TTL_DAYS`` (défaut 30).
+    ``0`` désactive l'expiration (sessions éternelles — déconseillé en prod).
+    """
+    raw = os.getenv("DOMESTIQUE_AI_SESSION_TTL_DAYS")
+    if raw is None or raw.strip() == "":
+        return 30
+    try:
+        value = int(raw)
+    except ValueError:
+        logger.warning("DOMESTIQUE_AI_SESSION_TTL_DAYS=%r invalide — fallback 30.", raw)
+        return 30
+    return max(0, value)
+
+
 def get_profile_path() -> Path:
     """Chemin du YAML profil athlète. Override via DOMESTIQUE_AI_PROFILE_PATH."""
     custom = os.getenv("DOMESTIQUE_AI_PROFILE_PATH")
