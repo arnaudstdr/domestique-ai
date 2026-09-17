@@ -47,11 +47,13 @@ athlètes, sans perdre les données du Raspberry Pi.
       recovery codes, lockout, TTL) — 9 tests ajoutés, suite verte
 
 ### Lot 2 — Crypto + TOTP (`domestique_ai/security.py`)
-- [ ] `argon2-cffi` (+ `pyotp`, `qrcode`) dans `pyproject.toml`
-- [ ] `hash_password` / `verify_password`
-- [ ] TOTP : secret, `otpauth://` + QR data-URL, `verify_totp`
-- [ ] Recovery codes : génération + consommation
-- [ ] Challenge 2FA stateless HMAC-signé (TTL 5 min)
+- [x] `argon2-cffi` (+ `pyotp`, `qrcode`) dans `pyproject.toml`
+- [x] `hash_password` / `verify_password` (+ `assert_password_strength`)
+- [x] TOTP : `new_totp_secret`, `totp_uri`, `totp_qr_svg_data_uri`, `verify_totp`
+- [x] Recovery codes : `generate/hash/verify_recovery_code`
+- [x] Challenge 2FA stateless HMAC-signé (TTL 5 min) —
+      `create_login_challenge` / `verify_login_challenge`
+- [x] Tests `test_security.py` (9 tests) — suite verte (655)
 
 ### Lot 3 — Endpoints (`api/routers/auth.py`)
 - [ ] `POST /api/auth/login` → `{status:"totp_required", challenge}` ou 401
