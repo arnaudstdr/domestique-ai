@@ -131,3 +131,138 @@ def test_session_resolve_valid_invalid_revoked_expired():
 
     _, future = pdb.create_session(user["id"], expires_at=_future())
     assert pdb.resolve_session_token(future)["id"] == user["id"]
+
+
+# ---------------------------------------------------------------------------
+# Lot 1 — migration additive, credentials, 2FA, lockout
+# ---------------------------------------------------------------------------
+
+
+def test_migration_adds_columns_and_preserves_existing_data(tmp_path):
+    """Une base « ancien schéma » migre sans perdre de lignes ni de tokens."""
+    import sqlite3
+
+    old_path = tmp_path / "old_platform.db"
+    conn = sqlite3.connect(old_path)
+    conn.execute("""
+        CREATE TABLE users (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            public_id TEXT NOT NULL UNIQUE,
+            role TEXT NOT NULL,
+            display_name TEXT,
+            is_bootstrap INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL
+        )
+    """)
+    conn.execute(
+        "INSERT INTO users (public_id, role, display_name, is_bootstrap, created_at) "
+        "VALUES ('legacy-pid', 'coach', 'Owner', 1, '2026-01-01T00:00:00+00:00')"
+    )
+    conn.commit()
+    conn.close()
+
+    pdb.init_platform_db(old_path)
+
+    cols = {r[1] for r in sqlite3.connect(old_path).execute("PRAGMA table_info(users)")}
+    assert {"email", "password_hash", "totp_secret", "totp_enabled", "locked_until"} <= cols
+
+    # La ligne existante est intacte et le nouveau champ a un défaut sûr.
+    user = pdb.get_user_by_public_id("legacy-pid", path=old_path)
+    assert user is not None
+    assert user["display_name"] == "Owner"
+    assert user["totp_enabled"] is False
+
+
+def test_get_user_by_email_is_case_insensitive():
+    user = pdb.create_user(role="athlete")
+    pdb.set_user_credentials(user["id"], "Alice@Example.com", "hash")
+    assert pdb.get_user_by_email("alice@example.com")["id"] == user["id"]
+    assert pdb.get_user_by_email("ALICE@EXAMPLE.COM")["id"] == user["id"]
+    assert pdb.get_user_by_email("unknown@example.com") is None
+    assert pdb.get_user_by_email("") is None
+
+
+def test_set_user_credentials_rejects_duplicate_email():
+    import sqlite3
+
+    a = pdb.create_user(role="athlete")
+    b = pdb.create_user(role="athlete")
+    pdb.set_user_credentials(a["id"], "dup@example.com", "hash-a")
+    with pytest.raises(sqlite3.IntegrityError):
+        pdb.set_user_credentials(b["id"], "DUP@example.com", "hash-b")
+
+
+def test_get_user_credentials_hides_nothing_but_is_separate():
+    user = pdb.create_user(role="athlete")
+    pdb.set_user_credentials(user["id"], "bob@example.com", "hash")
+    creds = pdb.get_user_credentials(user["id"])
+    assert creds["password_hash"] == "hash"
+    assert creds["email"] == "bob@example.com"
+    assert creds["totp_enabled"] is False
+    # _user_dict (payloads API) n'expose jamais le hash.
+    assert "password_hash" not in user
+
+
+def test_totp_enable_disable_lifecycle():
+    user = pdb.create_user(role="athlete")
+    # Sans secret, l'activation échoue.
+    assert pdb.enable_totp(user["id"]) is False
+
+    pdb.set_totp_secret(user["id"], "SECRET123")
+    assert pdb.get_user_credentials(user["id"])["totp_enabled"] is False
+    assert pdb.enable_totp(user["id"]) is True
+    assert pdb.get_user_by_id(user["id"])["totp_enabled"] is True
+
+    pdb.disable_totp(user["id"])
+    creds = pdb.get_user_credentials(user["id"])
+    assert creds["totp_enabled"] is False
+    assert creds["totp_secret"] is None
+
+
+def test_recovery_codes_replace_and_consume():
+    user = pdb.create_user(role="athlete")
+    pdb.replace_recovery_codes(user["id"], ["h1", "h2", "h3"])
+    codes = pdb.list_recovery_codes(user["id"])
+    assert len(codes) == 3
+
+    assert pdb.mark_recovery_code_used(codes[0]["id"]) is True
+    assert pdb.mark_recovery_code_used(codes[0]["id"]) is False  # déjà consommé
+    assert len(pdb.list_recovery_codes(user["id"])) == 2
+
+    # Remplacement purge les anciens codes.
+    pdb.replace_recovery_codes(user["id"], ["x1"])
+    remaining = pdb.list_recovery_codes(user["id"])
+    assert [c["code_hash"] for c in remaining] == ["x1"]
+
+
+def test_failed_login_lockout_and_clear():
+    user = pdb.create_user(role="athlete")
+    for _ in range(pdb.MAX_FAILED_ATTEMPTS - 1):
+        state = pdb.record_failed_login(user["id"])
+        assert state["locked_until"] is None
+    state = pdb.record_failed_login(user["id"])
+    assert state["locked_until"] is not None
+    assert pdb.user_is_locked(state["locked_until"]) is True
+
+    pdb.clear_failed_login(user["id"])
+    creds = pdb.get_user_credentials(user["id"])
+    assert creds["failed_attempts"] == 0
+    assert creds["locked_until"] is None
+    assert pdb.user_is_locked(creds["locked_until"]) is False
+
+
+def test_user_is_locked_handles_none_and_past():
+    assert pdb.user_is_locked(None) is False
+    assert pdb.user_is_locked(_past()) is False
+    assert pdb.user_is_locked(_future()) is True
+
+
+def test_session_default_ttl_from_env(monkeypatch):
+    user = pdb.create_user(role="athlete")
+    monkeypatch.setenv("DOMESTIQUE_AI_SESSION_TTL_DAYS", "30")
+    session, _ = pdb.create_session(user["id"])
+    assert session["expires_at"] is not None
+
+    monkeypatch.setenv("DOMESTIQUE_AI_SESSION_TTL_DAYS", "0")
+    eternal, _ = pdb.create_session(user["id"])
+    assert eternal["expires_at"] is None

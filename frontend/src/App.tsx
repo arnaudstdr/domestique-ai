@@ -12,6 +12,7 @@ import Tendances from "./pages/Tendances";
 import Login from "./pages/Login";
 import AcceptInvite from "./pages/AcceptInvite";
 import Reconnect from "./pages/Reconnect";
+import SetupTwoFactor from "./pages/SetupTwoFactor";
 import Roster from "./pages/Roster";
 import Prescribe from "./pages/Prescribe";
 import { clearViewingAthlete } from "./api/client";
@@ -127,6 +128,7 @@ export default function App() {
       <Route path="/login" element={<Login />} />
       <Route path="/accept-invite" element={<AcceptInvite />} />
       <Route path="/reconnect" element={<Reconnect />} />
+      <Route path="/setup-2fa" element={<SetupTwoFactor />} />
       <Route path="/*" element={<AuthenticatedLayout />} />
     </Routes>
   );

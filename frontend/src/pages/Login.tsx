@@ -1,44 +1,77 @@
 import { useState } from "react";
-import { setApiToken } from "../api/client";
+import { ApiError, api, setApiToken } from "../api/client";
 
 /**
- * Mini page de saisie du token API Bearer (CR-021).
+ * Connexion email + mot de passe, puis code TOTP (ou code de secours).
  *
- * Affichée quand le backend renvoie 401 sur n'importe quelle requête. Le
- * token est stocké en `localStorage` puis l'app redirige vers le chemin
- * initial (passé en query `?next=...`).
+ * Le token de session renvoyé est stocké comme Bearer en `localStorage`, puis
+ * l'app redirige vers le chemin initial (query `?next=...`).
  */
 export default function Login() {
-  const [token, setToken] = useState("");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [challenge, setChallenge] = useState<string | null>(null);
+  const [code, setCode] = useState("");
+  const [useRecovery, setUseRecovery] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  function submit(event: React.FormEvent) {
+  function redirect() {
+    const params = new URLSearchParams(window.location.search);
+    const next = params.get("next") || "/";
+    // Reload complet pour repartir avec le nouveau header sur tous les fetchs.
+    window.location.assign(next);
+  }
+
+  async function submitCredentials(event: React.FormEvent) {
     event.preventDefault();
-    const trimmed = token.trim();
-    if (!trimmed) return;
+    if (!email.trim() || !password) return;
     setSubmitting(true);
     setError(null);
     try {
-      setApiToken(trimmed);
-    } catch {
-      setError(
-        "Impossible de stocker le token (localStorage indisponible).",
-      );
+      const res = await api.auth.login(email.trim(), password);
+      if (res.status === "totp_required" && res.challenge) {
+        setChallenge(res.challenge);
+        setSubmitting(false);
+        return;
+      }
+      if (res.session_token) {
+        setApiToken(res.session_token);
+        redirect();
+        return;
+      }
+      setError("Réponse inattendue du serveur.");
       setSubmitting(false);
-      return;
+    } catch (err) {
+      setError(loginErrorMessage(err));
+      setSubmitting(false);
     }
-    const params = new URLSearchParams(window.location.search);
-    const next = params.get("next") || "/";
-    // On force un reload complet pour que les éventuels caches SSE/SW
-    // soient repartis avec le nouveau header sur tous les fetchs.
-    window.location.assign(next);
+  }
+
+  async function submitCode(event: React.FormEvent) {
+    event.preventDefault();
+    if (!challenge || !code.trim()) return;
+    setSubmitting(true);
+    setError(null);
+    try {
+      const res = await api.auth.loginTotp(challenge, code.trim());
+      if (res.session_token) {
+        setApiToken(res.session_token);
+        redirect();
+        return;
+      }
+      setError("Réponse inattendue du serveur.");
+      setSubmitting(false);
+    } catch (err) {
+      setError(actionErrorMessage(err, "Code de vérification incorrect."));
+      setSubmitting(false);
+    }
   }
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-surface px-4 text-gray-100">
       <form
-        onSubmit={submit}
+        onSubmit={challenge ? submitCode : submitCredentials}
         className="card w-full max-w-sm space-y-4 p-6"
       >
         <div className="text-center">
@@ -52,30 +85,72 @@ export default function Login() {
             Domestique<span className="text-accent">AI</span>
           </h1>
           <p className="mt-1 text-xs text-gray-400">
-            Authentification requise
+            {challenge ? "Vérification en 2 étapes" : "Connexion"}
           </p>
         </div>
 
-        <p className="text-sm text-gray-300">
-          Saisis le token configuré dans{" "}
-          <code className="rounded bg-white/10 px-1 py-0.5 text-xs">
-            DOMESTIQUE_AI_API_TOKEN
-          </code>{" "}
-          côté serveur.
-        </p>
-
-        <label className="block">
-          <span className="text-xs text-gray-400">Token</span>
-          <input
-            type="password"
-            autoFocus
-            autoComplete="current-password"
-            value={token}
-            onChange={(event) => setToken(event.target.value)}
-            placeholder="••••••••••••••••••"
-            className="mt-1 w-full rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent"
-          />
-        </label>
+        {challenge ? (
+          <>
+            <p className="text-sm text-gray-300">
+              {useRecovery
+                ? "Saisis l'un de tes codes de secours."
+                : "Saisis le code à 6 chiffres de ton application d'authentification."}
+            </p>
+            <label className="block">
+              <span className="text-xs text-gray-400">
+                {useRecovery ? "Code de secours" : "Code de vérification"}
+              </span>
+              <input
+                autoFocus
+                inputMode={useRecovery ? "text" : "numeric"}
+                autoComplete="one-time-code"
+                value={code}
+                onChange={(event) => setCode(event.target.value)}
+                placeholder={useRecovery ? "xxxxx-xxxxx" : "123456"}
+                className="mt-1 w-full rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm tracking-widest focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent"
+              />
+            </label>
+            <button
+              type="button"
+              onClick={() => {
+                setUseRecovery((v) => !v);
+                setCode("");
+                setError(null);
+              }}
+              className="text-xs text-gray-400 hover:text-accent"
+            >
+              {useRecovery
+                ? "Utiliser un code à 6 chiffres"
+                : "Utiliser un code de secours"}
+            </button>
+          </>
+        ) : (
+          <>
+            <label className="block">
+              <span className="text-xs text-gray-400">Email</span>
+              <input
+                type="email"
+                autoFocus
+                autoComplete="email"
+                value={email}
+                onChange={(event) => setEmail(event.target.value)}
+                placeholder="toi@exemple.com"
+                className="mt-1 w-full rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent"
+              />
+            </label>
+            <label className="block">
+              <span className="text-xs text-gray-400">Mot de passe</span>
+              <input
+                type="password"
+                autoComplete="current-password"
+                value={password}
+                onChange={(event) => setPassword(event.target.value)}
+                placeholder="••••••••••••"
+                className="mt-1 w-full rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent"
+              />
+            </label>
+          </>
+        )}
 
         {error ? (
           <p className="text-xs text-red-400" role="alert">
@@ -85,12 +160,40 @@ export default function Login() {
 
         <button
           type="submit"
-          disabled={submitting || !token.trim()}
+          disabled={submitting || (challenge ? !code.trim() : !email.trim() || !password)}
           className="w-full rounded-lg bg-accent py-2 text-sm font-semibold text-surface transition-colors hover:bg-accent/90 disabled:cursor-not-allowed disabled:opacity-50"
         >
-          {submitting ? "Connexion…" : "Continuer"}
+          {submitting
+            ? "Connexion…"
+            : challenge
+              ? "Valider"
+              : "Se connecter"}
         </button>
       </form>
     </div>
   );
+}
+
+function loginErrorMessage(err: unknown): string {
+  if (err instanceof ApiError) {
+    if (err.status === 429) {
+      return "Trop de tentatives. Compte temporairement verrouillé, réessaie dans quelques minutes.";
+    }
+    if (err.status === 401) {
+      return "Email ou mot de passe incorrect.";
+    }
+  }
+  return "Échec de la connexion.";
+}
+
+function actionErrorMessage(err: unknown, fallback: string): string {
+  if (err instanceof ApiError) {
+    if (err.status === 429) {
+      return "Trop de tentatives. Réessaie dans quelques minutes.";
+    }
+    if (err.status === 401) {
+      return fallback;
+    }
+  }
+  return fallback;
 }

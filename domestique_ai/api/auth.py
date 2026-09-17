@@ -21,6 +21,7 @@ Comportement :
 from __future__ import annotations
 
 import hmac
+import json
 from pathlib import Path
 
 from starlette.types import ASGIApp, Receive, Scope, Send
@@ -57,6 +58,21 @@ async def _send_401(send: Send) -> None:
     await send({"type": "http.response.body", "body": body})
 
 
+async def _send_error(send: Send, status: int, detail: str) -> None:
+    body = json.dumps({"detail": detail}).encode("utf-8")
+    await send(
+        {
+            "type": "http.response.start",
+            "status": status,
+            "headers": [
+                (b"content-type", b"application/json"),
+                (b"content-length", str(len(body)).encode("latin-1")),
+            ],
+        }
+    )
+    await send({"type": "http.response.body", "body": body})
+
+
 class BearerAuthMiddleware:
     """Vérifie le header ``Authorization: Bearer <token>`` sur ``/api/*``.
 
@@ -68,16 +84,29 @@ class BearerAuthMiddleware:
     """
 
     _LOG = get_logger("auth")
-    # Routes joignables sans session : accept-invite (entrée des comptes), le
-    # callback OAuth Google Health (redirection navigateur, validée par son
-    # `state`), et le flux iCalendar (les clients calendrier ne peuvent pas
-    # envoyer de Bearer — il est protégé par sa propre clé `?key=`).
+    # Routes joignables sans session : accept-invite (entrée des comptes), login
+    # (mot de passe + 2FA), le callback OAuth Google Health (redirection
+    # navigateur, validée par son `state`), et le flux iCalendar (les clients
+    # calendrier ne peuvent pas envoyer de Bearer — protégé par sa clé `?key=`).
     _EXEMPT_API_PATHS = {
         "/api/health",
         "/api/auth/accept-invite",
+        "/api/auth/login",
+        "/api/auth/login/totp",
         "/api/auth/reconnect",
         "/api/google-health/callback",
         "/api/plan/feed.ics",
+    }
+
+    # Routes accessibles à une session authentifiée mais pas encore conforme 2FA
+    # (enrôlement en cours). Le reste de l'API est verrouillé tant que la 2FA
+    # n'est pas active — évite qu'un compte à demi configuré utilise l'app.
+    _TOTP_SETUP_ALLOWED_PATHS = {
+        "/api/auth/me",
+        "/api/auth/logout",
+        "/api/auth/setup-credentials",
+        "/api/auth/totp/enroll",
+        "/api/auth/totp/verify",
     }
 
     def __init__(
@@ -128,6 +157,24 @@ class BearerAuthMiddleware:
 
         if user is None:
             await _send_401(send)
+            return
+
+        # 2FA obligatoire : un compte qui a des identifiants (donc qui se connecte
+        # par mot de passe) mais dont le TOTP n'est pas encore activé est bloqué
+        # hors des routes d'enrôlement. Le bootstrap (propriétaire) reste
+        # exempté — break-glass, et un compte sans mot de passe (session
+        # historique) n'est pas bloqué pour éviter un lockout collectif.
+        if (
+            user.get("has_password")
+            and not user.get("is_bootstrap")
+            and not user.get("totp_enabled")
+            and path not in self._TOTP_SETUP_ALLOWED_PATHS
+        ):
+            await _send_error(
+                send,
+                status=403,
+                detail="totp_setup_required",
+            )
             return
 
         # Annoter le scope : current_user pour les dépendances en aval, et flag

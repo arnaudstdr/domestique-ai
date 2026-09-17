@@ -499,12 +499,36 @@ export interface MeResponse {
   public_id: string;
   role: string;
   display_name: string | null;
+  email: string | null;
+  totp_enabled: boolean;
 }
 
 export interface AcceptInviteResponse {
   session_token: string;
   public_id: string;
   role: string;
+}
+
+export interface LoginResponse {
+  status: "ok" | "totp_required";
+  challenge: string | null;
+  session_token: string | null;
+  public_id: string | null;
+  role: string | null;
+}
+
+export interface TotpEnrollResponse {
+  secret: string;
+  otpauth_uri: string;
+  qr_svg_data_uri: string;
+}
+
+export interface TotpVerifyResponse {
+  recovery_codes: string[];
+}
+
+export interface StatusResponse {
+  status: string;
 }
 
 // ---- Roster coach (liste d'athlètes + invitations) --------------------------

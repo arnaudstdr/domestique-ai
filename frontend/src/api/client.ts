@@ -19,6 +19,7 @@ import type {
   InvitationCreated,
   InvitationOut,
   LoadResponse,
+  LoginResponse,
   MeResponse,
   MorningEntry,
   MorningResponse,
@@ -34,10 +35,13 @@ import type {
   ReconnectLink,
   RideVolumeResponse,
   SimilarActivitiesResponse,
+  StatusResponse,
   SyncResult,
   SyncStatus,
   GarminStatus,
   TodayWorkoutResponse,
+  TotpEnrollResponse,
+  TotpVerifyResponse,
   TrendPeriod,
   TrendsResponse,
   WeeklyReviewResult,
@@ -158,6 +162,17 @@ function handleUnauthorized(): void {
   }
 }
 
+/**
+ * Redirige vers l'assistant d'enrôlement 2FA quand le middleware refuse un
+ * appel (`403 totp_setup_required`). Mémorise la page d'origine.
+ */
+function handleTotpSetupRequired(): void {
+  if (window.location.pathname === "/setup-2fa") return;
+  const current = window.location.pathname + window.location.search;
+  const next = encodeURIComponent(current);
+  window.location.assign(`/setup-2fa?next=${next}`);
+}
+
 async function http<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${API_BASE}${withAthlete(path)}`, {
     headers: {
@@ -173,11 +188,16 @@ async function http<T>(path: string, init?: RequestInit): Promise<T> {
   }
   if (!response.ok) {
     let message = response.statusText;
+    let detail = "";
     try {
       const data = await response.json();
-      message = data.detail || data.message || message;
+      detail = data.detail || data.message || "";
+      message = detail || message;
     } catch {
       // payload non JSON, on garde le statusText
+    }
+    if (response.status === 403 && detail === "totp_setup_required") {
+      handleTotpSetupRequired();
     }
     throw new ApiError(response.status, message);
   }
@@ -369,12 +389,29 @@ export const api = {
   },
   auth: {
     me: () => http<MeResponse>(`/api/auth/me`),
-    acceptInvite: (inviteToken: string, displayName?: string | null) =>
+    login: (email: string, password: string) =>
+      http<LoginResponse>(`/api/auth/login`, {
+        method: "POST",
+        body: JSON.stringify({ email, password }),
+      }),
+    loginTotp: (challenge: string, code: string) =>
+      http<LoginResponse>(`/api/auth/login/totp`, {
+        method: "POST",
+        body: JSON.stringify({ challenge, code }),
+      }),
+    acceptInvite: (
+      inviteToken: string,
+      displayName?: string | null,
+      email?: string | null,
+      password?: string | null,
+    ) =>
       http<AcceptInviteResponse>(`/api/auth/accept-invite`, {
         method: "POST",
         body: JSON.stringify({
           invite_token: inviteToken,
           display_name: displayName || null,
+          email: email || null,
+          password: password || null,
         }),
       }),
     logout: () => http<{ status: string }>(`/api/auth/logout`, { method: "POST" }),
@@ -382,6 +419,36 @@ export const api = {
       http<AcceptInviteResponse>(`/api/auth/reconnect`, {
         method: "POST",
         body: JSON.stringify({ token }),
+      }),
+    setupCredentials: (email: string, password: string) =>
+      http<StatusResponse>(`/api/auth/setup-credentials`, {
+        method: "POST",
+        body: JSON.stringify({ email, password }),
+      }),
+    totpEnroll: () =>
+      http<TotpEnrollResponse>(`/api/auth/totp/enroll`, { method: "POST" }),
+    totpVerify: (code: string) =>
+      http<TotpVerifyResponse>(`/api/auth/totp/verify`, {
+        method: "POST",
+        body: JSON.stringify({ code }),
+      }),
+    totpDisable: (password: string) =>
+      http<StatusResponse>(`/api/auth/totp/disable`, {
+        method: "POST",
+        body: JSON.stringify({ password }),
+      }),
+    changePassword: (currentPassword: string, newPassword: string) =>
+      http<StatusResponse>(`/api/auth/password`, {
+        method: "POST",
+        body: JSON.stringify({
+          current_password: currentPassword,
+          new_password: newPassword,
+        }),
+      }),
+    regenerateRecoveryCodes: (password: string) =>
+      http<TotpVerifyResponse>(`/api/auth/recovery-codes`, {
+        method: "POST",
+        body: JSON.stringify({ password }),
       }),
     athletes: () => http<AthleteSummary[]>(`/api/auth/athletes`),
     createInvitation: (
