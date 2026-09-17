@@ -6,6 +6,7 @@ import {
   LogOut,
   Save,
   Settings,
+  ShieldCheck,
   Target,
   UserRound,
 } from "lucide-react";
@@ -100,6 +101,7 @@ export default function Profil() {
       <ObjectiveSection />
       <AvailabilitySection />
       <AccountSection />
+      <SecuritySection />
     </div>
   );
 }
@@ -192,6 +194,197 @@ function GarminSection() {
           )}
         </>
       )}
+    </section>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// 5. Sécurité (mot de passe + 2FA)
+// ---------------------------------------------------------------------------
+
+function SecuritySection() {
+  const [me, setMe] = useState<MeResponse | null>(null);
+  const [current, setCurrent] = useState("");
+  const [next, setNext] = useState("");
+  const [confirm, setConfirm] = useState("");
+  const [pwBusy, setPwBusy] = useState(false);
+  const [otpPassword, setOtpPassword] = useState("");
+  const [otpBusy, setOtpBusy] = useState(false);
+  const [newCodes, setNewCodes] = useState<string[] | null>(null);
+  const { push } = useToast();
+
+  useEffect(() => {
+    api.auth.me().then(setMe).catch(() => setMe(null));
+  }, []);
+
+  async function changePassword(event: React.FormEvent) {
+    event.preventDefault();
+    if (next !== confirm) {
+      push("Les deux mots de passe ne correspondent pas.", "error");
+      return;
+    }
+    setPwBusy(true);
+    try {
+      await api.auth.changePassword(current, next);
+      setCurrent("");
+      setNext("");
+      setConfirm("");
+      push("Mot de passe modifié.", "success");
+    } catch (err) {
+      const msg =
+        err instanceof ApiError && err.status === 401
+          ? "Mot de passe actuel incorrect."
+          : err instanceof ApiError && err.status === 422
+            ? "Nouveau mot de passe trop court (10 caractères minimum)."
+            : "Échec du changement de mot de passe.";
+      push(msg, "error");
+    } finally {
+      setPwBusy(false);
+    }
+  }
+
+  async function regenerateCodes(event: React.FormEvent) {
+    event.preventDefault();
+    setOtpBusy(true);
+    try {
+      const res = await api.auth.regenerateRecoveryCodes(otpPassword);
+      setNewCodes(res.recovery_codes);
+      setOtpPassword("");
+    } catch (err) {
+      const msg =
+        err instanceof ApiError && err.status === 401
+          ? "Mot de passe incorrect."
+          : "Échec de la régénération.";
+      push(msg, "error");
+    } finally {
+      setOtpBusy(false);
+    }
+  }
+
+  async function disableTotp() {
+    setOtpBusy(true);
+    try {
+      await api.auth.totpDisable(otpPassword);
+      setOtpPassword("");
+      push("2FA désactivée — réactive-la depuis l'assistant.", "success");
+      window.location.assign("/setup-2fa");
+    } catch (err) {
+      const msg =
+        err instanceof ApiError && err.status === 401
+          ? "Mot de passe incorrect."
+          : "Échec de la désactivation.";
+      push(msg, "error");
+      setOtpBusy(false);
+    }
+  }
+
+  return (
+    <section className="card space-y-4">
+      <h3 className="flex items-center gap-2 text-sm font-medium text-gray-200">
+        <ShieldCheck className="h-4 w-4 text-accent" strokeWidth={1.75} aria-hidden="true" />
+        Sécurité
+      </h3>
+
+      <div className="rounded-lg bg-surface/40 p-3 text-sm">
+        {me === null ? (
+          <span className="text-muted">—</span>
+        ) : me.totp_enabled ? (
+          <span className="inline-flex items-center gap-2 text-accent">
+            <ShieldCheck className="h-4 w-4" strokeWidth={1.75} aria-hidden="true" />
+            Double authentification active ({me.email})
+          </span>
+        ) : (
+          <span className="flex flex-wrap items-center gap-2 text-gray-300">
+            Double authentification inactive.
+            <a href="/setup-2fa" className="text-accent hover:underline">
+              Activer la 2FA
+            </a>
+          </span>
+        )}
+      </div>
+
+      <form onSubmit={changePassword} className="space-y-2">
+        <p className="label-eyebrow">Changer le mot de passe</p>
+        <input
+          type="password"
+          autoComplete="current-password"
+          value={current}
+          onChange={(e) => setCurrent(e.target.value)}
+          placeholder="Mot de passe actuel"
+          className="input w-full"
+        />
+        <input
+          type="password"
+          autoComplete="new-password"
+          value={next}
+          onChange={(e) => setNext(e.target.value)}
+          placeholder="Nouveau mot de passe (10 car. min)"
+          className="input w-full"
+        />
+        <input
+          type="password"
+          autoComplete="new-password"
+          value={confirm}
+          onChange={(e) => setConfirm(e.target.value)}
+          placeholder="Confirmer le nouveau mot de passe"
+          className="input w-full"
+        />
+        <button
+          type="submit"
+          disabled={pwBusy || !current || next.length < 10 || next !== confirm}
+          className="btn-primary w-full disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          {pwBusy ? "Modification…" : "Modifier le mot de passe"}
+        </button>
+      </form>
+
+      {me?.totp_enabled ? (
+        <div className="space-y-2 border-t border-white/5 pt-3">
+          <p className="label-eyebrow">Double authentification</p>
+          {newCodes ? (
+            <div className="space-y-2">
+              <p className="text-xs text-gray-300">
+                Nouveaux codes de secours (affichés une seule fois) :
+              </p>
+              <ul className="grid grid-cols-2 gap-1.5 rounded-lg border border-accent/30 bg-accent/[0.06] p-3 font-mono text-xs">
+                {newCodes.map((c) => (
+                  <li key={c} className="tracking-wide text-gray-100">
+                    {c}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : (
+            <form onSubmit={regenerateCodes} className="space-y-2">
+              <input
+                type="password"
+                autoComplete="current-password"
+                value={otpPassword}
+                onChange={(e) => setOtpPassword(e.target.value)}
+                placeholder="Mot de passe pour confirmer"
+                className="input w-full"
+              />
+              <div className="flex gap-2">
+                <button
+                  type="submit"
+                  disabled={otpBusy || !otpPassword}
+                  className="btn-ghost flex-1 disabled:opacity-50"
+                >
+                  Régénérer les codes
+                </button>
+                <button
+                  type="button"
+                  onClick={disableTotp}
+                  disabled={otpBusy || !otpPassword}
+                  className="btn-ghost flex-1 text-red-400 disabled:opacity-50"
+                >
+                  Désactiver la 2FA
+                </button>
+              </div>
+            </form>
+          )}
+        </div>
+      ) : null}
     </section>
   );
 }

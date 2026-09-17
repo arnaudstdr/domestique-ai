@@ -78,13 +78,21 @@ athlètes, sans perdre les données du Raspberry Pi.
       recovery, changement mdp, désactivation, bootstrap) — suite verte (668)
 
 ### Lot 5 — Anti-bruteforce
-- [ ] Backoff + lockout 15 min (~5 échecs), reset au succès
+- [x] Backoff + lockout 15 min (5 échecs), reset au succès
+      (`record_failed_login` / `clear_failed_login` / `user_is_locked`,
+      appliqué sur `/login` et `/login/totp`) — implémenté lots 1 + 3
 
 ### Lot 6 — Frontend
-- [ ] `Login.tsx` : 2 étapes (email/mdp → OTP / code de secours)
-- [ ] `AcceptInvite.tsx` : assistant email/mdp → QR → codes de secours
-- [ ] `Profil.tsx` : gérer 2FA, changer mdp, régénérer les codes
-- [ ] `client.ts` / `types.ts` : méthodes + redirection `totp_setup_required`
+- [x] `Login.tsx` : 2 étapes (email/mdp → OTP / code de secours)
+- [x] `AcceptInvite.tsx` : assistant email/mdp → QR → codes de secours
+- [x] `SetupTwoFactor.tsx` + composant `TwoFactorSetup.tsx` : assistant
+      d'enrôlement (identifiants optionnels → QR → vérif → codes de secours)
+- [x] `Profil.tsx` : section Sécurité (statut 2FA, changer mdp, régénérer les
+      codes, désactiver)
+- [x] `client.ts` / `types.ts` : méthodes + interception
+      `403 totp_setup_required` → redirection `/setup-2fa`
+- [x] `App.tsx` : route `/setup-2fa`
+- [x] `npm run build` (tsc + vite) OK
 
 ### Lot 7 — Tests
 - [ ] `test_platform_db.py` : migration additive, hash, email unique, lockout
