@@ -1,0 +1,10 @@
+# Configuration GitGuardian.
+#
+# Les fichiers de test contiennent des mots de passe factices (fixtures :
+# "supersecret1", "brandnewpass9", etc.) qui déclenchent le détecteur
+# « Generic Password » sans être des secrets réels. On exclut les tests du
+# scan — aucun secret de production ne doit y transiter de toute façon.
+version: 2
+secret:
+  ignored_paths:
+    - 'tests/**'
