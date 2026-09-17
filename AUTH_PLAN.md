@@ -56,17 +56,26 @@ athlètes, sans perdre les données du Raspberry Pi.
 - [x] Tests `test_security.py` (9 tests) — suite verte (655)
 
 ### Lot 3 — Endpoints (`api/routers/auth.py`)
-- [ ] `POST /api/auth/login` → `{status:"totp_required", challenge}` ou 401
-- [ ] `POST /api/auth/login/totp` → code TOTP **ou** recovery code → session
-- [ ] `POST /api/auth/totp/enroll` (secret + QR) / `POST /api/auth/totp/verify`
-- [ ] `POST /api/auth/password`, `POST /api/auth/recovery-codes`
-- [ ] `accept-invite` → assistant `{invite_token, display_name, email, password}`
+- [x] `POST /api/auth/login` → `{status:"totp_required", challenge}` ou session
+- [x] `POST /api/auth/login/totp` → code TOTP **ou** recovery code → session
+- [x] `POST /api/auth/totp/enroll` (secret + QR) / `POST /api/auth/totp/verify`
+- [x] `POST /api/auth/totp/disable` (mot de passe requis)
+- [x] `POST /api/auth/password`, `POST /api/auth/recovery-codes`
+- [x] `POST /api/auth/setup-credentials` (compte sans identifiants — legacy/bootstrap)
+- [x] `accept-invite` → `{invite_token, display_name, email, password}`
+      (transaction unique : email dupliqué → 409, invitation non consommée)
+- [x] `get_user_credentials` / `set_password` / `has_password` dans `platform_db`
 
 ### Lot 4 — Middleware (`api/auth.py`)
-- [ ] `_EXEMPT_API_PATHS` += `/api/auth/login`, `/api/auth/login/totp`
-- [ ] Enforcement 2FA : `totp_enabled=0` → 403 sauf allowlist
-      (`/me`, `/totp/*`, `/logout`)
-- [ ] Break-glass token legacy préservé
+- [x] `_EXEMPT_API_PATHS` += `/api/auth/login`, `/api/auth/login/totp`
+- [x] Enforcement 2FA : `has_password` + `totp_enabled=0` + non-bootstrap → 403
+      `totp_setup_required`, sauf allowlist (`/me`, `/logout`,
+      `/setup-credentials`, `/totp/enroll`, `/totp/verify`)
+- [x] Break-glass token legacy préservé (bootstrap exonéré d'enforcement)
+- [x] Grandfathering : un compte sans mot de passe (session historique) n'est
+      jamais bloqué → pas de lockout collectif au déploiement
+- [x] Tests `test_auth_password.py` (13 tests : login, lockout, enrôlement,
+      recovery, changement mdp, désactivation, bootstrap) — suite verte (668)
 
 ### Lot 5 — Anti-bruteforce
 - [ ] Backoff + lockout 15 min (~5 échecs), reset au succès

@@ -225,6 +225,7 @@ def _user_dict(row: sqlite3.Row) -> dict[str, Any]:
         "created_at": row["created_at"],
         "email": row["email"],
         "totp_enabled": bool(row["totp_enabled"]),
+        "has_password": bool(row["password_hash"]),
     }
 
 
@@ -373,6 +374,19 @@ def set_user_credentials(
                 _now(),
                 user_id,
             ),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def set_password(user_id: int, password_hash: str, path: Path | None = None) -> None:
+    """Met à jour le hash de mot de passe sans toucher à l'email (changement de mdp)."""
+    conn = _connect(path)
+    try:
+        conn.execute(
+            "UPDATE users SET password_hash = ?, password_changed_at = ? WHERE id = ?",
+            (password_hash, _now(), user_id),
         )
         conn.commit()
     finally:
@@ -722,12 +736,18 @@ def revoke_invitation(
 
 
 def accept_invitation(
-    plaintext: str, display_name: str | None = None, path: Path | None = None
+    plaintext: str,
+    display_name: str | None = None,
+    email: str | None = None,
+    password_hash: str | None = None,
+    path: Path | None = None,
 ) -> tuple[dict[str, Any], str]:
     """Consomme une invitation : crée l'utilisateur + une session (+ lien coach si applicable).
 
     Retourne (user_dict, session_token_clair). Lève ``InvitationError`` si
-    l'invitation est inconnue, expirée ou déjà consommée. Transaction unique.
+    l'invitation est inconnue, expirée ou déjà consommée. Transaction unique :
+    si ``email`` est déjà pris (``sqlite3.IntegrityError``), rien n'est committé
+    et l'invitation reste ``pending``.
     """
     if not plaintext:
         raise InvitationError("Invitation invalide.")
@@ -751,10 +771,20 @@ def accept_invitation(
 
         now = _now()
         public_id = uuid.uuid4().hex
+        normalized_email = (email or "").strip().lower() or None
         cur = conn.execute(
-            "INSERT INTO users (public_id, role, display_name, is_bootstrap, created_at) "
-            "VALUES (?, ?, ?, 0, ?)",
-            (public_id, inv["role"], display_name, now),
+            "INSERT INTO users (public_id, role, display_name, is_bootstrap, created_at, "
+            "email, password_hash, password_changed_at) "
+            "VALUES (?, ?, ?, 0, ?, ?, ?, ?)",
+            (
+                public_id,
+                inv["role"],
+                display_name,
+                now,
+                normalized_email,
+                password_hash,
+                now if password_hash else None,
+            ),
         )
         user_id = cur.lastrowid
 
