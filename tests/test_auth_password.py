@@ -76,9 +76,7 @@ def _enroll_totp(client: TestClient, session: str) -> str:
     assert enroll.status_code == 200, enroll.text
     secret = enroll.json()["secret"]
     code = pyotp.TOTP(secret).now()
-    verify = client.post(
-        "/api/auth/totp/verify", headers=_bearer(session), json={"code": code}
-    )
+    verify = client.post("/api/auth/totp/verify", headers=_bearer(session), json={"code": code})
     assert verify.status_code == 200, verify.text
     return secret
 
@@ -142,9 +140,7 @@ def test_full_totp_enrollment_and_login_flow(client: TestClient) -> None:
     assert enroll.json()["qr_svg_data_uri"].startswith("data:image/svg+xml;base64,")
 
     code = pyotp.TOTP(secret).now()
-    verify = client.post(
-        "/api/auth/totp/verify", headers=_bearer(session), json={"code": code}
-    )
+    verify = client.post("/api/auth/totp/verify", headers=_bearer(session), json={"code": code})
     assert verify.status_code == 200, verify.text
     recovery_codes = verify.json()["recovery_codes"]
     assert len(recovery_codes) == 10
@@ -162,9 +158,7 @@ def test_full_totp_enrollment_and_login_flow(client: TestClient) -> None:
     challenge = r.json()["challenge"]
     assert not r.json()["session_token"]
 
-    bad = client.post(
-        "/api/auth/login/totp", json={"challenge": challenge, "code": "000000"}
-    )
+    bad = client.post("/api/auth/login/totp", json={"challenge": challenge, "code": "000000"})
     assert bad.status_code == 401
 
     good = client.post(
@@ -188,9 +182,7 @@ def test_login_totp_accepts_recovery_code(client: TestClient) -> None:
         "/api/auth/login",
         json={"email": "bob@example.com", "password": "supersecret1"},
     ).json()["challenge"]
-    r = client.post(
-        "/api/auth/login/totp", json={"challenge": challenge, "code": recovery[0]}
-    )
+    r = client.post("/api/auth/login/totp", json={"challenge": challenge, "code": recovery[0]})
     assert r.status_code == 200, r.text
     assert r.json()["status"] == "ok"
 
@@ -199,16 +191,12 @@ def test_login_totp_accepts_recovery_code(client: TestClient) -> None:
         "/api/auth/login",
         json={"email": "bob@example.com", "password": "supersecret1"},
     ).json()["challenge"]
-    r2 = client.post(
-        "/api/auth/login/totp", json={"challenge": challenge2, "code": recovery[0]}
-    )
+    r2 = client.post("/api/auth/login/totp", json={"challenge": challenge2, "code": recovery[0]})
     assert r2.status_code == 401
 
 
 def test_login_totp_rejects_bad_challenge(client: TestClient) -> None:
-    r = client.post(
-        "/api/auth/login/totp", json={"challenge": "garbage", "code": "123456"}
-    )
+    r = client.post("/api/auth/login/totp", json={"challenge": "garbage", "code": "123456"})
     assert r.status_code == 401
 
 
@@ -264,14 +252,20 @@ def test_change_password_and_relogin(client: TestClient) -> None:
         json={"current_password": "supersecret1", "new_password": "brandnewpass9"},
     )
     assert r.status_code == 200
-    assert client.post(
-        "/api/auth/login",
-        json={"email": "alice@example.com", "password": "supersecret1"},
-    ).status_code == 401
-    assert client.post(
-        "/api/auth/login",
-        json={"email": "alice@example.com", "password": "brandnewpass9"},
-    ).status_code == 200
+    assert (
+        client.post(
+            "/api/auth/login",
+            json={"email": "alice@example.com", "password": "supersecret1"},
+        ).status_code
+        == 401
+    )
+    assert (
+        client.post(
+            "/api/auth/login",
+            json={"email": "alice@example.com", "password": "brandnewpass9"},
+        ).status_code
+        == 200
+    )
 
 
 def test_change_password_wrong_current_rejected(client: TestClient) -> None:
@@ -291,9 +285,7 @@ def test_totp_disable_requires_password(client: TestClient) -> None:
     code = pyotp.TOTP(enroll["secret"]).now()
     client.post("/api/auth/totp/verify", headers=_bearer(session), json={"code": code})
 
-    r = client.post(
-        "/api/auth/totp/disable", headers=_bearer(session), json={"password": "wrong"}
-    )
+    r = client.post("/api/auth/totp/disable", headers=_bearer(session), json={"password": "wrong"})
     assert r.status_code == 401
 
     r2 = client.post(

@@ -18,9 +18,7 @@ def test_list_users_runs(capsys: pytest.CaptureFixture) -> None:
 
 def test_set_credentials_then_lookup() -> None:
     bootstrap = pdb.get_or_create_bootstrap_coach()
-    auth_cli.main(
-        ["set-credentials", "--email", "coach@example.com", "--password", "coachsecret1"]
-    )
+    auth_cli.main(["set-credentials", "--email", "coach@example.com", "--password", "coachsecret1"])
     user = pdb.get_user_by_email("coach@example.com")
     assert user is not None and user["id"] == bootstrap["id"]
     creds = pdb.get_user_credentials(bootstrap["id"])

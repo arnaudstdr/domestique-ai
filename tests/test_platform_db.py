@@ -266,4 +266,3 @@ def test_session_default_ttl_from_env(monkeypatch):
     monkeypatch.setenv("DOMESTIQUE_AI_SESSION_TTL_DAYS", "0")
     eternal, _ = pdb.create_session(user["id"])
     assert eternal["expires_at"] is None
-

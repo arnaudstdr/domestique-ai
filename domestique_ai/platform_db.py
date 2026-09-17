@@ -315,9 +315,7 @@ def get_user_by_email(email: str, path: Path | None = None) -> dict[str, Any] | 
         return None
     conn = _connect(path)
     try:
-        row = conn.execute(
-            "SELECT * FROM users WHERE lower(email) = ?", (normalized,)
-        ).fetchone()
+        row = conn.execute("SELECT * FROM users WHERE lower(email) = ?", (normalized,)).fetchone()
         return _user_dict(row) if row else None
     finally:
         conn.close()
@@ -366,8 +364,7 @@ def set_user_credentials(
     conn = _connect(path)
     try:
         conn.execute(
-            "UPDATE users SET email = ?, password_hash = ?, password_changed_at = ? "
-            "WHERE id = ?",
+            "UPDATE users SET email = ?, password_hash = ?, password_changed_at = ? WHERE id = ?",
             (
                 (email or "").strip().lower(),
                 password_hash,
@@ -435,9 +432,7 @@ def disable_totp(user_id: int, path: Path | None = None) -> None:
         conn.close()
 
 
-def replace_recovery_codes(
-    user_id: int, code_hashes: list[str], path: Path | None = None
-) -> None:
+def replace_recovery_codes(user_id: int, code_hashes: list[str], path: Path | None = None) -> None:
     """Remplace l'ensemble des codes de secours d'un utilisateur (les anciens sont purgés)."""
     conn = _connect(path)
     try:
@@ -504,9 +499,7 @@ def record_failed_login(user_id: int, path: Path | None = None) -> dict[str, Any
     """
     conn = _connect(path)
     try:
-        row = conn.execute(
-            "SELECT failed_attempts FROM users WHERE id = ?", (user_id,)
-        ).fetchone()
+        row = conn.execute("SELECT failed_attempts FROM users WHERE id = ?", (user_id,)).fetchone()
         attempts = (row["failed_attempts"] if row else 0) + 1
         locked_until: str | None = None
         if attempts >= MAX_FAILED_ATTEMPTS:

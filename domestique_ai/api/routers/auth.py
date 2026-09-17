@@ -439,9 +439,7 @@ def totp_verify(
             detail="Aucun enrôlement TOTP en cours. Appelle /totp/enroll d'abord.",
         )
     if not security.verify_totp(creds["totp_secret"], body.code):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST, detail="Code invalide."
-        )
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Code invalide.")
     enable_totp(user["id"])
     codes = security.generate_recovery_codes()
     replace_recovery_codes(user["id"], [security.hash_recovery_code(c) for c in codes])
@@ -488,9 +486,7 @@ def setup_credentials(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)
         ) from exc
     try:
-        set_user_credentials(
-            user["id"], body.email, security.hash_password(body.password)
-        )
+        set_user_credentials(user["id"], body.email, security.hash_password(body.password))
     except sqlite3.IntegrityError as exc:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,

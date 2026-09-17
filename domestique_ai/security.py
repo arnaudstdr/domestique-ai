@@ -157,12 +157,8 @@ def create_login_challenge(user_id: int, ttl_sec: int = CHALLENGE_TTL_SEC) -> st
         "exp": int(time.time()) + ttl_sec,
         "nonce": secrets.token_hex(8),
     }
-    body = _b64url(
-        json.dumps(payload, separators=(",", ":"), sort_keys=True).encode("utf-8")
-    )
-    signature = hmac.new(
-        get_session_secret(), body.encode("ascii"), hashlib.sha256
-    ).hexdigest()
+    body = _b64url(json.dumps(payload, separators=(",", ":"), sort_keys=True).encode("utf-8"))
+    signature = hmac.new(get_session_secret(), body.encode("ascii"), hashlib.sha256).hexdigest()
     return f"{body}.{signature}"
 
 
@@ -171,9 +167,7 @@ def verify_login_challenge(token: str) -> int | None:
     if not token or "." not in token:
         return None
     body, _, signature = token.partition(".")
-    expected = hmac.new(
-        get_session_secret(), body.encode("ascii"), hashlib.sha256
-    ).hexdigest()
+    expected = hmac.new(get_session_secret(), body.encode("ascii"), hashlib.sha256).hexdigest()
     if not hmac.compare_digest(signature, expected):
         return None
     try:
