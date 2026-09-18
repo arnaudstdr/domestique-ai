@@ -148,6 +148,17 @@ def test_build_initial_messages_trims_long_history(monkeypatch):
     assert messages[1]["content"] == f"m{40 - coach_module.MAX_HISTORY_MESSAGES}"
 
 
+def test_system_prompt_covers_health_topics():
+    """Le coach se positionne cycliste ET assistant santé."""
+    assert "coach cycliste" in SYSTEM_PROMPT
+    assert "assistant santé" in SYSTEM_PROMPT
+    for topic in ("nutrition", "sommeil", "renforcement", "récupération"):
+        assert topic in SYSTEM_PROMPT
+    # Les nouveaux tools santé/multi-sport sont cités.
+    assert "get_nutrition_context" in SYSTEM_PROMPT
+    assert "get_activity_mix" in SYSTEM_PROMPT
+
+
 # Variable conservée pour rétro-compat des imports — pourra être retirée
 # quand on retypera test_coach.py.
 _ = coach_module

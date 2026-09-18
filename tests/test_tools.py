@@ -12,7 +12,9 @@ from domestique_ai.llm.tools import (
     TOOL_SCHEMAS,
     dispatch,
     get_activity_details,
+    get_activity_mix,
     get_morning_trends,
+    get_nutrition_context,
     get_objective,
     get_planned_workout,
     get_recent_activities,
@@ -78,6 +80,12 @@ def _seed_activities(db_path):
             ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             rows,
         )
+        # Une activité hors vélo (renfo) pour les agrégats multi-sport.
+        conn.execute(
+            "INSERT INTO activities (strava_id, date, duration, sport_type, training_load) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (4, "2026-04-28T18:00:00Z", 2400, "Workout", 30),
+        )
         conn.commit()
     finally:
         conn.close()
@@ -109,6 +117,8 @@ def test_tool_schemas_have_required_shape():
         "find_similar_activities",
         "remember_fact",
         "search_conversations",
+        "get_activity_mix",
+        "get_nutrition_context",
     }
     for schema in TOOL_SCHEMAS:
         assert schema["type"] == "function"
@@ -167,11 +177,31 @@ def test_get_training_load_state_empty_db(tmp_path, monkeypatch):
 
 def test_get_recent_activities_filters_window(seeded_db, freeze_today):
     out = get_recent_activities(days=3)
-    assert out["count"] == 2  # 2026-04-27 et 2026-04-30 dans la fenêtre 3j
+    assert out["count"] == 3  # 27, 28 et 30 avril dans la fenêtre 3j
     assert out["as_of"] == "2026-04-30"
     activity = out["activities"][0]
     assert "hr_zones_sec" in activity
     assert set(activity["hr_zones_sec"]) == {"z1", "z2", "z3", "z4", "z5"}
+    assert "sport_type" in activity
+
+
+def test_get_activity_mix_aggregates_by_sport(seeded_db, freeze_today):
+    out = get_activity_mix(days=10)
+    assert out["total_sessions"] == 4
+    by_sport = {row["sport_type"]: row for row in out["by_sport"]}
+    assert "Workout" in by_sport
+    assert by_sport["Workout"]["sessions"] == 1
+    assert by_sport["unknown"]["sessions"] == 3  # les activités seedées sans sport
+
+
+def test_get_nutrition_context_exposes_facts(seeded_db, freeze_today):
+    out = get_nutrition_context(days=10)
+    assert out["available"] is True
+    assert out["food_log_available"] is False
+    assert out["sessions_count"] == 4
+    assert out["longest_session"] is not None
+    assert out["hardest_session"] is not None
+    assert "weekly_tss_7d" in out
 
 
 def test_get_recent_activities_ignores_old_when_unsynced(seeded_db, monkeypatch):
@@ -277,6 +307,30 @@ def test_propose_workout_invalid_zone():
     assert out["available"] is False
 
 
+def test_propose_workout_offbike_strength():
+    out = propose_workout(sport="musculation/gainage", duration_min=45)
+    assert out["available"] is True
+    assert out["kind"] == "strength_gainage"
+    assert out["sport"] == "musculation/gainage"
+    assert any(block.get("phase") == "circuit" for block in out["structure"])
+
+
+def test_propose_workout_offbike_cross_training():
+    out = propose_workout(sport="cross-training", duration_min=60)
+    assert out["available"] is True
+    assert out["kind"] == "cross_training"
+
+
+def test_propose_workout_offbike_unknown_sport():
+    out = propose_workout(sport="judo", duration_min=60)
+    assert out["available"] is False
+
+
+def test_propose_workout_requires_duration():
+    assert propose_workout(target_zone="z2")["available"] is False
+    assert propose_workout(sport="mobilite")["available"] is False
+
+
 def test_propose_workout_invalid_duration():
     out = propose_workout(target_zone="z2", duration_min=0)
     assert out["available"] is False
@@ -288,8 +342,13 @@ def test_dispatch_unknown_tool():
 
 
 def test_dispatch_with_invalid_args():
-    # propose_workout exige target_zone et duration_min
+    # propose_workout sans duration_min renvoie une validation, pas un crash.
     result = dispatch("propose_workout", {})
+    assert result["available"] is False
+
+
+def test_dispatch_with_unknown_kwarg_returns_error():
+    result = dispatch("propose_workout", {"nonsense": 1})
     assert "error" in result
 
 

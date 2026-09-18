@@ -292,7 +292,9 @@ conversations.py    # persistance SQLite (table conversations) + new_session_id(
 memory.py           # mémoire persistante : faits, résumés, RAG (cf. ci-dessous)
 ```
 
-Règle d'or : **le LLM n'invente jamais de chiffre**. Le `SYSTEM_PROMPT` impose d'appeler un tool avant toute affirmation chiffrée (CTL, TSB, zones, distance, etc.). Les 6 tools exposent les données calculées par notre code Python.
+Règle d'or : **le LLM n'invente jamais de chiffre**. Le `SYSTEM_PROMPT` impose d'appeler un tool avant toute affirmation chiffrée (CTL, TSB, zones, distance, etc.). Les tools exposent les données calculées par notre code Python.
+
+Positionnement : coach **cycliste et assistant santé**. Au-delà de l'entraînement vélo, il conseille sur la nutrition, le sommeil, la récupération et le renforcement, à partir de ses connaissances générales — ancrées sur les données réelles de l'athlète (`get_nutrition_context`, `get_activity_mix`) mais sans jamais présenter un repère général comme une mesure de l'athlète. Pas de disclaimer médical systématique (ton neutre). Activités hors vélo : `propose_workout(sport=...)` gère renfo/gainage, cross-training et mobilité (conseil ponctuel — **non planifié** dans le plan).
 
 Pour ajouter un tool :
 

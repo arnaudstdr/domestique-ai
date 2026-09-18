@@ -104,6 +104,7 @@ def get_recent_activities(days: int = 7, *, ctx: AthleteContext | None = None) -
         out.append(
             {
                 "date": act.get("date"),
+                "sport_type": act.get("sport_type"),
                 "duration_sec": act.get("duration"),
                 "distance_km": round((act.get("distance") or 0) / 1000, 2),
                 "elevation_m": act.get("elevation_gain"),
@@ -155,6 +156,58 @@ def get_zone_distribution(days: int = 14, *, ctx: AthleteContext | None = None) 
     }
 
 
+def get_activity_mix(days: int = 28, *, ctx: AthleteContext | None = None) -> dict[str, Any]:
+    """Répartition de la pratique par sport sur les N derniers jours.
+
+    Agrège séances, durée, distance, dénivelé et charge par ``sport_type``
+    (Ride, Run, Walk, Workout…). Permet au coach de raisonner multi-sport
+    (vélo + course + renfo) sans confondre les disciplines.
+    """
+    activities = fetch_activities_from_db(ctx=ctx)
+    as_of = _today()
+    recent = _filter_recent(activities, days, end=as_of)
+
+    buckets: dict[str, dict[str, float]] = {}
+    for act in recent:
+        sport = act.get("sport_type") or "unknown"
+        bucket = buckets.setdefault(
+            sport,
+            {
+                "sessions": 0.0,
+                "duration_sec": 0.0,
+                "distance_km": 0.0,
+                "elevation_m": 0.0,
+                "training_load": 0.0,
+            },
+        )
+        bucket["sessions"] += 1
+        bucket["duration_sec"] += act.get("duration") or 0
+        bucket["distance_km"] += (act.get("distance") or 0) / 1000
+        bucket["elevation_m"] += act.get("elevation_gain") or 0
+        bucket["training_load"] += act.get("training_load") or 0
+
+    by_sport = [
+        {
+            "sport_type": sport,
+            "sessions": int(values["sessions"]),
+            "duration_h": round(values["duration_sec"] / 3600, 1),
+            "distance_km": round(values["distance_km"], 1),
+            "elevation_m": round(values["elevation_m"], 0),
+            "training_load": round(values["training_load"], 1),
+        }
+        for sport, values in sorted(
+            buckets.items(), key=lambda item: item[1]["sessions"], reverse=True
+        )
+    ]
+    return {
+        "as_of": as_of.isoformat(),
+        "days": days,
+        "total_sessions": len(recent),
+        "sports_count": len(by_sport),
+        "by_sport": by_sport,
+    }
+
+
 def get_objective(*, ctx: AthleteContext | None = None) -> dict[str, Any]:
     """Objectif d'entraînement courant (ou indication s'il est absent)."""
     from domestique_ai.llm.objectives import load_objective
@@ -192,7 +245,7 @@ def get_activity_details(external_id: int, *, ctx: AthleteContext | None = None)
             "hr_z1_time, hr_z2_time, hr_z3_time, hr_z4_time, hr_z5_time, "
             "avg_temp, min_temp, max_temp, "
             "name, calories, max_power, cadence_avg, cadence_max, "
-            "speed_avg, speed_max, elevation_loss "
+            "speed_avg, speed_max, elevation_loss, sport_type "
             "FROM activities WHERE strava_id = ? OR garmin_id = ?",
             (external_id, external_id),
         )
@@ -207,6 +260,7 @@ def get_activity_details(external_id: int, *, ctx: AthleteContext | None = None)
         "available": True,
         "external_id": row[0],
         "name": row[17],
+        "sport_type": row[25],
         "date": row[1],
         "duration_sec": row[2],
         "avg_heart_rate": row[3],
@@ -301,6 +355,61 @@ def get_morning_trends(days: int = 30, *, ctx: AthleteContext | None = None) -> 
     }
 
 
+def get_nutrition_context(days: int = 14, *, ctx: AthleteContext | None = None) -> dict[str, Any]:
+    """Contexte factuel pour des conseils nutrition personnalisés.
+
+    Renvoie les faits disponibles sur l'athlète (poids, FTP, W/kg, charge
+    hebdo, volume et intensité des séances récentes, séance la plus longue et
+    la plus dure, température moyenne, calories estimées). **Aucune donnée
+    d'apport alimentaire n'est suivie** : le coach s'en sert comme ancrage
+    factuel, pas pour calculer un bilan calorique.
+    """
+    from domestique_ai.processing.morning_metrics import latest_weight_entry, power_to_weight
+
+    ctx = ctx or context_from_env()
+    entry = latest_weight_entry(db_path=ctx.db_path)
+    weight_kg = entry[1] if entry else None
+    weight_date = entry[0] if entry else None
+    wkg = power_to_weight(ctx.ftp, weight_kg)
+
+    activities = fetch_activities_from_db(ctx=ctx)
+    as_of = _today()
+    recent = _filter_recent(activities, days, end=as_of)
+    week = _filter_recent(activities, 7, end=as_of)
+
+    def _session(act: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "date": act.get("date"),
+            "sport_type": act.get("sport_type"),
+            "duration_min": round((act.get("duration") or 0) / 60),
+            "training_load": act.get("training_load"),
+        }
+
+    longest = max(recent, key=lambda a: a.get("duration") or 0, default=None)
+    hardest = max(recent, key=lambda a: a.get("training_load") or 0, default=None)
+    temps = [a.get("avg_temp") for a in recent if a.get("avg_temp") is not None]
+    avg_temp = round(sum(temps) / len(temps), 1) if temps else None
+    total_seconds = sum(a.get("duration") or 0 for a in recent)
+
+    return {
+        "available": True,
+        "as_of": as_of.isoformat(),
+        "window_days": days,
+        "weight_kg": weight_kg,
+        "weight_date": weight_date,
+        "ftp_w": ctx.ftp,
+        "wkg": wkg,
+        "weekly_tss_7d": round(sum(a.get("training_load") or 0 for a in week), 1),
+        "sessions_count": len(recent),
+        "total_duration_h": round(total_seconds / 3600, 1),
+        "longest_session": _session(longest) if longest else None,
+        "hardest_session": _session(hardest) if hardest else None,
+        "avg_temp_c": avg_temp,
+        "total_calories_kcal": round(sum(a.get("calories") or 0 for a in recent)) or None,
+        "food_log_available": False,
+    }
+
+
 def get_overtraining_signals(*, ctx: AthleteContext | None = None) -> dict[str, Any]:
     """
     Indicateurs auto de surentraînement : TSB chronique, monotony de Foster,
@@ -379,6 +488,122 @@ def _kind_for_target(target_zone: str) -> str:
         "z4": "threshold",
         "z5": "vo2max",
     }.get(target_zone, "endurance")
+
+
+# Templates d'activités hors vélo (renfo, gainage, mobilité, cross-training).
+# Structure en blocs travail/repos (pas de zones %HRR vélo) — accessibles par
+# ``propose_workout(sport=..., target_zone=None)``.
+_OFFBIKE_TEMPLATES = {
+    "musculation/gainage": {
+        "kind": "strength_gainage",
+        "sport": "musculation/gainage",
+        "structure": [
+            {"phase": "warmup", "fraction": 0.20, "detail": "mobilité + activation"},
+            {
+                "phase": "circuit",
+                "block": {"work_min": 3, "rest_min": 1},
+                "fraction_total": 0.60,
+                "detail": "squats, gainage ventral/latéral, pont fessier, bird-dog — 2 à 3 tours",
+            },
+            {"phase": "cooldown", "fraction": 0.20, "detail": "étirements"},
+        ],
+        "rationale": "Renfo/gainage au poids du corps ou charges légères : "
+        "travail de la sangle abdominale et des chaînes postérieures, sans "
+        "impact sur les jambes. Nuit pas au vélo si placé en fin de journée.",
+    },
+    "cross-training": {
+        "kind": "cross_training",
+        "sport": "cross-training",
+        "structure": [
+            {"phase": "warmup", "fraction": 0.15},
+            {"phase": "active", "fraction": 0.70, "detail": "RPE 5-6/10, effort continu"},
+            {"phase": "cooldown", "fraction": 0.15},
+        ],
+        "rationale": "Cross-training (elliptique, natation, càp souple, home "
+        "trainer facile) : entretient le foncier en changeant les appuis et "
+        "en réduisant la sollicitation spécifique.",
+    },
+    "mobilite": {
+        "kind": "mobility",
+        "sport": "mobilite",
+        "structure": [
+            {
+                "phase": "active",
+                "fraction": 1.0,
+                "detail": "enchaînement mobilité "
+                "hanches, thoracique, chevilles — 2 à 3 séries de 30-60 s",
+            },
+        ],
+        "rationale": "Mobilité/récupération active : séance courte et douce, "
+        "idéale en J+1 de séance dure ou en entretien régulier.",
+    },
+}
+
+
+def propose_workout(
+    target_zone: str | None = None,
+    duration_min: int | None = None,
+    kind: str | None = None,
+    sport: str = "cyclisme",
+    *,
+    ctx: AthleteContext | None = None,
+) -> dict[str, Any]:
+    """
+    Squelette de séance.
+
+    Vélo (``sport="cyclisme"``, défaut) : ``target_zone`` (z1..z5) et
+    ``duration_min`` requis ; ``kind`` déduit de la zone si absent.
+    Hors vélo (``sport`` renfo/cross-training/mobilité) : ``target_zone``
+    inutile, ``duration_min`` suffit.
+
+    ``ctx`` est accepté pour l'appel uniforme via ``dispatch`` mais ignoré
+    (séance template, sans données athlète).
+    """
+    if duration_min is None or duration_min <= 0:
+        return {"available": False, "reason": "duration_min doit être positif."}
+
+    is_cycling = sport in ("cyclisme", "cycling", "bike", "velo", "vélo")
+    if not is_cycling:
+        offbike = _OFFBIKE_TEMPLATES.get(sport)
+        if offbike is None:
+            return {
+                "available": False,
+                "reason": f"sport inconnu: {sport!r}. Attendu 'cyclisme' ou "
+                f"{sorted(_OFFBIKE_TEMPLATES)}.",
+            }
+        return {
+            "available": True,
+            "sport": offbike["sport"],
+            "duration_min": duration_min,
+            "kind": offbike["kind"],
+            "structure": offbike["structure"],
+            "rationale": offbike["rationale"],
+        }
+
+    target_zone = (target_zone or "").lower()
+    if target_zone not in HR_ZONE_KEYS:
+        return {
+            "available": False,
+            "reason": f"target_zone invalide: {target_zone!r}. Attendu: {list(HR_ZONE_KEYS)}",
+        }
+
+    selected_kind = kind or _kind_for_target(target_zone)
+    template = _WORKOUT_TEMPLATES.get(selected_kind)
+    if template is None:
+        return {
+            "available": False,
+            "reason": f"kind inconnu: {selected_kind!r}. Attendu: {sorted(_WORKOUT_TEMPLATES)}",
+        }
+
+    return {
+        "available": True,
+        "sport": "cyclisme",
+        "target_zone": target_zone,
+        "duration_min": duration_min,
+        "kind": template["kind"],
+        "structure": template["structure"],
+        "rationale": template["rationale"],
+    }
 
 
 def generate_training_plan(
@@ -539,50 +764,6 @@ def propose_workout_today(
     return _propose_today(available_min=available_min, refresh=refresh, ctx=ctx)
 
 
-def propose_workout(
-    target_zone: str,
-    duration_min: int,
-    kind: str | None = None,
-    *,
-    ctx: AthleteContext | None = None,
-) -> dict[str, Any]:
-    """
-    Squelette de séance basé sur la zone cible et la durée.
-
-    target_zone : z1..z5 (zone dominante visée).
-    duration_min : durée totale en minutes.
-    kind : recovery | endurance | tempo | threshold | vo2max (optionnel,
-           déduit de target_zone si absent).
-    ``ctx`` est accepté pour l'appel uniforme via ``dispatch`` mais ignoré
-    (séance template, sans données athlète).
-    """
-    target_zone = (target_zone or "").lower()
-    if target_zone not in HR_ZONE_KEYS:
-        return {
-            "available": False,
-            "reason": f"target_zone invalide: {target_zone!r}. Attendu: {list(HR_ZONE_KEYS)}",
-        }
-    if duration_min <= 0:
-        return {"available": False, "reason": "duration_min doit être positif."}
-
-    selected_kind = kind or _kind_for_target(target_zone)
-    template = _WORKOUT_TEMPLATES.get(selected_kind)
-    if template is None:
-        return {
-            "available": False,
-            "reason": f"kind inconnu: {selected_kind!r}. Attendu: {sorted(_WORKOUT_TEMPLATES)}",
-        }
-
-    return {
-        "available": True,
-        "target_zone": target_zone,
-        "duration_min": duration_min,
-        "kind": template["kind"],
-        "structure": template["structure"],
-        "rationale": template["rationale"],
-    }
-
-
 # ---- Schémas JSON pour le LLM ------------------------------------------------
 
 TOOL_SCHEMAS: list[dict[str, Any]] = [
@@ -600,7 +781,7 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
         "function": {
             "name": "get_recent_activities",
             "description": "Liste les activités sur les N derniers jours avec "
-            "TSS, durée, distance, dénivelé, HR moyenne et zones.",
+            "sport (sport_type), TSS, durée, distance, dénivelé, HR moyenne et zones.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -648,7 +829,7 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "get_activity_details",
-            "description": "Détail complet d'une activité par son id externe.",
+            "description": "Détail complet d'une activité par son id externe, sport compris.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -693,6 +874,52 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
             "de Foster, saut de volume hebdo. Renvoie alertes "
             "agrégées avec messages explicites.",
             "parameters": {"type": "object", "properties": {}, "required": []},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_activity_mix",
+            "description": "Répartition de la pratique par sport (vélo, course, "
+            "renfo, marche…) sur les N derniers jours : séances, durée, "
+            "distance, dénivelé et charge par discipline. Utile pour voir la "
+            "pratique dans son ensemble ou parler des activités hors vélo.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "days": {
+                        "type": "integer",
+                        "description": "Fenêtre en jours (défaut 28).",
+                        "minimum": 1,
+                        "maximum": 365,
+                    },
+                },
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_nutrition_context",
+            "description": "Contexte factuel pour des conseils nutrition : poids, "
+            "FTP, W/kg, charge hebdo (TSS 7 j), nombre de séances et durée "
+            "totale, séance la plus longue et la plus dure, température "
+            "moyenne, calories estimées. Aucun journal alimentaire n'est "
+            "suivi — sert d'ancrage pour personnaliser, pas à calculer un "
+            "bilan calorique.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "days": {
+                        "type": "integer",
+                        "description": "Fenêtre d'analyse en jours (défaut 14).",
+                        "minimum": 1,
+                        "maximum": 365,
+                    },
+                },
+                "required": [],
+            },
         },
     },
     {
@@ -785,14 +1012,22 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
         "function": {
             "name": "propose_workout",
             "description": "Génère un squelette de séance (échauffement, corps, "
-            "retour au calme) selon une zone cible et une durée.",
+            "retour au calme). Par défaut cyclisme : fournir target_zone et "
+            "duration_min. Pour une activité hors vélo (renforcement, gainage, "
+            "mobilité, cross-training), passer sport et duration_min — "
+            "target_zone inutile.",
             "parameters": {
                 "type": "object",
                 "properties": {
+                    "sport": {
+                        "type": "string",
+                        "enum": ["cyclisme", *_OFFBIKE_TEMPLATES.keys()],
+                        "description": "Discipline (défaut 'cyclisme').",
+                    },
                     "target_zone": {
                         "type": "string",
                         "enum": list(HR_ZONE_KEYS),
-                        "description": "Zone HR dominante visée.",
+                        "description": "Zone HR dominante visée (cyclisme uniquement).",
                     },
                     "duration_min": {
                         "type": "integer",
@@ -803,10 +1038,10 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
                     "kind": {
                         "type": "string",
                         "enum": list(_WORKOUT_TEMPLATES.keys()),
-                        "description": "Type de séance (déduit de target_zone si absent).",
+                        "description": "Type de séance vélo (déduit de target_zone si absent).",
                     },
                 },
-                "required": ["target_zone", "duration_min"],
+                "required": ["duration_min"],
             },
         },
     },
@@ -916,6 +1151,8 @@ TOOLS: dict[str, Callable[..., dict[str, Any]]] = {
     "get_activity_details": get_activity_details,
     "get_morning_trends": get_morning_trends,
     "get_overtraining_signals": get_overtraining_signals,
+    "get_activity_mix": get_activity_mix,
+    "get_nutrition_context": get_nutrition_context,
     "generate_training_plan": generate_training_plan,
     "get_planned_workout": get_planned_workout,
     "propose_workout_today": propose_workout_today,
