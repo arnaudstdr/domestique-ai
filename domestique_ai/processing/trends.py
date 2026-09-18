@@ -20,6 +20,7 @@ from domestique_ai.processing.analyzer import (
     HR_ZONE_KEYS,
     calculate_ctl_atl_tsb,
     fetch_activities_from_db,
+    is_ride,
 )
 
 Period = Literal["3m", "6m", "1y", "all"]
@@ -172,6 +173,96 @@ def _shift_month_one_year(month_key: str) -> str:
     """``"2026-05" -> "2025-05"`` (utile pour comparer N et N-1)."""
     year = int(month_key[:4])
     return f"{year - 1:04d}-{month_key[5:]}"
+
+
+def _week_start(date: dt.date) -> dt.date:
+    """Lundi de la semaine ISO de ``date`` (même convention que ride-volume)."""
+    return date - dt.timedelta(days=date.weekday())
+
+
+def _weeks_in_range(start: dt.date, end: dt.date) -> list[dt.date]:
+    """Liste continue des lundis de la semaine de ``start`` à celle de ``end``."""
+    weeks: list[dt.date] = []
+    cursor = _week_start(start)
+    last = _week_start(end)
+    while cursor <= last:
+        weeks.append(cursor)
+        cursor += dt.timedelta(days=7)
+    return weeks
+
+
+def get_weekly_volume(
+    weeks: int = 12,
+    db_path: Path | None = None,
+    today: dt.date | None = None,
+    *,
+    ctx: AthleteContext | None = None,
+) -> dict[str, Any]:
+    """Volume vélo par semaine ISO sur les ``weeks`` dernières semaines.
+
+    Filtre ``is_ride`` (``sport_type`` contenant "Ride") puis **somme** les
+    activités par semaine ISO. Renvoie une liste continue incluant les semaines
+    sans activité (distance 0) jusqu'à la semaine en cours.
+
+    Structure retournée :
+        {"weeks": [{"week", "week_starting", "distance_km", "elevation_m",
+                    "duration_sec", "sessions", "tss"}, ...]}
+    """
+    today = today or dt.date.today()
+    current_week = _week_start(today)
+
+    buckets: dict[str, dict[str, float]] = {}
+    for act in fetch_activities_from_db(db_path, ctx=ctx):
+        if not is_ride(act.get("sport_type")):
+            continue
+        date_str = act.get("date")
+        if not date_str:
+            continue
+        try:
+            act_date = dt.datetime.fromisoformat(date_str.replace("Z", "+00:00")).date()
+        except ValueError:
+            continue
+        week_start = _week_start(act_date)
+        if week_start < current_week - dt.timedelta(days=7 * (weeks - 1)):
+            continue
+        if week_start > current_week:
+            continue
+        iso_year, iso_week, _ = act_date.isocalendar()
+        key = f"{iso_year}-W{iso_week:02d}"
+        bucket = buckets.setdefault(
+            key,
+            {
+                "distance_km": 0.0,
+                "elevation_m": 0.0,
+                "duration_sec": 0.0,
+                "sessions": 0.0,
+                "tss": 0.0,
+            },
+        )
+        bucket["distance_km"] += float(act.get("distance") or 0) / 1000
+        bucket["elevation_m"] += float(act.get("elevation_gain") or 0)
+        bucket["duration_sec"] += float(act.get("duration") or 0)
+        bucket["sessions"] += 1
+        bucket["tss"] += float(act.get("training_load") or 0)
+
+    first_week = current_week - dt.timedelta(days=7 * (weeks - 1))
+    payload: list[dict[str, Any]] = []
+    for week_start in _weeks_in_range(first_week, current_week):
+        iso_year, iso_week, _ = week_start.isocalendar()
+        key = f"{iso_year}-W{iso_week:02d}"
+        bucket = buckets.get(key) or {}
+        payload.append(
+            {
+                "week": key,
+                "week_starting": week_start.isoformat(),
+                "distance_km": round(bucket.get("distance_km", 0.0), 1),
+                "elevation_m": round(bucket.get("elevation_m", 0.0), 0),
+                "duration_sec": int(bucket.get("duration_sec", 0)),
+                "sessions": int(bucket.get("sessions", 0)),
+                "tss": round(bucket.get("tss", 0.0), 1),
+            }
+        )
+    return {"weeks": payload}
 
 
 def get_trends(

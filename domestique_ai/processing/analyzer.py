@@ -35,6 +35,11 @@ HR_ZONE_KEYS = ("z1", "z2", "z3", "z4", "z5")
 _HR_ZONE_PAUSE_GAP_SEC = 5.0
 
 
+def is_ride(sport_type: str | None) -> bool:
+    """Filtre vélo : ``sport_type`` contient 'Ride' (Ride, VirtualRide, …)."""
+    return bool(sport_type) and "Ride" in sport_type
+
+
 def fetch_activities_from_db(
     db_path: Path | None = None, *, ctx: AthleteContext | None = None
 ) -> list[dict[str, Any]]:

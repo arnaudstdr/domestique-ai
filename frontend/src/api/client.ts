@@ -45,6 +45,7 @@ import type {
   TrendPeriod,
   TrendsResponse,
   WeeklyReviewResult,
+  WeeklyVolumeResponse,
 } from "./types";
 
 const API_BASE = "";
@@ -215,6 +216,8 @@ export const api = {
       http<LoadResponse>(`/api/metrics/load?days=${days}`),
     overtraining: () => http<OvertrainingResponse>(`/api/metrics/overtraining`),
     rideVolume: () => http<RideVolumeResponse>(`/api/metrics/ride-volume`),
+    weeklyVolume: (weeks = 12) =>
+      http<WeeklyVolumeResponse>(`/api/metrics/weekly-volume?weeks=${weeks}`),
     trends: (period: TrendPeriod = "6m") =>
       http<TrendsResponse>(`/api/metrics/trends?period=${period}`),
     ftpProjection: () =>

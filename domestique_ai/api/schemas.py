@@ -61,6 +61,24 @@ class RideVolumeResponse(BaseModel):
     week: VolumePeriod
 
 
+class WeeklyVolumeEntry(BaseModel):
+    """Volume d'une semaine ISO (vélo uniquement)."""
+
+    week: str  # ``"YYYY-Www"`` (ISO)
+    week_starting: str  # lundi ISO ``"YYYY-MM-DD"``
+    distance_km: float
+    elevation_m: float
+    duration_sec: int
+    sessions: int
+    tss: float
+
+
+class WeeklyVolumeResponse(BaseModel):
+    """Réponse de ``GET /api/metrics/weekly-volume``."""
+
+    weeks: list[WeeklyVolumeEntry]
+
+
 # ---- Tendances longues -------------------------------------------------------
 
 

@@ -12,10 +12,12 @@ import type {
   ActivitiesList,
   DailyBriefResponse,
   RideVolumeResponse,
+  WeeklyVolumeResponse,
 } from "../api/types";
 import DailyBriefCard from "../components/DailyBriefCard";
 import LoadChart from "../components/LoadChart";
 import MetricCard from "../components/MetricCard";
+import WeeklyVolumeChart from "../components/WeeklyVolumeChart";
 import ZoneBar from "../components/ZoneBar";
 import { useToast } from "../hooks/useToast";
 import { useViewing } from "../hooks/useViewing";
@@ -53,6 +55,7 @@ export default function Dashboard() {
   const [ot, setOt] = useState<OvertrainingResponse | null>(null);
   const [activities, setActivities] = useState<ActivitiesList | null>(null);
   const [volume, setVolume] = useState<RideVolumeResponse | null>(null);
+  const [weekly, setWeekly] = useState<WeeklyVolumeResponse | null>(null);
   const [brief, setBrief] = useState<DailyBriefResponse | null>(null);
   const [briefLoading, setBriefLoading] = useState(true);
   const [loading, setLoading] = useState(true);
@@ -63,16 +66,18 @@ export default function Dashboard() {
   async function refresh() {
     setLoading(true);
     try {
-      const [l, o, acts, vol] = await Promise.all([
+      const [l, o, acts, vol, wk] = await Promise.all([
         api.metrics.load(90),
         api.metrics.overtraining(),
         api.activities.list(1, 50, { days: 28 }),
         api.metrics.rideVolume(),
+        api.metrics.weeklyVolume(12),
       ]);
       setLoad(l);
       setOt(o);
       setActivities(acts);
       setVolume(vol);
+      setWeekly(wk);
     } catch (err) {
       const msg = err instanceof ApiError ? err.message : String(err);
       push(`Erreur de chargement : ${msg}`, "error");
@@ -162,6 +167,23 @@ export default function Dashboard() {
         </div>
       )}
 
+      {volume && (
+        <div className="grid grid-cols-2 gap-3">
+          <MetricCard
+            label="Km vélo (année)"
+            value={formatKm(volume.year.distance_km)}
+            hint={formatHours(volume.year.duration_sec)}
+          />
+          <MetricCard
+            label="Km vélo (semaine)"
+            value={formatKm(volume.week.distance_km)}
+            hint={formatHours(volume.week.duration_sec)}
+          />
+        </div>
+      )}
+
+      <WeeklyVolumeChart data={weekly?.weeks || []} />
+
       <div className="grid grid-cols-3 gap-3">
         <MetricCard
           label="CTL"
@@ -184,21 +206,6 @@ export default function Dashboard() {
           }
         />
       </div>
-
-      {volume && (
-        <div className="grid grid-cols-2 gap-3">
-          <MetricCard
-            label="Km vélo (année)"
-            value={formatKm(volume.year.distance_km)}
-            hint={formatHours(volume.year.duration_sec)}
-          />
-          <MetricCard
-            label="Km vélo (semaine)"
-            value={formatKm(volume.week.distance_km)}
-            hint={formatHours(volume.week.duration_sec)}
-          />
-        </div>
-      )}
 
       <LoadChart data={load?.history || []} />
 

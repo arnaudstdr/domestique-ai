@@ -21,16 +21,18 @@ from domestique_ai.api.schemas import (
     SyncResult,
     TrendsResponse,
     VolumePeriod,
+    WeeklyVolumeResponse,
 )
 from domestique_ai.athlete_context import AthleteContext
 from domestique_ai.processing.analyzer import (
     calculate_ctl_atl_tsb,
     fetch_activities_from_db,
+    is_ride,
     recalculate_training_loads,
 )
 from domestique_ai.processing.morning_metrics import detect_morning_alerts
 from domestique_ai.processing.overtraining import detect_overtraining_signals
-from domestique_ai.processing.trends import get_ftp_projection, get_trends
+from domestique_ai.processing.trends import get_ftp_projection, get_trends, get_weekly_volume
 
 router = APIRouter(prefix="/api/metrics", tags=["metrics"])
 log = get_logger("metrics")
@@ -133,11 +135,6 @@ def get_overtraining(
     return OvertrainingResponse(alerts=alerts, indicators=indicators)
 
 
-def _is_ride(sport_type: str | None) -> bool:
-    """Filtre vélo : `sport_type` contient 'Ride' (Ride, VirtualRide, …)."""
-    return bool(sport_type) and "Ride" in sport_type
-
-
 @router.get("/ride-volume", response_model=RideVolumeResponse)
 def get_ride_volume(
     ctx: AthleteContext = Depends(get_athlete_context),  # noqa: B008
@@ -155,7 +152,7 @@ def get_ride_volume(
     week = {"distance_m": 0.0, "duration_sec": 0}
 
     for act in fetch_activities_from_db(ctx=ctx):
-        if not _is_ride(act.get("sport_type")):
+        if not is_ride(act.get("sport_type")):
             continue
         date_str = act.get("date")
         if not date_str:
@@ -183,6 +180,15 @@ def get_ride_volume(
             duration_sec=int(week["duration_sec"]),
         ),
     )
+
+
+@router.get("/weekly-volume", response_model=WeeklyVolumeResponse)
+def get_weekly_volume_endpoint(
+    weeks: int = Query(default=12, ge=1, le=52),
+    ctx: AthleteContext = Depends(get_athlete_context),  # noqa: B008
+) -> WeeklyVolumeResponse:
+    """Volume vélo par semaine ISO (``weeks`` dernières, semaines vides incluses)."""
+    return WeeklyVolumeResponse(**get_weekly_volume(weeks=weeks, ctx=ctx))
 
 
 @router.get("/trends", response_model=TrendsResponse)

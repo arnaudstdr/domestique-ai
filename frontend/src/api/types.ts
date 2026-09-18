@@ -50,6 +50,20 @@ export interface RideVolumeResponse {
   week: VolumePeriod;
 }
 
+export interface WeeklyVolumeEntry {
+  week: string;
+  week_starting: string;
+  distance_km: number;
+  elevation_m: number;
+  duration_sec: number;
+  sessions: number;
+  tss: number;
+}
+
+export interface WeeklyVolumeResponse {
+  weeks: WeeklyVolumeEntry[];
+}
+
 // ---- Activités similaires ----------------------------------------------------
 
 export type SportBucket = "indoor" | "outdoor" | "other";
