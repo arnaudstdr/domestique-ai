@@ -369,9 +369,7 @@ def test_ftp_projection_exposes_wkg_when_weight_known(tmp_path, monkeypatch):
     result = get_ftp_projection(db_path=db, today=dt.date(2026, 5, 21))
     assert result["weight_kg"] == 70.0
     assert result["current_wkg"] == pytest.approx(4.0)
-    assert result["projected_wkg"] == pytest.approx(
-        round(result["projected_ftp"] / 70.0, 2)
-    )
+    assert result["projected_wkg"] == pytest.approx(round(result["projected_ftp"] / 70.0, 2))
 
 
 def test_ftp_projection_wkg_none_without_weight(tmp_path, monkeypatch):

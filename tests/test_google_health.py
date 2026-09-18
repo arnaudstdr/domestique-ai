@@ -542,9 +542,7 @@ def test_sync_writes_weight_and_preserves_manual(client: GoogleHealthClient, tmp
                             "weight": {
                                 "weightGrams": 70500,
                                 "sampleTime": {
-                                    "civilTime": {
-                                        "date": {"year": 2026, "month": 5, "day": 11}
-                                    }
+                                    "civilTime": {"date": {"year": 2026, "month": 5, "day": 11}}
                                 },
                             },
                         }
