@@ -109,6 +109,45 @@ def test_build_initial_messages_tolerates_context_builder_failure(monkeypatch):
     assert [m["role"] for m in messages] == ["system", "user"]
 
 
+def test_build_initial_messages_injects_memory_block_new_session(monkeypatch):
+    """Le bloc mémoire est injecté même sur une nouvelle session."""
+    monkeypatch.setattr(
+        "domestique_ai.llm.daily_brief.build_coach_context",
+        lambda *args, **kwargs: "",
+    )
+    messages = build_initial_messages(
+        None, "Salut", memory_block="MÉMOIRE PERSISTANTE : genou fragile"
+    )
+    roles = [m["role"] for m in messages]
+    assert roles == ["system", "system", "user"]
+    assert "genou fragile" in messages[1]["content"]
+
+
+def test_build_initial_messages_injects_memory_block_with_history(monkeypatch):
+    """Le bloc mémoire accompagne aussi les tours suivants (continuité)."""
+    history = [{"role": "user", "content": "Hello"}]
+    messages = build_initial_messages(
+        history, "Et demain ?", memory_block="MÉMOIRE PERSISTANTE : objectif juin"
+    )
+    roles = [m["role"] for m in messages]
+    # system + mémoire + history + user
+    assert roles == ["system", "system", "user", "user"]
+    assert "objectif juin" in messages[1]["content"]
+
+
+def test_build_initial_messages_trims_long_history(monkeypatch):
+    """Au-delà du seuil, seuls les derniers messages verbatim sont gardés."""
+    monkeypatch.setattr(
+        "domestique_ai.llm.daily_brief.build_coach_context",
+        lambda *args, **kwargs: "",
+    )
+    history = [{"role": "user", "content": f"m{i}"} for i in range(40)]
+    messages = build_initial_messages(history, "fin")
+    # system + MAX_HISTORY_MESSAGES + user final.
+    assert len(messages) == 1 + coach_module.MAX_HISTORY_MESSAGES + 1
+    assert messages[1]["content"] == f"m{40 - coach_module.MAX_HISTORY_MESSAGES}"
+
+
 # Variable conservée pour rétro-compat des imports — pourra être retirée
 # quand on retypera test_coach.py.
 _ = coach_module

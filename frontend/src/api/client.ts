@@ -11,6 +11,7 @@ import type {
   ActivityWeather,
   AthleteSummary,
   Availability,
+  CoachMemoryFact,
   CoachMessage,
   CoachSession,
   DailyBriefResponse,
@@ -354,6 +355,39 @@ export const api = {
       http<CoachMessage[]>(`/api/coach/sessions/${sessionId}/messages`),
     deleteSession: (sessionId: string) =>
       http<void>(`/api/coach/sessions/${sessionId}`, { method: "DELETE" }),
+    finalizeSession: (sessionId: string) =>
+      http<{ session_id: string; summarized: boolean }>(
+        `/api/coach/sessions/${sessionId}/finalize`,
+        { method: "POST" },
+      ),
+    memory: {
+      list: (activeOnly = true) =>
+        http<CoachMemoryFact[]>(`/api/coach/memory?active_only=${activeOnly}`),
+      create: (payload: {
+        category: CoachMemoryFact["category"];
+        content: string;
+        pinned?: boolean;
+      }) =>
+        http<CoachMemoryFact>(`/api/coach/memory`, {
+          method: "POST",
+          body: JSON.stringify(payload),
+        }),
+      update: (
+        id: number,
+        payload: {
+          category?: CoachMemoryFact["category"];
+          content?: string;
+          pinned?: boolean;
+          active?: boolean;
+        },
+      ) =>
+        http<CoachMemoryFact>(`/api/coach/memory/${id}`, {
+          method: "PUT",
+          body: JSON.stringify(payload),
+        }),
+      remove: (id: number) =>
+        http<void>(`/api/coach/memory/${id}`, { method: "DELETE" }),
+    },
     today: (availableMin?: number) => {
       const q = availableMin ? `?available_min=${availableMin}` : "";
       return http<TodayWorkoutResponse>(`/api/coach/today${q}`);

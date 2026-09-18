@@ -381,6 +381,24 @@ export interface CoachMessage {
   tool_calls: { name: string; arguments: unknown; result: unknown }[] | null;
 }
 
+export type CoachMemoryCategory =
+  | "preference"
+  | "constraint"
+  | "goal"
+  | "agreement"
+  | "personal";
+
+export interface CoachMemoryFact {
+  id: number;
+  category: CoachMemoryCategory;
+  content: string;
+  source_session_id: string | null;
+  pinned: boolean;
+  active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
 // ---- Plan d'entraînement -----------------------------------------------------
 
 export type WorkoutPhase = "warmup" | "active" | "rest" | "cooldown";

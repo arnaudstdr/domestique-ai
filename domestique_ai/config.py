@@ -496,6 +496,47 @@ def get_ollama_model() -> str:
     return os.getenv("OLLAMA_MODEL", "gemma4:31b-cloud")
 
 
+def get_ollama_embed_model() -> str:
+    """Modèle d'embeddings Ollama pour la mémoire du coach.
+
+    Override via ``OLLAMA_EMBED_MODEL``. Doit être tiré au préalable :
+    ``ollama pull nomic-embed-text``.
+    """
+    return os.getenv("OLLAMA_EMBED_MODEL", "nomic-embed-text")
+
+
+def get_session_summary_every_messages() -> int:
+    """Seuil de messages déclenchant un résumé roulant de session.
+
+    Override via ``SESSION_SUMMARY_EVERY_MESSAGES`` (défaut 8). Une valeur
+    ``<= 0`` désactive le résumé roulant.
+    """
+    raw = os.getenv("SESSION_SUMMARY_EVERY_MESSAGES")
+    if raw is None or raw.strip() == "":
+        return 8
+    try:
+        return max(0, int(raw))
+    except ValueError:
+        logger.warning("SESSION_SUMMARY_EVERY_MESSAGES=%r invalide — fallback 8.", raw)
+        return 8
+
+
+def get_session_idle_finalize_minutes() -> int:
+    """Inactivité (minutes) au bout de laquelle une session est finalisée.
+
+    Override via ``SESSION_IDLE_FINALIZE_MINUTES`` (défaut 45, 0 = désactivé).
+    La finalisation génère le résumé final + l'extraction des faits durables.
+    """
+    raw = os.getenv("SESSION_IDLE_FINALIZE_MINUTES")
+    if raw is None or raw.strip() == "":
+        return 45
+    try:
+        return max(0, int(raw))
+    except ValueError:
+        logger.warning("SESSION_IDLE_FINALIZE_MINUTES=%r invalide — fallback 45.", raw)
+        return 45
+
+
 def get_plan_min_ctl() -> float:
     """Plancher de CTL appliqué au plafond TSS hebdo des plans.
 

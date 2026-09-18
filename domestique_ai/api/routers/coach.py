@@ -16,6 +16,9 @@ from domestique_ai.api.logging import get_logger
 from domestique_ai.api.schemas import (
     CoachAnalyzeRequest,
     CoachChatRequest,
+    CoachMemoryFact,
+    CoachMemoryFactCreate,
+    CoachMemoryFactUpdate,
     CoachMessage,
     CoachSession,
     DailyBriefResponse,
@@ -34,6 +37,14 @@ from domestique_ai.llm.conversations import (
     new_session_id,
 )
 from domestique_ai.llm.daily_brief import build_daily_brief
+from domestique_ai.llm.memory import (
+    extract_facts_from_session,
+    list_facts,
+    purge_session,
+    remember_fact,
+    summarize_session,
+    update_fact,
+)
 from domestique_ai.llm.ollama_client import OllamaError
 
 router = APIRouter(prefix="/api/coach", tags=["coach"])
@@ -96,9 +107,70 @@ def remove_session(
     session_id: str,
     ctx: AthleteContext = Depends(get_athlete_context),  # noqa: B008
 ) -> None:
-    """Supprime une session et tous ses messages."""
+    """Supprime une session et tous ses messages (+ résumés et vecteurs associés)."""
     log.info("Suppression session %s", session_id[:8])
     delete_session(session_id, db_path=ctx.db_path)
+    purge_session(session_id, ctx=ctx)
+
+
+# ---- Mémoire persistante du coach -------------------------------------------
+
+
+@router.get("/memory", response_model=list[CoachMemoryFact])
+def get_memory(
+    active_only: bool = True,
+    ctx: AthleteContext = Depends(get_athlete_context),  # noqa: B008
+) -> list[CoachMemoryFact]:
+    """Liste les faits durables mémorisés par le coach."""
+    return [CoachMemoryFact(**fact) for fact in list_facts(active_only=active_only, ctx=ctx)]
+
+
+@router.post("/memory", response_model=CoachMemoryFact, status_code=status.HTTP_201_CREATED)
+def create_memory(
+    payload: CoachMemoryFactCreate,
+    ctx: AthleteContext = Depends(get_athlete_context),  # noqa: B008
+) -> CoachMemoryFact:
+    """Ajoute un fait durable à la mémoire du coach."""
+    if not payload.content.strip():
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="content vide.")
+    result = remember_fact(payload.category, payload.content, ctx=ctx)
+    if "error" in result:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=result["error"])
+    fact = update_fact(result["id"], pinned=payload.pinned, ctx=ctx)
+    if fact is None:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="échec.")
+    return CoachMemoryFact(**fact)
+
+
+@router.put("/memory/{fact_id}", response_model=CoachMemoryFact)
+def update_memory(
+    fact_id: int,
+    payload: CoachMemoryFactUpdate,
+    ctx: AthleteContext = Depends(get_athlete_context),  # noqa: B008
+) -> CoachMemoryFact:
+    """Met à jour un fait mémorisé (contenu, catégorie, épingle, activation)."""
+    fact = update_fact(
+        fact_id,
+        content=payload.content,
+        category=payload.category,
+        pinned=payload.pinned,
+        active=payload.active,
+        ctx=ctx,
+    )
+    if fact is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="fait introuvable.")
+    return CoachMemoryFact(**fact)
+
+
+@router.delete("/memory/{fact_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_memory(
+    fact_id: int,
+    ctx: AthleteContext = Depends(get_athlete_context),  # noqa: B008
+) -> None:
+    """Supprime un fait de la mémoire du coach."""
+    from domestique_ai.llm.memory import delete_fact
+
+    delete_fact(fact_id, ctx=ctx)
 
 
 async def _coach_event_stream(
@@ -109,6 +181,7 @@ async def _coach_event_stream(
     *,
     session_id: str | None = None,
     persist_to_session: str | None = None,
+    user_message_id: int | None = None,
 ) -> AsyncGenerator[dict[str, str], None]:
     """Pipeline SSE partagé entre `/chat` et `/analyze`.
 
@@ -159,7 +232,7 @@ async def _coach_event_stream(
             "yes" if final_payload.get("thinking") else "no",
         )
         if persist_to_session is not None:
-            append_message(
+            assistant_message_id = append_message(
                 persist_to_session,
                 "assistant",
                 {
@@ -176,8 +249,49 @@ async def _coach_event_stream(
             # le poll régulier de /api/coach/sessions côté front.
             if get_session_title(persist_to_session, db_path=ctx.db_path) is None:
                 asyncio.create_task(_generate_title_safely(persist_to_session, ctx))
+            # Mémoire persistante : vectorise les messages échangés et rafraîchit
+            # le résumé roulant si le seuil est atteint. Best-effort, hors chemin
+            # critique (to_thread pour ne pas bloquer l'event loop).
+            asyncio.create_task(
+                _update_memory_safely(
+                    persist_to_session,
+                    user_message,
+                    final_payload["content"] or "",
+                    user_message_id,
+                    assistant_message_id,
+                    ctx,
+                )
+            )
 
     yield _sse_event("done", {"type": "done"})
+
+
+async def _update_memory_safely(
+    session_id: str,
+    user_text: str,
+    assistant_text: str,
+    user_message_id: int | None,
+    assistant_message_id: int | None,
+    ctx: AthleteContext,
+) -> None:
+    """Vectorise le tour + rafraîchit le résumé roulant. Ne lève jamais."""
+
+    def _work() -> None:
+        from domestique_ai.llm import memory
+
+        if user_message_id is not None:
+            memory.index_message(user_message_id, session_id, "user", user_text, ctx=ctx)
+        if assistant_message_id is not None:
+            memory.index_message(
+                assistant_message_id, session_id, "assistant", assistant_text, ctx=ctx
+            )
+        if memory.should_summarize(session_id, ctx=ctx):
+            memory.summarize_session(session_id, ctx=ctx)
+
+    try:
+        await asyncio.to_thread(_work)
+    except Exception:  # noqa: BLE001 — best-effort, on n'interrompt jamais le chat
+        log.exception("Échec mise à jour mémoire session %s", session_id[:8])
 
 
 async def _generate_title_safely(session_id: str, ctx: AthleteContext) -> None:
@@ -215,7 +329,7 @@ async def post_chat(
         for m in load_session(session_id, db_path=ctx.db_path)
         if m.get("role") in ("user", "assistant") and (m.get("content") or "").strip()
     ]
-    append_message(
+    user_message_id = append_message(
         session_id,
         "user",
         {"role": "user", "content": user_message},
@@ -231,8 +345,39 @@ async def post_chat(
             ctx,
             session_id=session_id,
             persist_to_session=session_id,
+            user_message_id=user_message_id,
         )
     )
+
+
+@router.post("/sessions/{session_id}/finalize")
+async def finalize_session(
+    session_id: str,
+    ctx: AthleteContext = Depends(get_athlete_context),  # noqa: B008
+) -> dict[str, Any]:
+    """Finalise une session : résumé final + extraction des faits durables.
+
+    Appelé de façon best-effort par le front au démarrage d'une nouvelle
+    session ou au changement de session. Idempotent : sans nouveaux messages,
+    ne régénère rien.
+    """
+
+    def _work() -> dict[str, Any]:
+        summary = summarize_session(session_id, final=True, ctx=ctx)
+        facts: list[dict[str, Any]] = []
+        if summary and summary.get("updated"):
+            facts = extract_facts_from_session(session_id, ctx=ctx)
+        return {
+            "session_id": session_id,
+            "summarized": bool(summary and summary.get("updated")),
+            "facts": facts,
+        }
+
+    try:
+        return await asyncio.to_thread(_work)
+    except Exception:  # noqa: BLE001 — best-effort
+        log.exception("Échec finalisation session %s", session_id[:8])
+        return {"session_id": session_id, "summarized": False, "facts": []}
 
 
 @router.get("/daily-brief", response_model=DailyBriefResponse)

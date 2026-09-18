@@ -852,6 +852,59 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "remember_fact",
+            "description": "Mémorise un fait DURABLE sur l'athlète pour les "
+            "sessions futures (préférence, contrainte/blessure, objectif, "
+            "accord, info perso). À appeler quand l'athlète partage une "
+            "information utile à long terme. Ne pas mémoriser d'état passager "
+            "(fatigue du jour, humeur).",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "category": {
+                        "type": "string",
+                        "enum": ["preference", "constraint", "goal", "agreement", "personal"],
+                        "description": "Catégorie du fait.",
+                    },
+                    "content": {
+                        "type": "string",
+                        "description": "Fait à retenir, formulé de façon autonome "
+                        "(compréhensible hors contexte).",
+                    },
+                },
+                "required": ["category", "content"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "search_conversations",
+            "description": "Recherche sémantique dans les échanges passés avec "
+            "l'athlète (mémoire des conversations). Utile pour retrouver un "
+            "échange précis (« quand on avait parlé de… ») ou vérifier ce qui a "
+            "déjà été dit avant de répondre.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "Requête en langage naturel.",
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "Nombre de passages retournés (défaut 5).",
+                        "minimum": 1,
+                        "maximum": 20,
+                    },
+                },
+                "required": ["query"],
+            },
+        },
+    },
 ]
 
 
@@ -909,6 +962,37 @@ def find_similar_activities(
 
 
 TOOLS["find_similar_activities"] = find_similar_activities
+
+
+def remember_fact(
+    category: str, content: str, *, ctx: AthleteContext | None = None
+) -> dict[str, Any]:
+    """Mémorise un fait durable sur l'athlète (mémoire persistante).
+
+    Délègue à ``llm.memory.remember_fact``. Dédup par similarité sémantique :
+    un fait très proche d'un fait existant met à jour celui-ci.
+    """
+    from domestique_ai.llm.memory import remember_fact as _impl
+
+    ctx = ctx or context_from_env()
+    return _impl(category, content, ctx=ctx)
+
+
+TOOLS["remember_fact"] = remember_fact
+
+
+def search_conversations(
+    query: str, limit: int = 5, *, ctx: AthleteContext | None = None
+) -> dict[str, Any]:
+    """Recherche sémantique dans les échanges passés (mémoire conversationnelle)."""
+    from domestique_ai.llm.memory import get_relevant_memory
+
+    ctx = ctx or context_from_env()
+    hits = get_relevant_memory(query, k=limit, types=("message", "summary", "fact"), ctx=ctx)
+    return {"query": query, "results": hits, "available": bool(hits)}
+
+
+TOOLS["search_conversations"] = search_conversations
 
 
 def dispatch(

@@ -20,6 +20,7 @@ def _reset_sync_state(monkeypatch):
         "DOMESTIQUE_AI_GOOGLE_HEALTH_FIRST_RUN_DELAY_MIN",
         "HEALTHCHECKS_PING_URL",
         "HEALTHCHECKS_PING_INTERVAL_MIN",
+        "SESSION_IDLE_FINALIZE_MINUTES",
     ):
         monkeypatch.delenv(key, raising=False)
 
@@ -104,6 +105,7 @@ def test_interval_negative_clamped_to_zero(monkeypatch):
 def test_start_scheduler_disabled_when_interval_zero(monkeypatch):
     monkeypatch.setenv("DOMESTIQUE_AI_GARMIN_AUTO_SYNC_MINUTES", "0")
     monkeypatch.setenv("DOMESTIQUE_AI_GOOGLE_HEALTH_AUTO_SYNC_MINUTES", "0")
+    monkeypatch.setenv("SESSION_IDLE_FINALIZE_MINUTES", "0")
     scheduler._scheduler = None
     scheduler.start_scheduler()
     assert scheduler._scheduler is None
@@ -272,6 +274,7 @@ def test_scheduler_noop_when_everything_disabled(monkeypatch):
     monkeypatch.setenv("DOMESTIQUE_AI_GARMIN_AUTO_SYNC_MINUTES", "0")
     monkeypatch.setenv("DOMESTIQUE_AI_GOOGLE_HEALTH_AUTO_SYNC_MINUTES", "0")
     monkeypatch.delenv("HEALTHCHECKS_PING_URL", raising=False)
+    monkeypatch.setenv("SESSION_IDLE_FINALIZE_MINUTES", "0")
     scheduler._scheduler = None
     scheduler.start_scheduler()
     assert scheduler._scheduler is None

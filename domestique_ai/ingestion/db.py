@@ -142,6 +142,63 @@ def init_db(db_path: Path | None = None, *, ctx: AthleteContext | None = None) -
                 updated_at TEXT NOT NULL
             )
         """)
+        # --- Mémoire persistante du coach -------------------------------------
+        # Faits durables sur l'athlète (préférences, contraintes, objectifs,
+        # accords). Injectés dans le prompt système. ``embedding`` = vecteur
+        # float32 (BLOB) pour la dédup et le retrieval sémantique.
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS coach_memory (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                category TEXT NOT NULL,
+                content TEXT NOT NULL,
+                embedding BLOB,
+                source_session_id TEXT,
+                pinned INTEGER NOT NULL DEFAULT 0,
+                active INTEGER NOT NULL DEFAULT 1,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            )
+        """)
+        _ensure_column(conn, "coach_memory", "embedding", "BLOB")
+        _ensure_column(conn, "coach_memory", "source_session_id", "TEXT")
+        _ensure_column(conn, "coach_memory", "pinned", "INTEGER NOT NULL DEFAULT 0")
+        _ensure_column(conn, "coach_memory", "active", "INTEGER NOT NULL DEFAULT 1")
+        # Résumé épisodique par session. ``last_summarized_message_id`` sert de
+        # garde-fou anti-doublon (résumé roulant + finalisation). ``topics`` =
+        # JSON array de thèmes.
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS session_summaries (
+                session_id TEXT PRIMARY KEY,
+                summary TEXT NOT NULL,
+                topics TEXT,
+                message_count INTEGER,
+                last_summarized_message_id INTEGER,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            )
+        """)
+        _ensure_column(conn, "session_summaries", "topics", "TEXT")
+        _ensure_column(conn, "session_summaries", "message_count", "INTEGER")
+        _ensure_column(conn, "session_summaries", "last_summarized_message_id", "INTEGER")
+        # Index de retrieval unique : messages, résumés et faits y sont
+        # vectorisés. ``source_type`` ∈ 'message' | 'summary' | 'fact'.
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS memory_vectors (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                source_type TEXT NOT NULL,
+                ref_id INTEGER,
+                session_id TEXT,
+                text TEXT NOT NULL,
+                embedding BLOB NOT NULL,
+                created_at TEXT NOT NULL
+            )
+        """)
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_memory_vectors_session ON memory_vectors(session_id)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_memory_vectors_type ON memory_vectors(source_type)"
+        )
         conn.execute("""
             CREATE TABLE IF NOT EXISTS weight_history (
                 date TEXT PRIMARY KEY,

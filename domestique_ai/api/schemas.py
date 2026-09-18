@@ -500,6 +500,33 @@ class CoachAnalyzeRequest(BaseModel):
     prompt: str
 
 
+MemoryCategory = Literal["preference", "constraint", "goal", "agreement", "personal"]
+
+
+class CoachMemoryFact(BaseModel):
+    id: int
+    category: MemoryCategory
+    content: str
+    source_session_id: str | None = None
+    pinned: bool = False
+    active: bool = True
+    created_at: str
+    updated_at: str
+
+
+class CoachMemoryFactCreate(BaseModel):
+    category: MemoryCategory = "personal"
+    content: str
+    pinned: bool = False
+
+
+class CoachMemoryFactUpdate(BaseModel):
+    category: MemoryCategory | None = None
+    content: str | None = None
+    pinned: bool | None = None
+    active: bool | None = None
+
+
 # ---- Plan d'entraînement -----------------------------------------------------
 
 

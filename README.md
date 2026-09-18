@@ -394,6 +394,7 @@ Raspberry Pi procedure, including upgrading an existing deployment without data 
 
 ```bash
 ollama pull gemma4:31b-cloud   # default model; override via OLLAMA_MODEL
+ollama pull nomic-embed-text    # coach persistent memory; override via OLLAMA_EMBED_MODEL
 ollama serve                   # or point OLLAMA_HOST at a remote endpoint
 ```
 

@@ -21,6 +21,10 @@ from domestique_ai.llm.ollama_client import stream_chat
 from domestique_ai.llm.tools import TOOL_SCHEMAS, dispatch
 
 MAX_TOOL_LOOPS = 5
+# Nombre de messages user/assistant verbatim conservés pour la session courante.
+# Au-delà, on s'appuie sur le résumé roulant de la session (injecté via le bloc
+# mémoire) pour ne pas laisser le contexte exploser.
+MAX_HISTORY_MESSAGES = 24
 
 SYSTEM_PROMPT = """Tu es un coach d'endurance francophone qui assiste un cycliste.
 
@@ -29,6 +33,15 @@ Règles strictes :
 - Avant toute affirmation chiffrée (CTL, ATL, TSB, distance, durée, zones HR,
   charge, FTP, dénivelé, etc.), tu DOIS appeler le tool approprié pour
   récupérer la donnée. N'invente jamais de chiffre.
+- Tu disposes d'une MÉMOIRE PERSISTANTE de tes échanges passés avec l'athlète
+  (bloc « MÉMOIRE PERSISTANTE » dans le contexte). Utilise-la pour assurer la
+  continuité, mais ne prétends jamais te souvenir d'autre chose que de ce qui
+  figure dans ce bloc, dans les résumés, ou dans les tools. Si tu ne sais pas,
+  dis-le.
+- Quand l'athlète partage une information durable (blessure, contrainte,
+  préférence, objectif, décision prise), appelle `remember_fact` pour la
+  mémoriser. N'enregistre pas d'état passager (fatigue du jour, humeur).
+- Pour retrouver un échange passé précis, appelle `search_conversations`.
 - Quand l'utilisateur évoque son objectif, sa charge, sa fatigue ou son
   programme, appelle systématiquement get_objective et get_training_load_state.
 - Pour proposer une séance, appelle propose_workout pour obtenir un
@@ -79,7 +92,11 @@ class ToolTrace:
 
 
 def build_initial_messages(
-    history: list[dict[str, Any]] | None, user_message: str, *, ctx: AthleteContext | None = None
+    history: list[dict[str, Any]] | None,
+    user_message: str,
+    *,
+    ctx: AthleteContext | None = None,
+    memory_block: str = "",
 ) -> list[dict[str, Any]]:
     """Construit la liste de messages à envoyer au LLM (system + history + user).
 
@@ -90,10 +107,13 @@ def build_initial_messages(
 
     Palier 2 de la proactivité : si l'historique est vide (nouvelle session),
     on injecte un bloc contextuel (TSB, séance du jour, alerte saillante) en
-    message ``system`` additionnel. Le coach démarre informé sans avoir à
-    appeler ses tools sur la 1re question banale. Sur les tours suivants
-    (history non vide), le contexte n'est PAS réinjecté — il vit déjà dans
-    la conversation, inutile de gonfler le prompt.
+    message ``system`` additionnel.
+
+    Mémoire persistante : ``memory_block`` (faits durables + résumés + passages
+    passés pertinents, construit par ``llm.memory``) est ajouté en message
+    ``system`` à **chaque tour**, nouvelle session ou non. Au-delà de
+    ``MAX_HISTORY_MESSAGES`` messages, l'historique verbatim est tronqué aux
+    plus récents — le résumé roulant prend le relais via le bloc mémoire.
     """
     base: list[dict[str, Any]] = [{"role": "system", "content": SYSTEM_PROMPT}]
     if not history:
@@ -107,12 +127,16 @@ def build_initial_messages(
             context = ""
         if context:
             base.append({"role": "system", "content": context})
+    if memory_block:
+        base.append({"role": "system", "content": memory_block})
     if history:
-        for msg in history:
-            role = msg.get("role")
-            content = msg.get("content")
-            if role in ("user", "assistant") and content:
-                base.append({"role": role, "content": content})
+        clean = [
+            msg
+            for msg in history
+            if msg.get("role") in ("user", "assistant") and msg.get("content")
+        ]
+        for msg in clean[-MAX_HISTORY_MESSAGES:]:
+            base.append({"role": msg["role"], "content": msg["content"]})
     base.append({"role": "user", "content": user_message})
     return base
 
@@ -136,7 +160,16 @@ async def run_turn_stream(
     persister en DB l'assistant turn complet — il ne traverse jamais le wire).
     """
     ctx = ctx or context_from_env()
-    messages = build_initial_messages(history, user_message, ctx=ctx)
+    # Bloc mémoire calculé UNE fois par tour (avant la boucle de tools) : le
+    # retrieval s'appuie sur la question utilisateur et n'a pas à être rejoué à
+    # chaque itération. Best-effort : une panne mémoire ne bloque jamais le chat.
+    try:
+        from domestique_ai.llm.memory import build_memory_block
+
+        memory_block = build_memory_block(user_message, ctx=ctx)
+    except Exception:  # noqa: BLE001
+        memory_block = ""
+    messages = build_initial_messages(history, user_message, ctx=ctx, memory_block=memory_block)
     trace: list[ToolTrace] = []
     accumulated_content = ""
     accumulated_thinking = ""

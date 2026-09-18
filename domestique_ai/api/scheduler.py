@@ -27,6 +27,7 @@ from domestique_ai.api.routers.garmin import trigger_sync_blocking as trigger_ga
 from domestique_ai.config import (
     get_google_health_auto_sync_minutes,
     get_google_health_first_run_delay_minutes,
+    get_session_idle_finalize_minutes,
 )
 from domestique_ai.healthcheck import ping_healthcheck
 from domestique_ai.ingestion.google_health import GoogleHealthClient
@@ -40,6 +41,10 @@ _DEFAULT_GOOGLE_HEALTH_INTERVAL_MIN = 360
 _DEFAULT_GOOGLE_HEALTH_FIRST_RUN_DELAY_MIN = 10
 _DEFAULT_GARMIN_INTERVAL_MIN = 30
 _DEFAULT_GARMIN_FIRST_RUN_DELAY_MIN = 5
+# Cadence du job de finalisation des sessions mémoire (résumé + faits). Le
+# seuil d'inactivité lui-même est `SESSION_IDLE_FINALIZE_MINUTES` (défaut 45).
+_SESSION_FINALIZE_INTERVAL_MIN = 15
+_SESSION_FINALIZE_FIRST_RUN_DELAY_MIN = 5
 
 
 def _read_positive_int(env_name: str, default: int) -> int:
@@ -174,6 +179,38 @@ def _all_athlete_contexts() -> list[tuple[str, object]]:
     return [(u["public_id"], context_for_athlete(u)) for u in users]
 
 
+def _finalize_sessions_job() -> None:
+    """Finalise les sessions coach inactives : résumé final + faits durables.
+
+    Une session sans nouveaux messages depuis ``SESSION_IDLE_FINALIZE_MINUTES``
+    est résumée puis ses faits durables sont extraits. Best-effort par athlète :
+    une exception n'interrompt pas les autres (un job APScheduler ne doit jamais
+    lever).
+    """
+    from domestique_ai.llm.memory import backfill_memory, finalize_idle_sessions
+
+    try:
+        targets = _all_athlete_contexts()
+    except Exception:  # noqa: BLE001
+        log.exception("Finalisation sessions mémoire : énumération des athlètes échouée.")
+        return
+
+    total = 0
+    for public_id, ctx in targets:
+        try:
+            backfill_memory(ctx=ctx)
+        except Exception:  # noqa: BLE001
+            log.exception("Backfill mémoire [%s] : exception non gérée.", public_id[:8])
+        try:
+            total += finalize_idle_sessions(ctx=ctx)
+        except Exception:  # noqa: BLE001
+            log.exception(
+                "Finalisation sessions mémoire [%s] : exception non gérée.", public_id[:8]
+            )
+    if total:
+        log.info("Finalisation sessions mémoire : %d session(s) finalisée(s).", total)
+
+
 def _weekly_review_job() -> None:
     """Revue hebdomadaire — re-plan adaptatif pour tous les athlètes avec plan actif."""
     from domestique_ai.athlete_context import context_for_athlete
@@ -295,10 +332,12 @@ def _daily_morning_check_job() -> None:
 def start_scheduler() -> None:
     """Démarre le scheduler s'il n'est pas déjà en cours.
 
-    Enregistre trois jobs indépendants :
+    Enregistre plusieurs jobs indépendants :
     - ``garmin_auto_sync`` : sync Garmin périodique (si activé)
     - ``google_health_auto_sync`` : sync Google Health périodique (si activé)
     - ``healthcheck_ping`` : ping Healthchecks.io périodique (si URL configurée)
+    - ``daily_morning_check`` / ``weekly_review`` : coach adaptatif (CronTrigger)
+    - ``finalize_sessions`` : résumé + faits des sessions coach inactives
 
     No-op global si déjà démarré. Chaque job est ajouté seulement si sa
     configuration est valide — on peut donc avoir n'importe quelle combinaison.
@@ -311,18 +350,20 @@ def start_scheduler() -> None:
     hc_interval = _healthcheck_interval_minutes()
     hc_url_configured = os.getenv("HEALTHCHECKS_PING_URL", "").strip() != ""
     garmin_interval = _garmin_auto_sync_interval_minutes()
+    session_finalize_enabled = get_session_idle_finalize_minutes() > 0
 
     gh_enabled = gh_interval > 0
     hc_enabled = hc_interval > 0 and hc_url_configured
     garmin_enabled = garmin_interval > 0
 
-    if not gh_enabled and not hc_enabled and not garmin_enabled:
+    if not gh_enabled and not hc_enabled and not garmin_enabled and not session_finalize_enabled:
         if not gh_enabled:
             log.info("Auto-sync Google Health désactivé.")
         if not hc_url_configured:
             log.info("Healthchecks ping désactivé (HEALTHCHECKS_PING_URL absent).")
         if not garmin_enabled:
             log.info("Auto-sync Garmin désactivé (DOMESTIQUE_AI_GARMIN_AUTO_SYNC_MINUTES=0).")
+        log.info("Finalisation sessions mémoire désactivée (SESSION_IDLE_FINALIZE_MINUTES=0).")
         return
 
     scheduler = BackgroundScheduler(timezone="UTC")
@@ -432,6 +473,25 @@ def start_scheduler() -> None:
         log.info("Scheduler : ping Healthchecks.io toutes les %d min.", hc_interval)
     elif not hc_url_configured:
         log.info("Healthchecks ping désactivé (HEALTHCHECKS_PING_URL absent).")
+
+    if session_finalize_enabled:
+        scheduler.add_job(
+            _finalize_sessions_job,
+            "interval",
+            minutes=_SESSION_FINALIZE_INTERVAL_MIN,
+            id="finalize_sessions",
+            coalesce=True,
+            max_instances=1,
+            next_run_time=dt.datetime.now(dt.UTC)
+            + dt.timedelta(minutes=_SESSION_FINALIZE_FIRST_RUN_DELAY_MIN),
+        )
+        log.info(
+            "Scheduler : finalisation sessions inactives toutes les %d min (seuil %d min).",
+            _SESSION_FINALIZE_INTERVAL_MIN,
+            get_session_idle_finalize_minutes(),
+        )
+    else:
+        log.info("Finalisation sessions mémoire désactivée (SESSION_IDLE_FINALIZE_MINUTES=0).")
 
     scheduler.start()
     _scheduler = scheduler

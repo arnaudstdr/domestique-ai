@@ -5,6 +5,7 @@ Entrypoints :
 - `stream_chat()` : async generator de chunks normalisés (streaming SSE).
 - `chat_structured()` : appel non-stream avec sortie JSON validable côté
   appelant (best-effort, ne lève jamais).
+- `embed_texts()` : embeddings pour la mémoire du coach (best-effort).
 """
 
 from __future__ import annotations
@@ -16,7 +17,7 @@ from typing import Any
 
 import ollama
 
-from domestique_ai.config import get_ollama_host, get_ollama_model
+from domestique_ai.config import get_ollama_embed_model, get_ollama_host, get_ollama_model
 
 
 class OllamaError(RuntimeError):
@@ -146,6 +147,68 @@ def chat_structured_sync(
             timeout_s=timeout_s,
             options=options,
         )
+
+    try:
+        asyncio.get_running_loop()
+        in_loop = True
+    except RuntimeError:
+        in_loop = False
+
+    if not in_loop:
+        return asyncio.run(_run())
+
+    import concurrent.futures
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+        return executor.submit(lambda: asyncio.run(_run())).result()
+
+
+async def embed_texts(
+    texts: list[str],
+    *,
+    model: str | None = None,
+    timeout_s: float = 30.0,
+) -> list[list[float]]:
+    """Calcule les embeddings d'une liste de textes via Ollama.
+
+    Retourne une liste de vecteurs ``list[float]`` alignée sur ``texts``, ou
+    ``[]`` en cas d'échec (Ollama injoignable, modèle absent, timeout). Cette
+    fonction **ne lève jamais** : la mémoire du coach est best-effort.
+
+    Modèle par défaut : ``get_ollama_embed_model()`` (``nomic-embed-text``),
+    à tirer au préalable via ``ollama pull``.
+    """
+    if not texts:
+        return []
+    target_model = model or get_ollama_embed_model()
+    try:
+        response = await asyncio.wait_for(
+            _async_client().embed(model=target_model, input=texts),
+            timeout=timeout_s,
+        )
+    except (TimeoutError, ConnectionError, ollama.ResponseError):
+        return []
+    except Exception:  # noqa: BLE001 — best-effort, on retombe sur "pas d'embedding"
+        return []
+
+    embeddings = getattr(response, "embeddings", None)
+    if embeddings is None and isinstance(response, dict):
+        embeddings = response.get("embeddings")
+    if not embeddings:
+        return []
+    return [[float(x) for x in vec] for vec in embeddings]
+
+
+def embed_texts_sync(
+    texts: list[str],
+    *,
+    model: str | None = None,
+    timeout_s: float = 30.0,
+) -> list[list[float]]:
+    """Variante synchrone de ``embed_texts``, sûre même sous event loop."""
+
+    async def _run() -> list[list[float]]:
+        return await embed_texts(texts, model=model, timeout_s=timeout_s)
 
     try:
         asyncio.get_running_loop()

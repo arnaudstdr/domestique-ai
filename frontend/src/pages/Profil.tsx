@@ -20,6 +20,7 @@ import type {
   Profile,
   WeekdayName,
 } from "../api/types";
+import MemoryPanel from "../components/MemoryPanel";
 import { useToast } from "../hooks/useToast";
 
 const WEEKDAYS: { key: WeekdayName; label: string }[] = [
@@ -100,6 +101,7 @@ export default function Profil() {
       <ProfileSection />
       <ObjectiveSection />
       <AvailabilitySection />
+      <MemoryPanel />
       <AccountSection />
       <SecuritySection />
     </div>

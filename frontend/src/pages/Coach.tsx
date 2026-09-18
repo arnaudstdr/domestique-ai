@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
-import { useSearchParams } from "react-router-dom";
-import { MessageSquarePlus, Trash2 } from "lucide-react";
+import { Link, useSearchParams } from "react-router-dom";
+import { Brain, MessageSquarePlus, Trash2 } from "lucide-react";
 import { api, ApiError, streamCoachChat } from "../api/client";
 import type { CoachMessage, CoachSession } from "../api/types";
 import ChatBubble from "../components/ChatBubble";
@@ -234,7 +234,14 @@ export default function Coach() {
 
   const { push } = useToast();
 
+  function finalizeSession(sid: string | null) {
+    // Finalisation best-effort : résumé + extraction des faits durables. Le
+    // serveur reste idempotent si la session n'a pas de nouveaux messages.
+    if (sid) api.coach.finalizeSession(sid).catch(() => undefined);
+  }
+
   function startNew() {
+    finalizeSession(sessionId);
     setSessionId(null);
     setMessages([]);
     pendingRef.current = EMPTY_PENDING;
@@ -258,7 +265,10 @@ export default function Coach() {
         <div className="flex gap-2 items-center">
           <select
             value={sessionId || ""}
-            onChange={(e) => setSessionId(e.target.value || null)}
+            onChange={(e) => {
+              finalizeSession(sessionId);
+              setSessionId(e.target.value || null);
+            }}
             className="input flex-1"
           >
             <option value="">(nouvelle session)</option>
@@ -269,6 +279,14 @@ export default function Coach() {
               </option>
             ))}
           </select>
+          <Link
+            to="/profil"
+            className="btn-ghost"
+            title="Mémoire du coach"
+            aria-label="Mémoire du coach"
+          >
+            <Brain className="h-4 w-4" strokeWidth={1.75} aria-hidden="true" />
+          </Link>
           <button
             onClick={startNew}
             className="btn-ghost"

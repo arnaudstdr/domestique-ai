@@ -289,6 +289,7 @@ tools.py            # TOOL_SCHEMAS (JSON) + TOOLS (fonctions Python) + dispatch(
 coach.py            # SYSTEM_PROMPT + run_turn() : boucle tool-calling (max 5 itérations)
 objectives.py       # load_objective() / save_objective() — YAML data/objective.yaml
 conversations.py    # persistance SQLite (table conversations) + new_session_id()
+memory.py           # mémoire persistante : faits, résumés, RAG (cf. ci-dessous)
 ```
 
 Règle d'or : **le LLM n'invente jamais de chiffre**. Le `SYSTEM_PROMPT` impose d'appeler un tool avant toute affirmation chiffrée (CTL, TSB, zones, distance, etc.). Les 6 tools exposent les données calculées par notre code Python.
@@ -303,6 +304,18 @@ Pour ajouter un tool :
 Mode `thinking` activé sur le 1ᵉʳ tour de tool-calling (fiabilise la décision d'appeler les tools sur gemma3/4), désactivé sur les tours suivants pour gagner du temps. Les deltas de raisonnement sont streamés au client et affichés dans l'expander « 🧠 Raisonnement » de la page Coach (debug).
 
 Persistance : chaque message (user / assistant / tool) est stocké en JSON brut dans la table `conversations` (clé `session_id`, ordre par `id`). Reprise d'une session via le sélecteur de la page Coach.
+
+### Mémoire persistante du coach (`llm/memory.py`)
+
+Le coach garde une mémoire **entre les sessions**, à 3 étages, dans le SQLite de l'athlète (`ctx.db_path`) :
+
+- **Faits durables** (`coach_memory`) : préférences, contraintes/blessures, objectifs, accords, perso. Toujours injectés dans le prompt système. Population par l'outil `remember_fact` (explicite) **et** extraction auto en fin de session. Dédup par similarité (cosine > 0.9 → mise à jour).
+- **Résumés épisodiques** (`session_summaries`) : un résumé par session. **Résumé roulant** tous les `SESSION_SUMMARY_EVERY_MESSAGES` messages (défaut 8) ; **finalisation** (résumé final + extraction de faits) quand une session est inactive > `SESSION_IDLE_FINALIZE_MINUTES` (défaut 45, job APScheduler `finalize_sessions`), ou sur appel explicite `POST /api/coach/sessions/{id}/finalize` (front au `startNew`/changement de session). Le garde-fou `last_summarized_message_id` évite les régénérations.
+- **RAG** (`memory_vectors`) : index de retrieval unifié (messages, résumés, faits). Embeddings via Ollama (`OLLAMA_EMBED_MODEL`, défaut `nomic-embed-text` — `ollama pull nomic-embed-text`), cosine brute-force numpy (numpy déjà tiré par pandas). `build_memory_block(query)` assemble faits + 5 derniers résumés + top-4 passages pertinents, avec budget de contexte.
+
+Intégration : `build_initial_messages()` injecte le bloc mémoire en message `system` **à chaque tour** ; `run_turn_stream()` le calcule une fois par tour. L'historique verbatim de session est plafonné à `MAX_HISTORY_MESSAGES` (24) — le résumé roulant prend le relais. Outils exposés : `remember_fact` (écriture), `search_conversations` (lecture RAG).
+
+CRUD + UI : `GET/POST /api/coach/memory`, `PUT/DELETE /api/coach/memory/{id}`, composant `frontend/src/components/MemoryPanel.tsx` (section « Mémoire du coach » dans `/profil`, lien depuis la page Coach). `DELETE /api/coach/sessions/{id}` purge résumés + vecteurs ; les **faits durables survivent** (`source_session_id` nullifié). Backfill one-off de l'historique via flag `memory_backfill_done` (`sync_meta`), déclenché par le job scheduler. Tests : `tests/test_memory.py`, `tests/test_memory_api.py`, extensions `test_coach.py` / `test_scheduler.py`.
 
 Objectif : `data/objective.yaml` (gitignoré, template `data/objective.yaml.example`). Lu par le tool `get_objective`. Champs : `type` (cyclosportive/course/cyclo/maintenance), `date`, `distance_km`, `elevation_m`, `target_ftp`, `notes`. Override du chemin via `DOMESTIQUE_AI_OBJECTIVE_PATH` (utile pour les tests).
 
