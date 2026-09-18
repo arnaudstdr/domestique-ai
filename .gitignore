@@ -37,6 +37,8 @@ __pycache__/
 
 # Notes locales
 tmp/
+TODO.md
+*.DS_Store
 
 # Frontend (build & deps reconstruits par CI/Docker)
 frontend/node_modules/
