@@ -210,6 +210,40 @@ class ActivityWeather(BaseModel):
     station: str | None = None
 
 
+class ActivityCreate(BaseModel):
+    """Activité saisie manuellement (aucune source externe).
+
+    Le TSS est calculé côté serveur (``compute_training_load``) : hr-TSS si FC
+    moyenne + profil HR, sinon TSS puissance si puissance moyenne + FTP, sinon 0.
+    """
+
+    date: str = Field(description="Date/heure ISO (UTC recommandé), ex. 2026-06-01T08:00:00Z")
+    sport_type: str = Field(default="Ride", description="Nomenclature Strava/Garmin, ex. Ride")
+    duration_sec: int = Field(ge=1)
+    distance_km: float = Field(default=0.0, ge=0)
+    elevation_m: float | None = Field(default=None, ge=0)
+    avg_hr: float | None = Field(default=None, gt=0)
+    max_hr: float | None = Field(default=None, gt=0)
+    avg_power: float | None = Field(default=None, gt=0)
+    name: str | None = None
+
+
+class TcxImportFileResult(BaseModel):
+    """Résultat d'import d'un fichier TCX (un fichier peut contenir N activités)."""
+
+    filename: str
+    status: Literal["imported", "skipped", "error"]
+    reason: str | None = None
+    activities: list[ActivitySummary] = Field(default_factory=list)
+
+
+class TcxImportResponse(BaseModel):
+    imported: int
+    skipped: int
+    errors: int
+    results: list[TcxImportFileResult]
+
+
 class SimilarActivityMatch(BaseModel):
     """Une activité similaire à l'activité de référence."""
 

@@ -15,8 +15,11 @@ Conventions DB ``activities`` :
 
 from __future__ import annotations
 
+import datetime as dt
+import json
 import sqlite3
 from pathlib import Path
+from typing import Any
 
 from domestique_ai.athlete_context import AthleteContext
 from domestique_ai.config import get_db_path
@@ -66,7 +69,9 @@ def init_db(db_path: Path | None = None, *, ctx: AthleteContext | None = None) -
                 speed_max REAL,
                 elevation_loss REAL,
                 start_lat REAL,
-                start_lng REAL
+                start_lng REAL,
+                source TEXT,
+                source_uid TEXT
             )
         """)
         _ensure_column(conn, "activities", "max_heart_rate", "REAL")
@@ -94,9 +99,25 @@ def init_db(db_path: Path | None = None, *, ctx: AthleteContext | None = None) -
             ("start_lng", "REAL"),
         ):
             _ensure_column(conn, "activities", col, ddl)
+        # Source d'ingestion explicite : "garmin" | "strava" | "manual" | "tcx".
+        # ``source_uid`` : clé de dédup interne (sha1 du fichier importé) — NULL
+        # pour les saisies manuelles (deux séances identiques peuvent être
+        # légitimes). Les lignes historiques (source NULL) sont rétro-remplies.
+        _ensure_column(conn, "activities", "source", "TEXT")
+        _ensure_column(conn, "activities", "source_uid", "TEXT")
+        conn.execute(
+            "UPDATE activities SET source = CASE "
+            "WHEN strava_id IS NOT NULL THEN 'strava' "
+            "WHEN garmin_id IS NOT NULL THEN 'garmin' END "
+            "WHERE source IS NULL"
+        )
         conn.execute(
             "CREATE UNIQUE INDEX IF NOT EXISTS idx_activities_garmin_id "
             "ON activities(garmin_id) WHERE garmin_id IS NOT NULL"
+        )
+        conn.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_activities_source_uid "
+            "ON activities(source_uid) WHERE source_uid IS NOT NULL"
         )
         # Normalisation des sport_type hérités d'un mappage Garmin antérieur
         # (typeKey "road_biking" non mappé → fallback "RoadBiking"). Idempotent,
@@ -232,6 +253,17 @@ def init_db(db_path: Path | None = None, *, ctx: AthleteContext | None = None) -
                 value TEXT NOT NULL
             )
         """)
+        # Streams persistés uniquement pour les activités importées (TCX) : les
+        # activités Garmin les récupèrent en live (cache 1 h) et n'ont pas de
+        # ligne ici. ``activity_id`` référence ``activities.id`` (pas l'id
+        # externe, qui peut être un garmin_id/strava_id ou l'id local).
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS activity_streams (
+                activity_id INTEGER PRIMARY KEY,
+                payload TEXT NOT NULL,
+                created_at TEXT NOT NULL
+            )
+        """)
         conn.commit()
     finally:
         conn.close()
@@ -254,6 +286,170 @@ def summarize_temp_stream(
         return None
     avg = round(sum(clean) / len(clean), 1)
     return avg, round(min(clean), 1), round(max(clean), 1)
+
+
+# Colonnes autorisées à l'écriture via ``insert_activity`` — volontairement
+# explicite : tout ajout de colonne doit être déclaré ici en plus du schéma.
+_ACTIVITY_COLUMNS: tuple[str, ...] = (
+    "strava_id",
+    "garmin_id",
+    "date",
+    "duration",
+    "avg_heart_rate",
+    "max_heart_rate",
+    "avg_power",
+    "elevation_gain",
+    "distance",
+    "training_load",
+    "hr_z1_time",
+    "hr_z2_time",
+    "hr_z3_time",
+    "hr_z4_time",
+    "hr_z5_time",
+    "sport_type",
+    "avg_temp",
+    "min_temp",
+    "max_temp",
+    "map_polyline",
+    "name",
+    "calories",
+    "max_power",
+    "cadence_avg",
+    "cadence_max",
+    "speed_avg",
+    "speed_max",
+    "elevation_loss",
+    "start_lat",
+    "start_lng",
+    "source",
+    "source_uid",
+)
+
+
+def _resolve_path(db_path: Path | None, ctx: AthleteContext | None) -> Path:
+    return Path(db_path) if db_path else (ctx.db_path if ctx else get_db_path())
+
+
+def insert_activity(
+    record: dict[str, Any],
+    *,
+    ctx: AthleteContext | None = None,
+    db_path: Path | None = None,
+) -> int:
+    """Insère une activité à partir d'un dict de colonnes explicites.
+
+    Helper source-agnostique utilisé par l'ajout manuel et l'import TCX.
+    Les clés absentes valent ``NULL``. Retourne le ``rowid`` inséré — c'est cet
+    id local qui sert d'``external_id`` pour les activités sans id Garmin/Strava.
+    """
+    path = _resolve_path(db_path, ctx)
+    init_db(path)
+    columns = [col for col in _ACTIVITY_COLUMNS if col in record]
+    values = [record[col] for col in columns]
+    conn = sqlite3.connect(path)
+    try:
+        cursor = conn.execute(
+            f"INSERT INTO activities ({', '.join(columns)}) "
+            f"VALUES ({', '.join('?' for _ in columns)})",
+            values,
+        )
+        conn.commit()
+        return int(cursor.lastrowid)
+    finally:
+        conn.close()
+
+
+def store_activity_streams(
+    activity_id: int,
+    payload: dict[str, Any],
+    *,
+    ctx: AthleteContext | None = None,
+    db_path: Path | None = None,
+) -> None:
+    """Persiste (upsert) les streams JSON d'une activité importée (TCX)."""
+    path = _resolve_path(db_path, ctx)
+    init_db(path)
+    created_at = dt.datetime.now(dt.UTC).isoformat()
+    conn = sqlite3.connect(path)
+    try:
+        conn.execute(
+            "INSERT INTO activity_streams (activity_id, payload, created_at) "
+            "VALUES (?, ?, ?) ON CONFLICT(activity_id) DO UPDATE SET "
+            "payload = excluded.payload, created_at = excluded.created_at",
+            (int(activity_id), json.dumps(payload), created_at),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def load_activity_streams(
+    activity_id: int,
+    *,
+    ctx: AthleteContext | None = None,
+    db_path: Path | None = None,
+) -> dict[str, Any] | None:
+    """Retourne les streams persistés d'une activité, ou ``None`` si absents."""
+    path = _resolve_path(db_path, ctx)
+    if not path.exists():
+        return None
+    init_db(path)
+    conn = sqlite3.connect(path)
+    try:
+        row = conn.execute(
+            "SELECT payload FROM activity_streams WHERE activity_id = ?",
+            (int(activity_id),),
+        ).fetchone()
+    finally:
+        conn.close()
+    if not row:
+        return None
+    try:
+        return json.loads(row[0])
+    except (ValueError, TypeError):
+        return None
+
+
+def activity_id_for_source_uid(
+    source_uid: str,
+    *,
+    ctx: AthleteContext | None = None,
+    db_path: Path | None = None,
+) -> int | None:
+    """Id local de l'activité portant ``source_uid`` (dédup import), ou ``None``."""
+    path = _resolve_path(db_path, ctx)
+    if not path.exists():
+        return None
+    init_db(path)
+    conn = sqlite3.connect(path)
+    try:
+        row = conn.execute(
+            "SELECT id FROM activities WHERE source_uid = ?", (source_uid,)
+        ).fetchone()
+    finally:
+        conn.close()
+    return int(row[0]) if row else None
+
+
+def delete_activity(
+    activity_id: int,
+    *,
+    ctx: AthleteContext | None = None,
+    db_path: Path | None = None,
+) -> bool:
+    """Supprime une activité (et ses streams) par id local. ``True`` si supprimée."""
+    path = _resolve_path(db_path, ctx)
+    if not path.exists():
+        return False
+    init_db(path)
+    conn = sqlite3.connect(path)
+    try:
+        conn.execute("DELETE FROM activity_streams WHERE activity_id = ?", (int(activity_id),))
+        cursor = conn.execute("DELETE FROM activities WHERE id = ?", (int(activity_id),))
+        conn.commit()
+        return cursor.rowcount > 0
+    finally:
+        conn.close()
 
 
 def get_sync_meta(key: str, db_path: Path | None = None) -> str | None:

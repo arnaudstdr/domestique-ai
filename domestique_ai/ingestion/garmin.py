@@ -625,9 +625,9 @@ def save_garmin_activity(
                 hr_z1_time, hr_z2_time, hr_z3_time, hr_z4_time, hr_z5_time,
                 sport_type, avg_temp, min_temp, max_temp, map_polyline,
                 name, calories, max_power, cadence_avg, cadence_max,
-                speed_avg, speed_max, elevation_loss, start_lat, start_lng
+                speed_avg, speed_max, elevation_loss, start_lat, start_lng, source
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-                      ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                      ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
             (
                 None,
@@ -654,6 +654,7 @@ def save_garmin_activity(
                 activity.get("elevation_loss"),
                 activity.get("start_lat"),
                 activity.get("start_lng"),
+                "garmin",
             ),
         )
         conn.commit()

@@ -3,9 +3,11 @@
 import type {
   AcceptInviteResponse,
   ActivitiesList,
+  ActivityCreate,
   ActivityDetail,
   ActivityFilters,
   ActivityStreams,
+  ActivitySummary,
   ActivityWeather,
   AthleteSummary,
   Availability,
@@ -39,6 +41,7 @@ import type {
   SyncResult,
   SyncStatus,
   GarminStatus,
+  TcxImportResponse,
   TodayWorkoutResponse,
   TotpEnrollResponse,
   TotpVerifyResponse,
@@ -175,13 +178,19 @@ function handleTotpSetupRequired(): void {
 }
 
 async function http<T>(path: string, init?: RequestInit): Promise<T> {
+  // Un body FormData ne doit pas porter de Content-Type explicite : le
+  // navigateur pose lui-même le boundary multipart.
+  const isFormData = typeof FormData !== "undefined" && init?.body instanceof FormData;
+  const headers: Record<string, string> = {
+    ...authHeaders(),
+    ...((init?.headers as Record<string, string>) || {}),
+  };
+  if (!isFormData && !headers["Content-Type"]) {
+    headers["Content-Type"] = "application/json";
+  }
   const response = await fetch(`${API_BASE}${withAthlete(path)}`, {
-    headers: {
-      "Content-Type": "application/json",
-      ...authHeaders(),
-      ...(init?.headers || {}),
-    },
     ...init,
+    headers,
   });
   if (response.status === 401) {
     handleUnauthorized();
@@ -267,6 +276,21 @@ export const api = {
       http<SimilarActivitiesResponse>(
         `/api/activities/${id}/similar?limit=${limit}`,
       ),
+    create: (payload: ActivityCreate) =>
+      http<ActivitySummary>(`/api/activities`, {
+        method: "POST",
+        body: JSON.stringify(payload),
+      }),
+    importTcx: (files: File[]) => {
+      const form = new FormData();
+      for (const file of files) form.append("files", file);
+      return http<TcxImportResponse>(`/api/activities/import/tcx`, {
+        method: "POST",
+        body: form,
+      });
+    },
+    remove: (id: number) =>
+      http<void>(`/api/activities/${id}`, { method: "DELETE" }),
   },
   morning: {
     get: (days = 90) => http<MorningResponse>(`/api/morning?days=${days}`),

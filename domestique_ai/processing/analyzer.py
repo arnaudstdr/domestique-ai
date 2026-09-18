@@ -51,12 +51,12 @@ def fetch_activities_from_db(
     conn = sqlite3.connect(path)
     try:
         cursor = conn.execute(
-            "SELECT strava_id, garmin_id, date, duration, avg_heart_rate, max_heart_rate, "
+            "SELECT id, strava_id, garmin_id, date, duration, avg_heart_rate, max_heart_rate, "
             "avg_power, elevation_gain, distance, training_load, "
             "hr_z1_time, hr_z2_time, hr_z3_time, hr_z4_time, hr_z5_time, "
             "sport_type, avg_temp, min_temp, max_temp, map_polyline, "
             "name, calories, max_power, cadence_avg, cadence_max, "
-            "speed_avg, speed_max, elevation_loss, start_lat, start_lng "
+            "speed_avg, speed_max, elevation_loss, start_lat, start_lng, source "
             "FROM activities ORDER BY date ASC"
         )
         rows = cursor.fetchall()
@@ -64,36 +64,38 @@ def fetch_activities_from_db(
         conn.close()
     return [
         {
-            "strava_id": row[0],
-            "garmin_id": row[1],
-            "date": row[2],
-            "duration": row[3],
-            "avg_heart_rate": row[4],
-            "max_heart_rate": row[5],
-            "avg_power": row[6],
-            "elevation_gain": row[7],
-            "distance": row[8],
-            "training_load": row[9],
-            "hr_z1_time": row[10],
-            "hr_z2_time": row[11],
-            "hr_z3_time": row[12],
-            "hr_z4_time": row[13],
-            "hr_z5_time": row[14],
-            "sport_type": row[15],
-            "avg_temp": row[16],
-            "min_temp": row[17],
-            "max_temp": row[18],
-            "map_polyline": row[19],
-            "name": row[20],
-            "calories": row[21],
-            "max_power": row[22],
-            "cadence_avg": row[23],
-            "cadence_max": row[24],
-            "speed_avg": row[25],
-            "speed_max": row[26],
-            "elevation_loss": row[27],
-            "start_lat": row[28],
-            "start_lng": row[29],
+            "id": row[0],
+            "strava_id": row[1],
+            "garmin_id": row[2],
+            "date": row[3],
+            "duration": row[4],
+            "avg_heart_rate": row[5],
+            "max_heart_rate": row[6],
+            "avg_power": row[7],
+            "elevation_gain": row[8],
+            "distance": row[9],
+            "training_load": row[10],
+            "hr_z1_time": row[11],
+            "hr_z2_time": row[12],
+            "hr_z3_time": row[13],
+            "hr_z4_time": row[14],
+            "hr_z5_time": row[15],
+            "sport_type": row[16],
+            "avg_temp": row[17],
+            "min_temp": row[18],
+            "max_temp": row[19],
+            "map_polyline": row[20],
+            "name": row[21],
+            "calories": row[22],
+            "max_power": row[23],
+            "cadence_avg": row[24],
+            "cadence_max": row[25],
+            "speed_avg": row[26],
+            "speed_max": row[27],
+            "elevation_loss": row[28],
+            "start_lat": row[29],
+            "start_lng": row[30],
+            "source": row[31],
         }
         for row in rows
     ]

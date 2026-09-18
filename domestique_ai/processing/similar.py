@@ -63,8 +63,14 @@ def _within_tolerance(a: float, b: float, tolerance: float, floor: float) -> boo
 
 
 def _activity_to_dict(row: tuple[Any, ...]) -> dict[str, Any]:
-    # Id externe : strava_id (legacy) prioritaire, fallback garmin_id.
-    external_id = row[0] if row[0] is not None else row[1]
+    # Id externe : strava_id (legacy), fallback garmin_id, puis id local
+    # (activités manuelles / importées TCX).
+    for index in (0, 1, 10):
+        if row[index] is not None:
+            external_id = row[index]
+            break
+    else:
+        external_id = None
     return {
         "external_id": external_id,
         "date": row[2],
@@ -114,9 +120,9 @@ def find_similar_activities(
         )
         ref_row = conn.execute(
             "SELECT strava_id, garmin_id, date, duration, avg_heart_rate, avg_power, "
-            "elevation_gain, distance, training_load, sport_type "
-            "FROM activities WHERE strava_id = ? OR garmin_id = ?",
-            (external_id, external_id),
+            "elevation_gain, distance, training_load, sport_type, id "
+            "FROM activities WHERE strava_id = ? OR garmin_id = ? OR id = ?",
+            (external_id, external_id, external_id),
         ).fetchone()
         if ref_row is None:
             return {
@@ -147,9 +153,9 @@ def find_similar_activities(
         dist_hi = ref_dist * (1 + _DISTANCE_TOLERANCE * 2)
         rows = conn.execute(
             "SELECT strava_id, garmin_id, date, duration, avg_heart_rate, avg_power, "
-            "elevation_gain, distance, training_load, sport_type "
+            "elevation_gain, distance, training_load, sport_type, id "
             "FROM activities "
-            "WHERE coalesce(strava_id, garmin_id) != ? AND distance BETWEEN ? AND ? "
+            "WHERE coalesce(strava_id, garmin_id, id) != ? AND distance BETWEEN ? AND ? "
             "ORDER BY date DESC",
             (external_id, dist_lo, dist_hi),
         ).fetchall()

@@ -219,6 +219,32 @@ export interface ActivityDetail {
   hr_zones: Record<string, number> | null;
 }
 
+export interface ActivityCreate {
+  date: string;
+  sport_type: string;
+  duration_sec: number;
+  distance_km: number;
+  elevation_m?: number | null;
+  avg_hr?: number | null;
+  max_hr?: number | null;
+  avg_power?: number | null;
+  name?: string | null;
+}
+
+export interface TcxImportFileResult {
+  filename: string;
+  status: "imported" | "skipped" | "error";
+  reason: string | null;
+  activities: ActivitySummary[];
+}
+
+export interface TcxImportResponse {
+  imported: number;
+  skipped: number;
+  errors: number;
+  results: TcxImportFileResult[];
+}
+
 export interface ActivityWeather {
   available: boolean;
   issue_date: string | null;

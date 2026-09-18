@@ -1,9 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
+import { Plus, Upload } from "lucide-react";
 import { api, ApiError } from "../api/client";
 import type { ActivitiesList, ActivityFilters as Filters } from "../api/types";
 import ActivityCard from "../components/ActivityCard";
+import ActivityCreateForm from "../components/ActivityCreateForm";
 import ActivityFilters from "../components/ActivityFilters";
+import TcxImportForm from "../components/TcxImportForm";
 import { useToast } from "../hooks/useToast";
 
 const PAGE_SIZE = 20;
@@ -56,6 +59,8 @@ export default function Activities() {
   const [data, setData] = useState<ActivitiesList | null>(null);
   const [sportTypes, setSportTypes] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
+  const [panel, setPanel] = useState<"none" | "manual" | "tcx">("none");
+  const [reloadKey, setReloadKey] = useState(0);
   const { push } = useToast();
 
   const filters = useMemo(
@@ -107,7 +112,14 @@ export default function Activities() {
     return () => {
       if (debounceRef.current) clearTimeout(debounceRef.current);
     };
-  }, [filters, page, push]);
+  }, [filters, page, push, reloadKey]);
+
+  const refreshList = () => {
+    // Revenir en page 1 et relancer le fetch : une activité créée/importée a
+    // peu de chances d'être visible sur la page 3 en cours.
+    setSearchParams(filtersToUrl(filters, 1), { replace: false });
+    setReloadKey((k) => k + 1);
+  };
 
   const updateFilters = (next: Filters) => {
     // Tout changement de filtre reset la pagination à la page 1.
@@ -126,16 +138,39 @@ export default function Activities() {
 
   return (
     <div className="stagger space-y-3">
-      <div className="flex items-baseline justify-between">
+      <div className="flex items-baseline justify-between gap-3">
         <h2 className="font-display text-2xl font-extrabold tracking-tight text-gray-50">
           Activités
         </h2>
-        {data && (
-          <span className="metric-num text-xs text-muted">
-            {data.total} au total
-          </span>
-        )}
+        <div className="flex items-center gap-2">
+          {data && (
+            <span className="metric-num text-xs text-muted">
+              {data.total} au total
+            </span>
+          )}
+          <button
+            className="btn-ghost !px-2 !py-1"
+            title="Ajouter une activité"
+            onClick={() => setPanel((p) => (p === "manual" ? "none" : "manual"))}
+          >
+            <Plus size={16} />
+          </button>
+          <button
+            className="btn-ghost !px-2 !py-1"
+            title="Importer des fichiers TCX"
+            onClick={() => setPanel((p) => (p === "tcx" ? "none" : "tcx"))}
+          >
+            <Upload size={16} />
+          </button>
+        </div>
       </div>
+
+      {panel === "manual" && (
+        <ActivityCreateForm onCreated={refreshList} onClose={() => setPanel("none")} />
+      )}
+      {panel === "tcx" && (
+        <TcxImportForm onImported={refreshList} onClose={() => setPanel("none")} />
+      )}
 
       <ActivityFilters
         value={filters}

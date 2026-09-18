@@ -9,7 +9,7 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
-import { Bot } from "lucide-react";
+import { Bot, Trash2 } from "lucide-react";
 import { api, ApiError, streamCoachAnalyze } from "../api/client";
 import type {
   ActivityDetail as ActivityDetailType,
@@ -87,6 +87,7 @@ export default function ActivityDetail() {
   const [similar, setSimilar] = useState<SimilarActivitiesResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [analyzing, setAnalyzing] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const [analysis, setAnalysis] = useState<AnalysisState | null>(null);
   const analysisRef = useRef<AnalysisState>(EMPTY_ANALYSIS);
   const { push } = useToast();
@@ -142,6 +143,22 @@ export default function ActivityDetail() {
       push(`Analyse : ${msg}`, "error");
     } finally {
       setAnalyzing(false);
+    }
+  }
+
+  async function removeActivity() {
+    if (!detail || deleting) return;
+    if (!window.confirm("Supprimer cette activité ? Cette action est définitive.")) return;
+    setDeleting(true);
+    try {
+      await api.activities.remove(detail.activity.external_id);
+      push("Activité supprimée.", "success");
+      navigate("/activites");
+    } catch (err) {
+      const msg = err instanceof ApiError ? err.message : String(err);
+      push(`Erreur : ${msg}`, "error");
+    } finally {
+      setDeleting(false);
     }
   }
 
@@ -227,13 +244,30 @@ export default function ActivityDetail() {
         ← Retour
       </button>
 
-      <div className="card">
-        <h2 className="font-display text-xl font-bold tracking-tight text-gray-50">
-          {a.name || "Activité"}
-        </h2>
-        <p className="metric-num text-xs text-muted">
-          {new Date(a.date).toLocaleString("fr-FR")}
-        </p>
+      <div className="card flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <h2 className="font-display text-xl font-bold tracking-tight text-gray-50">
+            {a.name || "Activité"}
+          </h2>
+          <p className="metric-num text-xs text-muted">
+            {new Date(a.date).toLocaleString("fr-FR")}
+          </p>
+          {(a.source === "manual" || a.source === "tcx") && (
+            <span className="pill mt-2 bg-accent/15 text-accent">
+              {a.source === "manual" ? "Manuel" : "TCX"}
+            </span>
+          )}
+        </div>
+        {(a.source === "manual" || a.source === "tcx") && (
+          <button
+            onClick={removeActivity}
+            disabled={deleting}
+            className="btn-ghost !px-2 !py-1 text-tsb_neg disabled:opacity-50"
+            title="Supprimer cette activité"
+          >
+            <Trash2 size={16} />
+          </button>
+        )}
       </div>
 
       {s.latlng && <ActivityMap latlng={s.latlng} />}
