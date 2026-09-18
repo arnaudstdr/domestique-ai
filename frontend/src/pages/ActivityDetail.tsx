@@ -9,7 +9,7 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
-import { Bot, Trash2 } from "lucide-react";
+import { Bot, Check, Pencil, Trash2, X } from "lucide-react";
 import { api, ApiError, streamCoachAnalyze } from "../api/client";
 import type {
   ActivityDetail as ActivityDetailType,
@@ -22,6 +22,7 @@ import ChatBubble from "../components/ChatBubble";
 import MetricCard from "../components/MetricCard";
 import SimilarActivities from "../components/SimilarActivities";
 import ZoneBar from "../components/ZoneBar";
+import { sportOptions } from "../components/sports";
 import { CHART, axisProps, tooltipStyle } from "../chartTheme";
 import { useToast } from "../hooks/useToast";
 import { useViewing } from "../hooks/useViewing";
@@ -89,6 +90,12 @@ export default function ActivityDetail() {
   const [loading, setLoading] = useState(true);
   const [analyzing, setAnalyzing] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [editName, setEditName] = useState("");
+  const [editSport, setEditSport] = useState("Ride");
+  const [editRpe, setEditRpe] = useState("");
+  const [editNotes, setEditNotes] = useState("");
   const [analysis, setAnalysis] = useState<AnalysisState | null>(null);
   const analysisRef = useRef<AnalysisState>(EMPTY_ANALYSIS);
   const { push } = useToast();
@@ -163,9 +170,41 @@ export default function ActivityDetail() {
     }
   }
 
+  function startEdit() {
+    if (!detail) return;
+    const act = detail.activity;
+    setEditName(act.name ?? "");
+    setEditSport(act.sport_type ?? "Ride");
+    setEditRpe(act.rpe != null ? String(act.rpe) : "");
+    setEditNotes(act.notes ?? "");
+    setEditing(true);
+  }
+
+  async function saveEdit() {
+    if (!detail || saving) return;
+    setSaving(true);
+    try {
+      const updated = await api.activities.update(detail.activity.external_id, {
+        name: editName.trim() || null,
+        sport_type: editSport || null,
+        notes: editNotes.trim() || null,
+        rpe: editRpe ? Number(editRpe) : null,
+      });
+      setDetail({ ...detail, activity: updated });
+      setEditing(false);
+      push("Activité modifiée.", "success");
+    } catch (err) {
+      const msg = err instanceof ApiError ? err.message : String(err);
+      push(`Erreur : ${msg}`, "error");
+    } finally {
+      setSaving(false);
+    }
+  }
+
   useEffect(() => {
     let aborted = false;
     setLoading(true);
+    setEditing(false);
     setSimilar(null);
     setStreams(null);
     setWeather(null);
@@ -254,31 +293,142 @@ export default function ActivityDetail() {
         ← Retour
       </button>
 
-      <div className="card flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <h2 className="font-display text-xl font-bold tracking-tight text-gray-50">
-            {a.name || "Activité"}
-          </h2>
-          <p className="metric-num text-xs text-muted">
-            {new Date(a.date).toLocaleString("fr-FR")}
-          </p>
-          {(a.source === "manual" || a.source === "tcx") && (
-            <span className="pill mt-2 bg-accent/15 text-accent">
-              {a.source === "manual" ? "Manuel" : "TCX"}
-            </span>
-          )}
+      {editing ? (
+        <div className="card space-y-3">
+          <div className="flex items-center justify-between">
+            <h3 className="font-display text-sm font-bold text-gray-50">
+              Modifier l'activité
+            </h3>
+            <button
+              onClick={() => setEditing(false)}
+              className="btn-ghost !px-2 !py-1"
+              aria-label="Annuler"
+            >
+              <X size={16} />
+            </button>
+          </div>
+
+          <label className="block">
+            <span className="text-xs text-muted">Nom</span>
+            <input
+              type="text"
+              value={editName}
+              maxLength={200}
+              placeholder="Nom de l'activité"
+              onChange={(e) => setEditName(e.target.value)}
+              className="input mt-1"
+            />
+          </label>
+
+          <div className="grid grid-cols-2 gap-3">
+            <label className="block">
+              <span className="text-xs text-muted">Type</span>
+              <select
+                value={editSport}
+                onChange={(e) => setEditSport(e.target.value)}
+                className="input mt-1"
+              >
+                {sportOptions(a.sport_type).map((s) => (
+                  <option key={s} value={s}>
+                    {s}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="block">
+              <span className="text-xs text-muted">Effort ressenti</span>
+              <select
+                value={editRpe}
+                onChange={(e) => setEditRpe(e.target.value)}
+                className="input mt-1"
+              >
+                <option value="">—</option>
+                {Array.from({ length: 10 }, (_, i) => i + 1).map((n) => (
+                  <option key={n} value={n}>
+                    {n}/10
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+
+          <label className="block">
+            <span className="text-xs text-muted">Commentaire</span>
+            <textarea
+              value={editNotes}
+              maxLength={2000}
+              rows={3}
+              placeholder="Sensations, météo, contexte…"
+              onChange={(e) => setEditNotes(e.target.value)}
+              className="input mt-1"
+            />
+          </label>
+
+          <div className="flex gap-2">
+            <button
+              onClick={saveEdit}
+              disabled={saving}
+              className="btn-primary flex-1 disabled:opacity-50"
+            >
+              <span className="inline-flex items-center justify-center gap-2">
+                <Check size={16} />
+                {saving ? "Enregistrement…" : "Enregistrer"}
+              </span>
+            </button>
+            <button
+              onClick={() => setEditing(false)}
+              disabled={saving}
+              className="btn-ghost"
+            >
+              Annuler
+            </button>
+          </div>
         </div>
-        {(a.source === "manual" || a.source === "tcx") && (
-          <button
-            onClick={removeActivity}
-            disabled={deleting}
-            className="btn-ghost !px-2 !py-1 text-tsb_neg disabled:opacity-50"
-            title="Supprimer cette activité"
-          >
-            <Trash2 size={16} />
-          </button>
-        )}
-      </div>
+      ) : (
+        <div className="card flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <h2 className="font-display text-xl font-bold tracking-tight text-gray-50">
+              {a.name || "Activité"}
+            </h2>
+            <p className="metric-num text-xs text-muted">
+              {new Date(a.date).toLocaleString("fr-FR")}
+            </p>
+            <div className="mt-2 flex flex-wrap gap-1.5">
+              {(a.source === "manual" || a.source === "tcx") && (
+                <span className="pill bg-accent/15 text-accent">
+                  {a.source === "manual" ? "Manuel" : "TCX"}
+                </span>
+              )}
+              {a.rpe != null && (
+                <span className="pill bg-accent/15 text-accent" title="Effort ressenti">
+                  RPE {a.rpe}/10
+                </span>
+              )}
+            </div>
+          </div>
+          <div className="flex shrink-0 gap-1">
+            {!viewing && (
+              <button
+                onClick={startEdit}
+                className="btn-ghost !px-2 !py-1"
+                title="Modifier cette activité"
+              >
+                <Pencil size={16} />
+              </button>
+            )}
+            {(a.source === "manual" || a.source === "tcx") && (
+              <button
+                onClick={removeActivity}
+                disabled={deleting}
+                className="btn-ghost !px-2 !py-1 text-tsb_neg disabled:opacity-50"
+                title="Supprimer cette activité"
+              >
+                <Trash2 size={16} />
+              </button>
+            )}
+          </div>
+        </div>
+      )}
 
       {s.latlng && <ActivityMap latlng={s.latlng} />}
 
@@ -361,6 +511,20 @@ export default function ActivityDetail() {
           />
         )}
       </div>
+
+      {(a.notes || a.rpe != null) && (
+        <div className="card text-sm">
+          <h3 className="label-eyebrow mb-2">Notes / ressenti</h3>
+          {a.rpe != null && (
+            <p className="text-muted">
+              Effort ressenti : <span className="text-gray-50">{a.rpe}/10</span>
+            </p>
+          )}
+          {a.notes && (
+            <p className="mt-1 whitespace-pre-wrap text-gray-50">{a.notes}</p>
+          )}
+        </div>
+      )}
 
       {weather && (
         <div className="card text-sm">

@@ -8,6 +8,7 @@ import type {
   ActivityFilters,
   ActivityStreams,
   ActivitySummary,
+  ActivityUpdate,
   ActivityWeather,
   AthleteSummary,
   Availability,
@@ -281,6 +282,11 @@ export const api = {
     create: (payload: ActivityCreate) =>
       http<ActivitySummary>(`/api/activities`, {
         method: "POST",
+        body: JSON.stringify(payload),
+      }),
+    update: (id: number, payload: ActivityUpdate) =>
+      http<ActivitySummary>(`/api/activities/${id}`, {
+        method: "PATCH",
         body: JSON.stringify(payload),
       }),
     importTcx: (files: File[]) => {

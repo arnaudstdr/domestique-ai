@@ -56,7 +56,8 @@ def fetch_activities_from_db(
             "hr_z1_time, hr_z2_time, hr_z3_time, hr_z4_time, hr_z5_time, "
             "sport_type, avg_temp, min_temp, max_temp, map_polyline, "
             "name, calories, max_power, cadence_avg, cadence_max, "
-            "speed_avg, speed_max, elevation_loss, start_lat, start_lng, source "
+            "speed_avg, speed_max, elevation_loss, start_lat, start_lng, source, "
+            "notes, rpe "
             "FROM activities ORDER BY date ASC"
         )
         rows = cursor.fetchall()
@@ -96,6 +97,8 @@ def fetch_activities_from_db(
             "start_lat": row[29],
             "start_lng": row[30],
             "source": row[31],
+            "notes": row[32],
+            "rpe": row[33],
         }
         for row in rows
     ]

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 # ---- Metrics -----------------------------------------------------------------
 
@@ -167,6 +167,10 @@ class ActivitySummary(BaseModel):
     # en 09/2026) ou "garmin". Le champ ``external_id`` porte l'id externe de
     # la source (strava_id legacy ou garmin_id).
     source: str = "strava"
+    # Champs éditables par l'athlète (toutes sources) : commentaire libre et
+    # effort ressenti (RPE 1-10). Jamais alimentés par l'ingestion.
+    notes: str | None = None
+    rpe: int | None = None
 
 
 class ActivitiesList(BaseModel):
@@ -229,6 +233,23 @@ class ActivityCreate(BaseModel):
     max_hr: float | None = Field(default=None, gt=0)
     avg_power: float | None = Field(default=None, gt=0)
     name: str | None = None
+    notes: str | None = Field(default=None, max_length=2000)
+    rpe: int | None = Field(default=None, ge=1, le=10)
+
+
+class ActivityUpdate(BaseModel):
+    """Champs éditables d'une activité (PATCH partiel, toutes sources).
+
+    Seuls les champs fournis sont modifiés (``exclude_unset``). Une valeur
+    ``null`` explicite efface le champ (``name``/``notes``/``rpe``).
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str | None = Field(default=None, max_length=200)
+    sport_type: str | None = Field(default=None, max_length=64)
+    notes: str | None = Field(default=None, max_length=2000)
+    rpe: int | None = Field(default=None, ge=1, le=10)
 
 
 class TcxImportFileResult(BaseModel):

@@ -2,20 +2,7 @@ import { useState } from "react";
 import { Save, X } from "lucide-react";
 import { api, ApiError } from "../api/client";
 import { useToast } from "../hooks/useToast";
-
-const SPORTS = [
-  "Ride",
-  "VirtualRide",
-  "GravelRide",
-  "MountainBikeRide",
-  "EBikeRide",
-  "Run",
-  "TrailRun",
-  "Hike",
-  "Walk",
-  "Swim",
-  "Workout",
-];
+import { SPORTS } from "./sports";
 
 interface Props {
   onCreated: () => void;

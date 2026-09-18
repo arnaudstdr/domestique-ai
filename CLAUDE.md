@@ -149,6 +149,13 @@ Deux voies d'ajout hors Garmin, exposées dans l'en-tête de la page **Activité
 - **Import TCX** — `POST /api/activities/import/tcx` (multipart `list[UploadFile]`, `python-multipart` déjà en dépendance) : un ou plusieurs fichiers, un fichier pouvant contenir plusieurs `<Activity>`. Parser maison `ingestion/tcx.py` (`parse_tcx()`, stdlib `xml.etree` + matching par local-name car les namespaces varient) → agrégats (durée, distance, D+/D−, FC, watts, cadence, calories, tracé polyline) + streams. Zones HR recalculées par `calculate_hr_zones()` (séries HR/temps alignées) si `STRAVA_HR_REST`/`MAX` configurés. `source='tcx'`, streams persistés dans `activity_streams`. Dédup par sha1 du contenu (`source_uid = "<sha1>:<index>"`) : réimporter le même fichier → `skipped`. Un fichier en erreur n'interrompt pas les autres (résultat détaillé par fichier).
 - **Suppression** — `DELETE /api/activities/{external_id}` : réservée aux `source IN ('manual','tcx')` (403 sinon — une ligne Garmin/Strava serait recréée au prochain sync). Bouton corbeille sur la page détail.
 
+### Édition d'activité (toutes sources)
+
+- **Endpoint** — `PATCH /api/activities/{external_id}` (modèle `ActivityUpdate`) : édition partielle des 4 champs athlète — `name` (nom affiché), `sport_type` (type), `notes` (commentaire libre, colonne `notes`) et `rpe` (effort ressenti 1-10, colonne `rpe`). `exclude_unset` : seuls les champs fournis changent ; `null` efface ; chaîne vide/blanche normalisée en `NULL` (`_clean_text`). Renvoie l'`ActivitySummary` à jour.
+- **Ouvert à toutes les sources** (contrairement à la suppression) : l'édition ne touche que des champs jamais régénérés par l'ingestion — `save_garmin_activity()` ne réécrit jamais une ligne Garmin existante (skip si `garmin_id` déjà présent). Seul le backfill one-off `_BACKFILL_COLUMNS` re-fetch `name` (flag déjà posé en pratique).
+- **DB** : colonnes `notes TEXT` / `rpe INTEGER` nullables (migration `_ensure_column` + `_ACTIVITY_COLUMNS`), écrites par `update_activity_fields()` (whitelist `_EDITABLE_ACTIVITY_COLUMNS`). `fetch_activities_from_db()` les expose ; `ActivitySummary`/`ActivityCreate` portent `notes`/`rpe`.
+- **UI** — bouton crayon sur la page détail (`ActivityDetail.tsx`) : l'en-tête bascule en formulaire inline (nom, type via `components/sports.ts`, RPE 1-10, commentaire) + carte « Notes / ressenti » en lecture + pastille RPE. Masqué en vue coach (`viewing`, non-GET refusé par `get_athlete_context`).
+
 ### Auto-sync Garmin (scheduler APScheduler)
 
 Un `BackgroundScheduler` APScheduler tourne dans le process FastAPI et déclenche le sync Garmin à intervalle régulier — par défaut **toutes les 30 minutes**. Démarré au `lifespan` startup, arrêté proprement au shutdown.

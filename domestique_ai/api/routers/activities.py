@@ -17,6 +17,7 @@ from domestique_ai.api.schemas import (
     ActivityDetail,
     ActivityStreams,
     ActivitySummary,
+    ActivityUpdate,
     ActivityWeather,
     SimilarActivitiesResponse,
     TcxImportFileResult,
@@ -29,6 +30,7 @@ from domestique_ai.ingestion.db import (
     insert_activity,
     load_activity_streams,
     store_activity_streams,
+    update_activity_fields,
 )
 from domestique_ai.ingestion.garmin import (
     GarminIngestError,
@@ -111,7 +113,17 @@ def _activity_to_summary(row: dict) -> ActivitySummary:
         speed_max_kmh=_kmh_from_ms(row.get("speed_max")),
         elevation_loss=row.get("elevation_loss"),
         source=source,
+        notes=row.get("notes"),
+        rpe=row.get("rpe"),
     )
+
+
+def _clean_text(value: str | None) -> str | None:
+    """Normalise un champ texte éditable : ``strip`` et chaîne vide → ``None``."""
+    if value is None:
+        return None
+    cleaned = value.strip()
+    return cleaned or None
 
 
 def _parse_iso_utc(value: str) -> dt.datetime:
@@ -466,11 +478,46 @@ def create_activity(
             "training_load": tss,
             "sport_type": payload.sport_type or "Ride",
             "name": payload.name or "Séance manuelle",
+            "notes": _clean_text(payload.notes),
+            "rpe": payload.rpe,
             "source": "manual",
         },
         ctx=ctx,
     )
     return _summary_of_id(new_id, ctx)
+
+
+@router.patch("/{external_id}", response_model=ActivitySummary)
+def update_activity_endpoint(
+    external_id: int,
+    payload: ActivityUpdate,
+    ctx: AthleteContext = Depends(get_athlete_context),  # noqa: B008
+) -> ActivitySummary:
+    """Modifie les champs éditables d'une activité (nom, type, commentaire, RPE).
+
+    Ouvert à **toutes les sources** : l'édition ne touche que des champs jamais
+    régénérés par l'ingestion (le sync Garmin n'écrase pas une ligne existante).
+    Un ``PATCH`` partiel ne modifie que les champs fournis ; ``null`` efface.
+    """
+    base = _find_activity(external_id, ctx)
+    if base is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Activité {external_id} introuvable en base.",
+        )
+
+    fields = payload.model_dump(exclude_unset=True)
+    for key in ("name", "sport_type", "notes"):
+        if key in fields:
+            fields[key] = _clean_text(fields[key])
+    if not fields:
+        return _activity_to_summary(base)
+
+    update_activity_fields(base["id"], fields, ctx=ctx)
+    with _streams_lock:
+        _streams_cache.pop((str(ctx.db_path), external_id), None)
+    updated = _find_activity(external_id, ctx)
+    return _activity_to_summary(updated or base)
 
 
 def _persist_tcx_activity(

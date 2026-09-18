@@ -71,7 +71,9 @@ def init_db(db_path: Path | None = None, *, ctx: AthleteContext | None = None) -
                 start_lat REAL,
                 start_lng REAL,
                 source TEXT,
-                source_uid TEXT
+                source_uid TEXT,
+                notes TEXT,
+                rpe INTEGER
             )
         """)
         _ensure_column(conn, "activities", "max_heart_rate", "REAL")
@@ -105,6 +107,10 @@ def init_db(db_path: Path | None = None, *, ctx: AthleteContext | None = None) -
         # légitimes). Les lignes historiques (source NULL) sont rétro-remplies.
         _ensure_column(conn, "activities", "source", "TEXT")
         _ensure_column(conn, "activities", "source_uid", "TEXT")
+        # Champs éditables par l'athlète (toutes sources) : commentaire libre et
+        # effort ressenti (RPE 1-10). Jamais alimentés par l'ingestion.
+        _ensure_column(conn, "activities", "notes", "TEXT")
+        _ensure_column(conn, "activities", "rpe", "INTEGER")
         conn.execute(
             "UPDATE activities SET source = CASE "
             "WHEN strava_id IS NOT NULL THEN 'strava' "
@@ -382,6 +388,17 @@ _ACTIVITY_COLUMNS: tuple[str, ...] = (
     "start_lng",
     "source",
     "source_uid",
+    "notes",
+    "rpe",
+)
+
+# Colonnes modifiables par l'athlète via ``update_activity_fields`` — l'édition
+# ne touche jamais aux métriques d'ingestion (TSS, streams, GPS…).
+_EDITABLE_ACTIVITY_COLUMNS: tuple[str, ...] = (
+    "name",
+    "sport_type",
+    "notes",
+    "rpe",
 )
 
 
@@ -414,6 +431,37 @@ def insert_activity(
         )
         conn.commit()
         return int(cursor.lastrowid)
+    finally:
+        conn.close()
+
+
+def update_activity_fields(
+    activity_id: int,
+    fields: dict[str, Any],
+    *,
+    ctx: AthleteContext | None = None,
+    db_path: Path | None = None,
+) -> bool:
+    """Met à jour les champs éditables d'une activité (id local).
+
+    Seules les clés de ``_EDITABLE_ACTIVITY_COLUMNS`` sont prises en compte —
+    un dict vide (ou sans clé valide) est un no-op. Retourne ``True`` si une
+    ligne a été modifiée.
+    """
+    writable = {key: value for key, value in fields.items() if key in _EDITABLE_ACTIVITY_COLUMNS}
+    if not writable:
+        return False
+    path = _resolve_path(db_path, ctx)
+    init_db(path)
+    assignments = ", ".join(f"{col} = ?" for col in writable)
+    conn = sqlite3.connect(path)
+    try:
+        cursor = conn.execute(
+            f"UPDATE activities SET {assignments} WHERE id = ?",
+            [*writable.values(), int(activity_id)],
+        )
+        conn.commit()
+        return cursor.rowcount > 0
     finally:
         conn.close()
 

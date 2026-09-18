@@ -180,6 +180,8 @@ export interface ActivitySummary {
   speed_max_kmh: number | null;
   elevation_loss: number | null;
   source: string;
+  notes: string | null;
+  rpe: number | null;
 }
 
 export interface ActivitiesList {
@@ -232,6 +234,15 @@ export interface ActivityCreate {
   max_hr?: number | null;
   avg_power?: number | null;
   name?: string | null;
+  notes?: string | null;
+  rpe?: number | null;
+}
+
+export interface ActivityUpdate {
+  name?: string | null;
+  sport_type?: string | null;
+  notes?: string | null;
+  rpe?: number | null;
 }
 
 export interface TcxImportFileResult {
