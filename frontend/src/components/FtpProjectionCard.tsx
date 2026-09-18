@@ -20,6 +20,10 @@ function formatFtp(value: number | null): string {
   return value == null ? "—" : `${Math.round(value)} W`;
 }
 
+function formatWkg(value: number | null | undefined): string {
+  return value == null ? "—" : `${value.toFixed(2)} W/kg`;
+}
+
 export default function FtpProjectionCard({ data }: Props) {
   const trendArrow = data.delta_pct > 0 ? "↗" : data.delta_pct < 0 ? "↘" : "→";
   const trendTone =
@@ -50,6 +54,17 @@ export default function FtpProjectionCard({ data }: Props) {
           <div className="metric-num text-2xl font-semibold text-accent">{formatFtp(data.projected_ftp)}</div>
         </div>
       </div>
+
+      {data.weight_kg != null && (
+        <div className="flex items-center justify-between rounded-lg bg-white/5 px-3 py-2 text-xs">
+          <span className="text-muted">
+            Rapport poids/puissance <span className="text-muted/70">({data.weight_kg.toFixed(1)} kg)</span>
+          </span>
+          <span className="text-gray-200">
+            {formatWkg(data.current_wkg)} → <span className="text-accent">{formatWkg(data.projected_wkg)}</span>
+          </span>
+        </div>
+      )}
 
       <div className="rounded-lg bg-white/5 p-3 text-xs text-muted space-y-1">
         <div className="font-medium text-gray-300">Heuristique</div>

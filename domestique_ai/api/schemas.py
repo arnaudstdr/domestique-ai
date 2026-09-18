@@ -129,6 +129,9 @@ class FtpProjectionResponse(BaseModel):
     z4_z5_share_pct: float | None
     confidence: Literal["low", "medium", "high"]
     history_days: int
+    weight_kg: float | None = None
+    current_wkg: float | None = None
+    projected_wkg: float | None = None
 
 
 # ---- Activities --------------------------------------------------------------
@@ -314,6 +317,7 @@ class MorningEntry(BaseModel):
     active_calories: int | None = None
     readiness_score: int | None = None
     sleep_score_computed: int | None = None
+    weight_kg: float | None = None
 
 
 class MorningBaseline(BaseModel):
@@ -364,6 +368,26 @@ class MorningSubmit(BaseModel):
     steps: int | None = None
     active_calories: int | None = None
     readiness_score: int | None = None
+    weight_kg: float | None = Field(default=None, gt=0)
+
+
+class WeightResponse(BaseModel):
+    """Poids le plus récent + rapport poids/puissance dérivé."""
+
+    weight_kg: float | None = None
+    date: str | None = None
+    ftp_w: float | None = None
+    wkg: float | None = None
+
+
+class WeightSubmit(BaseModel):
+    """Saisie/édition d'un poids (upsert ciblé, n'écrase pas les autres métriques)."""
+
+    weight_kg: float = Field(gt=0, le=400)
+    date: str | None = Field(
+        default=None,
+        description="Date ISO YYYY-MM-DD. Défaut: today.",
+    )
 
 
 # ---- Google Health ---------------------------------------------------------

@@ -55,6 +55,7 @@ DATA_TYPE_RESPIRATORY_SLEEP = "respiratory-rate-sleep-summary"
 DATA_TYPE_SKIN_TEMP = "daily-sleep-temperature-derivations"
 DATA_TYPE_STEPS = "steps"
 DATA_TYPE_ACTIVE_ENERGY_BURNED = "active-energy-burned"
+DATA_TYPE_WEIGHT = "weight"
 
 
 class GoogleHealthAuthError(Exception):
@@ -409,6 +410,7 @@ class GoogleHealthClient:
             DATA_TYPE_RESPIRATORY_SLEEP, start_date, end_date
         )
         skin_temp_by_date = self.fetch_data_points(DATA_TYPE_SKIN_TEMP, start_date, end_date)
+        weight_by_date = self.fetch_data_points(DATA_TYPE_WEIGHT, start_date, end_date)
         steps_by_date = self.fetch_daily_rollup(DATA_TYPE_STEPS, start_date, end_date)
         calories_by_date = self.fetch_daily_rollup(
             DATA_TYPE_ACTIVE_ENERGY_BURNED, start_date, end_date
@@ -426,6 +428,7 @@ class GoogleHealthClient:
                 "skin_temp_delta_c": _extract_skin_temp(skin_temp_by_date.get(date_str)),
                 "steps": _extract_steps(steps_by_date.get(date_str)),
                 "active_calories": _extract_active_calories(calories_by_date.get(date_str)),
+                "weight_kg": _extract_weight(weight_by_date.get(date_str)),
             }
             sleep_summary = _summarize_sleep_sessions(sleep_sessions_by_date.get(date_str, []))
             entry.update(sleep_summary)
@@ -772,6 +775,41 @@ def _extract_active_calories(point: dict[str, Any] | None) -> int | None:
     return None
 
 
+def _extract_weight(point: dict[str, Any] | None) -> float | None:
+    """Poids en kg depuis un Sample Google Health.
+
+    Le format réel expose ``weight.weightGrams`` (entier). On accepte aussi
+    ``weightGrams`` à la racine et ``value.weight.weightGrams`` par robustesse.
+    Filtre les valeurs aberrantes (< 20 kg ou > 300 kg).
+    """
+    if not point:
+        return None
+
+    grams: Any = None
+    weight_obj = point.get("weight")
+    if isinstance(weight_obj, dict):
+        grams = weight_obj.get("weightGrams") or weight_obj.get("weight_grams")
+    if grams is None:
+        grams = point.get("weightGrams") or point.get("weight_grams")
+    if grams is None:
+        value = point.get("value", {}) or {}
+        weight_obj = value.get("weight") if isinstance(value, dict) else None
+        if isinstance(weight_obj, dict):
+            grams = weight_obj.get("weightGrams") or weight_obj.get("weight_grams")
+        elif isinstance(value, dict):
+            grams = value.get("weightGrams") or value.get("weight_grams")
+    if grams is None:
+        return None
+
+    try:
+        kg = float(grams) / 1000.0
+    except (TypeError, ValueError):
+        return None
+    if not 20.0 <= kg <= 300.0:
+        return None
+    return round(kg, 2)
+
+
 def _stage_seconds(stage: dict[str, Any]) -> int:
     """Durée d'un stade de sommeil en secondes.
 
@@ -1018,6 +1056,7 @@ def sync_google_health_morning_metrics(
             "steps": data.get("steps"),
             "active_calories": data.get("active_calories"),
             "readiness_score": readiness_score,
+            "weight_kg": data.get("weight_kg"),
         }
 
         # On ne stocke que les dates ayant au moins une métrique automatique.
@@ -1026,9 +1065,10 @@ def sync_google_health_morning_metrics(
             skipped.append(date_str)
             continue
 
-        # Conserve les champs manuels existants (stress, notes) si présents.
+        # Conserve les champs manuels existants (stress, notes, poids) si présents
+        # et non fournis par la source auto (ex. balance absente ce jour-là).
         if existing:
-            for manual_field in ("stress_score", "notes"):
+            for manual_field in ("stress_score", "notes", "weight_kg"):
                 if (
                     existing.get(manual_field) is not None
                     and metric_values.get(manual_field) is None

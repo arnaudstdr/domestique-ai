@@ -22,6 +22,7 @@ from domestique_ai.processing.analyzer import (
     fetch_activities_from_db,
     is_ride,
 )
+from domestique_ai.processing.morning_metrics import latest_weight, power_to_weight
 
 Period = Literal["3m", "6m", "1y", "all"]
 Resolution = Literal["day", "week", "month"]
@@ -466,6 +467,10 @@ def get_ftp_projection(
     else:
         confidence = "low"
 
+    weight = latest_weight(db_path=ctx.db_path if ctx else db_path)
+    current_wkg = power_to_weight(float(current_ftp) if current_ftp is not None else None, weight)
+    projected_wkg = power_to_weight(projected_ftp, weight)
+
     return {
         "current_ftp": float(current_ftp) if current_ftp is not None else None,
         "projected_ftp": projected_ftp,
@@ -475,4 +480,7 @@ def get_ftp_projection(
         "z4_z5_share_pct": z4_z5,
         "confidence": confidence,
         "history_days": history_days,
+        "weight_kg": weight,
+        "current_wkg": current_wkg,
+        "projected_wkg": projected_wkg,
     }

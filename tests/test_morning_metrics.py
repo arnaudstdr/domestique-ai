@@ -9,14 +9,19 @@ import pytest
 
 from domestique_ai.ingestion.db import init_db
 from domestique_ai.processing.morning_metrics import (
+    METRIC_COLUMNS,
     calculate_readiness_score,
     calculate_sleep_score,
     compute_baselines,
     detect_morning_alerts,
     fetch_morning_entry,
     fetch_morning_history,
+    latest_weight,
+    latest_weight_entry,
+    power_to_weight,
     readiness_band,
     save_morning_entry,
+    set_weight,
 )
 
 
@@ -96,6 +101,7 @@ def test_save_and_fetch_full_entry(db_path: Path):
         "active_calories": 420,
         "readiness_score": 72,
         "sleep_score_computed": 1,
+        "weight_kg": None,
     }
 
 
@@ -256,3 +262,69 @@ def test_readiness_band():
     assert readiness_band(40) == "LOW"
     assert readiness_band(20) == "VERY_LOW"
     assert readiness_band(None) is None
+
+
+# ---------------------------------------------------------------------------
+# Poids (weight_kg)
+# ---------------------------------------------------------------------------
+
+
+def test_weight_kg_in_metric_columns():
+    assert "weight_kg" in METRIC_COLUMNS
+
+
+def test_save_weight_and_fetch(db_path: Path):
+    save_morning_entry("2026-05-01", weight_kg=72.4, db_path=db_path)
+    entry = fetch_morning_entry("2026-05-01", db_path=db_path)
+    assert entry is not None
+    assert entry["weight_kg"] == 72.4
+
+
+def test_set_weight_preserves_other_fields(db_path: Path):
+    save_morning_entry("2026-05-01", hrv_ms=55.0, sleep_hours=7.0, db_path=db_path)
+    set_weight("2026-05-01", 70.5, db_path=db_path)
+    entry = fetch_morning_entry("2026-05-01", db_path=db_path)
+    assert entry["weight_kg"] == 70.5
+    # Les autres métriques du jour ne doivent pas être écrasées.
+    assert entry["hrv_ms"] == 55.0
+    assert entry["sleep_hours"] == 7.0
+
+
+def test_set_weight_creates_entry_without_other_metrics(db_path: Path):
+    assert set_weight("2026-05-02", 69.0, db_path=db_path) is True
+    entry = fetch_morning_entry("2026-05-02", db_path=db_path)
+    assert entry["weight_kg"] == 69.0
+    assert entry["hrv_ms"] is None
+
+
+def test_latest_weight_returns_most_recent_non_null(db_path: Path):
+    assert latest_weight(db_path=db_path) is None
+    save_morning_entry("2026-05-01", weight_kg=72.0, db_path=db_path)
+    save_morning_entry("2026-05-03", weight_kg=71.2, db_path=db_path)
+    # Une date plus récente sans poids ne doit pas masquer le dernier poids connu.
+    save_morning_entry("2026-05-05", hrv_ms=60.0, db_path=db_path)
+    assert latest_weight(db_path=db_path) == 71.2
+    assert latest_weight_entry(db_path=db_path) == ("2026-05-03", 71.2)
+
+
+def test_power_to_weight():
+    assert power_to_weight(250, 70) == 3.57
+    assert power_to_weight(None, 70) is None
+    assert power_to_weight(250, None) is None
+    assert power_to_weight(250, 0) is None
+
+
+def test_weight_does_not_trigger_alert(db_path: Path):
+    # Variation importante mais aucune alerte attendue (direction 0).
+    for i, w in enumerate([70.0, 70.0, 70.0, 80.0]):
+        save_morning_entry(f"2026-05-0{i + 1}", weight_kg=w, db_path=db_path)
+    alerts = detect_morning_alerts(db_path=db_path)
+    assert all(a["metric"] != "weight_kg" for a in alerts)
+
+
+def test_weight_baseline_computable(db_path: Path):
+    for i, w in enumerate([72.0, 72.5, 71.5, 72.0]):
+        save_morning_entry(f"2026-05-0{i + 1}", weight_kg=w, db_path=db_path)
+    baseline = compute_baselines("weight_kg", db_path=db_path)
+    assert baseline["available"] is True
+    assert baseline["latest"] == 72.0

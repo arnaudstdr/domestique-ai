@@ -150,6 +150,9 @@ export interface FtpProjectionResponse {
   z4_z5_share_pct: number | null;
   confidence: "low" | "medium" | "high";
   history_days: number;
+  weight_kg: number | null;
+  current_wkg: number | null;
+  projected_wkg: number | null;
 }
 
 export interface ActivitySummary {
@@ -278,6 +281,14 @@ export interface MorningEntry {
   active_calories: number | null;
   readiness_score: number | null;
   sleep_score_computed: number | null;
+  weight_kg: number | null;
+}
+
+export interface WeightResponse {
+  weight_kg: number | null;
+  date: string | null;
+  ftp_w: number | null;
+  wkg: number | null;
 }
 
 export interface MorningBaseline {

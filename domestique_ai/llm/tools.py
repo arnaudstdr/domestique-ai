@@ -232,8 +232,9 @@ def get_activity_details(external_id: int, *, ctx: AthleteContext | None = None)
 def get_morning_trends(days: int = 30, *, ctx: AthleteContext | None = None) -> dict[str, Any]:
     """
     Tendances des métriques matinales (HRV, FC repos, sommeil, stress, readiness,
-    SpO2, fréquence respiratoire, température cutanée, pas, calories) avec
-    baselines mobiles sur 14 jours et alertes si dérive vs baseline.
+    SpO2, fréquence respiratoire, température cutanée, pas, calories, poids) avec
+    baselines mobiles sur 14 jours et alertes si dérive vs baseline. Expose aussi
+    le poids courant et le rapport poids/puissance (W/kg) dérivé de la FTP.
     """
     from domestique_ai.processing.morning_metrics import (
         METRIC_COLUMNS,
@@ -263,7 +264,13 @@ def get_morning_trends(days: int = 30, *, ctx: AthleteContext | None = None) -> 
                 "sample_size": b["sample_size"],
             }
 
+    from domestique_ai.processing.morning_metrics import (
+        latest_weight,
+        power_to_weight,
+    )
+
     latest = history[-1]
+    weight_kg = latest.get("weight_kg") or latest_weight(db_path=ctx.db_path)
     advanced_latest = {
         "readiness_score": latest.get("readiness_score"),
         "readiness_band": readiness_band(latest.get("readiness_score")),
@@ -272,6 +279,8 @@ def get_morning_trends(days: int = 30, *, ctx: AthleteContext | None = None) -> 
         "skin_temp_delta_c": latest.get("skin_temp_delta_c"),
         "steps": latest.get("steps"),
         "active_calories": latest.get("active_calories"),
+        "weight_kg": weight_kg,
+        "wkg": power_to_weight(ctx.ftp, weight_kg),
         "sleep_stages_min": {
             "deep": latest.get("sleep_deep_min"),
             "rem": latest.get("sleep_rem_min"),

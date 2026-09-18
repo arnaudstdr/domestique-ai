@@ -15,6 +15,7 @@ from domestique_ai.ingestion.google_health import (
     DATA_TYPE_RESPIRATORY_SLEEP,
     DATA_TYPE_SLEEP,
     DATA_TYPE_STEPS,
+    DATA_TYPE_WEIGHT,
     GoogleHealthClient,
     _build_list_filter,
     _extract_active_calories,
@@ -24,6 +25,7 @@ from domestique_ai.ingestion.google_health import (
     _extract_skin_temp,
     _extract_spo2,
     _extract_steps,
+    _extract_weight,
     _summarize_sleep_sessions,
     sync_google_health_morning_metrics,
 )
@@ -497,3 +499,83 @@ def test_build_list_filter_uses_typed_fields():
     respiratory = _build_list_filter(DATA_TYPE_RESPIRATORY_SLEEP, start, end)
     assert 'respiratory_rate_sleep_summary.sample_time.civil_time >= "2026-08-28"' in respiratory
     assert 'respiratory_rate_sleep_summary.sample_time.civil_time < "2026-09-04"' in respiratory
+
+    weight = _build_list_filter(DATA_TYPE_WEIGHT, start, end)
+    assert 'weight.sample_time.civil_time >= "2026-08-28"' in weight
+    assert 'weight.sample_time.civil_time < "2026-09-04"' in weight
+
+
+def test_extract_weight_formats():
+    assert _extract_weight({"weight": {"weightGrams": 72400}}) == 72.4
+    assert _extract_weight({"weightGrams": 80000}) == 80.0
+    assert _extract_weight({"value": {"weight": {"weightGrams": 65000}}}) == 65.0
+    # Aberrant ou absent → None.
+    assert _extract_weight({"weight": {"weightGrams": 5000}}) is None
+    assert _extract_weight({"weight": {"weightGrams": 500000}}) is None
+    assert _extract_weight({}) is None
+    assert _extract_weight(None) is None
+
+
+def test_sync_writes_weight_and_preserves_manual(client: GoogleHealthClient, tmp_path: Path):
+    import datetime as dt
+
+    from domestique_ai.ingestion.db import init_db
+    from domestique_ai.processing.morning_metrics import (
+        fetch_morning_entry,
+        save_morning_entry,
+    )
+
+    db_path = tmp_path / "test.db"
+    init_db(db_path)
+    # Poids saisi à la main le 10 mai.
+    save_morning_entry("2026-05-10", weight_kg=71.0, db_path=db_path)
+
+    def side_effect(method, url, **kwargs):
+        if DATA_TYPE_WEIGHT in url:
+            # Le 10 : pas de poids auto (la saisie manuelle doit survivre).
+            # Le 11 : poids auto 70.5.
+            return _mock_response(
+                {
+                    "dataPoints": [
+                        {
+                            "dataSource": {},
+                            "weight": {
+                                "weightGrams": 70500,
+                                "sampleTime": {
+                                    "civilTime": {
+                                        "date": {"year": 2026, "month": 5, "day": 11}
+                                    }
+                                },
+                            },
+                        }
+                    ]
+                }
+            )
+        if DATA_TYPE_DAILY_HRV in url:
+            # Une autre métrique auto le 10 force l'upsert (donc la préservation
+            # du poids manuel doit s'appliquer).
+            return _mock_response(
+                {
+                    "dataPoints": [
+                        {
+                            "dataSource": {},
+                            "dailyHeartRateVariability": {
+                                "date": {"year": 2026, "month": 5, "day": 10},
+                                "averageHeartRateVariabilityMilliseconds": 60.0,
+                            },
+                        }
+                    ]
+                }
+            )
+        return _mock_response({"dataPoints": []})
+
+    with patch("requests.request", side_effect=side_effect):
+        sync_google_health_morning_metrics(
+            client,
+            start_date=dt.date(2026, 5, 10),
+            end_date=dt.date(2026, 5, 11),
+            db_path=db_path,
+        )
+
+    assert fetch_morning_entry("2026-05-10", db_path=db_path)["weight_kg"] == 71.0
+    assert fetch_morning_entry("2026-05-11", db_path=db_path)["weight_kg"] == 70.5

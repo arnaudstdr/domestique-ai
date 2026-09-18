@@ -12,6 +12,7 @@ from domestique_ai.llm.tools import (
     TOOL_SCHEMAS,
     dispatch,
     get_activity_details,
+    get_morning_trends,
     get_objective,
     get_planned_workout,
     get_recent_activities,
@@ -111,6 +112,17 @@ def test_tool_schemas_have_required_shape():
         assert schema["type"] == "function"
         assert "description" in schema["function"]
         assert "parameters" in schema["function"]
+
+
+def test_get_morning_trends_exposes_weight_and_wkg(seeded_db):
+    from domestique_ai.processing.morning_metrics import save_morning_entry
+
+    save_morning_entry("2026-04-30", weight_kg=70.0, db_path=seeded_db)
+
+    result = get_morning_trends(days=30)
+    assert result["available"] is True
+    assert result["latest_advanced"]["weight_kg"] == 70.0
+    assert result["latest_advanced"]["wkg"] == round(250.0 / 70.0, 2)
 
 
 def test_propose_workout_today_dispatchable(tmp_path, monkeypatch):

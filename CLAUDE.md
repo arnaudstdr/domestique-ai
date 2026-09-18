@@ -251,6 +251,32 @@ DOMESTIQUE_AI_GOOGLE_HEALTH_AUTO_SYNC_MINUTES=360
 **Auto-sync** : un job APScheduler supplémentaire récupère les 7 derniers jours
 toutes les 6 heures par défaut. Il est indépendant du sync Garmin.
 
+### Suivi du poids + rapport poids/puissance (W/kg)
+
+Le poids est une **métrique de la table `morning_metrics`** (`weight_kg REAL`,
+nullable) — source de vérité unique, par athlète (base isolée). La table
+historique orpheline `weight_history` n'est plus utilisée.
+
+- **Saisie** : champ « Poids » du formulaire Santé (manuel) **et** ingestion
+  auto Google Health (`DATA_TYPE_WEIGHT = "weight"`, `weightGrams / 1000`,
+  même scope OAuth que le reste). Au sync, un poids saisi à la main est
+  préservé si la balance ne fournit rien ce jour-là (`weight_kg` ajouté à la
+  préservation des champs manuels à côté de `stress_score`/`notes`).
+- **Pas d'alerte** de dérive sur le poids (`_ALERT_DIRECTION["weight_kg"] = 0`) :
+  variabilité quotidienne normale.
+- **Upsert ciblé** : `set_weight(date, kg)` (et `PUT /api/morning/weight`)
+  n'écrit QUE `weight_kg` — contrairement à `save_morning_entry` qui écrase
+  toutes les colonnes. Indispensable pour ne pas effacer HRV/sommeil d'un jour
+  lors d'une saisie du poids depuis les réglages.
+- **W/kg dérivé** (jamais stocké) : `latest_weight()` donne le dernier poids
+  connu, `power_to_weight(puissance, poids)` le rapport. Exposé dans
+  `GET /api/morning/weight` (`{weight_kg, date, ftp_w, wkg}`), la projection FTP
+  (`current_wkg`/`projected_wkg`, poids courant — approximation v1, pas de poids
+  historique par activité), le bloc d'état du coach et le tool
+  `get_morning_trends` (`weight_kg` + `wkg`). UI : Réglages (« Infos perso »,
+  champ + W/kg), Santé (formulaire + graphes), détail d'activité
+  (« Poids/puissance », puissance moy. / poids actuel).
+
 ### Coach LLM — `domestique_ai/llm/`
 
 Coach conversationnel via Ollama (modèle par défaut `gemma4:31b-cloud`, override `OLLAMA_MODEL`). Branché sur le dashboard dans l'onglet « Coach ».

@@ -49,6 +49,7 @@ import type {
   TrendsResponse,
   WeeklyReviewResult,
   WeeklyVolumeResponse,
+  WeightResponse,
 } from "./types";
 
 const API_BASE = "";
@@ -298,6 +299,12 @@ export const api = {
       http<void>(`/api/morning`, {
         method: "POST",
         body: JSON.stringify(entry),
+      }),
+    weight: () => http<WeightResponse>(`/api/morning/weight`),
+    setWeight: (weight_kg: number, date?: string) =>
+      http<WeightResponse>(`/api/morning/weight`, {
+        method: "PUT",
+        body: JSON.stringify({ weight_kg, date }),
       }),
   },
   googleHealth: {

@@ -442,19 +442,33 @@ function AccountSection() {
 
 function ProfileSection() {
   const [form, setForm] = useState<Profile>(EMPTY_PROFILE);
+  const [weight, setWeight] = useState<string>("");
+  const [savedWeight, setSavedWeight] = useState<number | null>(null);
   const [loaded, setLoaded] = useState(false);
   const [saving, setSaving] = useState(false);
   const { push } = useToast();
 
   useEffect(() => {
-    api.profile
-      .get()
-      .then((p) => {
+    Promise.all([
+      api.profile.get().catch(() => null),
+      api.morning.weight().catch(() => null),
+    ])
+      .then(([p, w]) => {
         if (p) setForm(p);
+        if (w?.weight_kg != null) {
+          setWeight(w.weight_kg.toString());
+          setSavedWeight(w.weight_kg);
+        }
         setLoaded(true);
       })
       .catch(() => setLoaded(true));
   }, []);
+
+  const parsedWeight = Number(weight.replace(",", "."));
+  const wkg =
+    form.ftp && Number.isFinite(parsedWeight) && parsedWeight > 0
+      ? form.ftp / parsedWeight
+      : null;
 
   function update<K extends keyof Profile>(key: K, value: Profile[K]) {
     setForm((prev) => ({ ...prev, [key]: value }));
@@ -478,10 +492,22 @@ function ProfileSection() {
         previous.hr_max !== saved.hr_max ||
         previous.sex !== saved.sex ||
         previous.lthr_pct !== saved.lthr_pct;
+
+      const weightChanged =
+        Number.isFinite(parsedWeight) &&
+        parsedWeight > 0 &&
+        parsedWeight !== savedWeight;
+      if (weightChanged) {
+        const w = await api.morning.setWeight(parsedWeight);
+        setSavedWeight(w.weight_kg);
+      }
+
       push(
         hrChanged
           ? "Profil enregistré. Recalcul de la charge en cours…"
-          : "Profil enregistré.",
+          : weightChanged
+            ? "Profil et poids enregistrés."
+            : "Profil enregistré.",
         "success",
       );
     } catch (err) {
@@ -499,7 +525,8 @@ function ProfileSection() {
         Infos perso
       </h3>
       <p className="text-xs text-muted">
-        Pilote le calcul de charge (hr-TSS / TSS power) et les zones HR.
+        Pilote le calcul de charge (hr-TSS / TSS power), les zones HR et le
+        rapport poids/puissance (le poids est suivi sur la page Santé).
       </p>
       <div className="grid grid-cols-2 gap-3">
         <label className="block">
@@ -548,6 +575,24 @@ function ProfileSection() {
             className="input mt-1"
           />
         </label>
+        <label className="block">
+          <span className="text-xs text-muted">Poids (kg)</span>
+          <input
+            type="number"
+            inputMode="decimal"
+            step={0.1}
+            value={weight}
+            onChange={(e) => setWeight(e.target.value)}
+            placeholder="ex : 70"
+            className="input mt-1"
+          />
+        </label>
+        <div className="block">
+          <span className="text-xs text-muted">Rapport poids/puissance</span>
+          <div className="mt-1 flex h-9 items-center rounded-lg border border-white/10 bg-white/5 px-3 text-sm text-gray-200">
+            {wkg != null ? `${wkg.toFixed(2)} W/kg` : "—"}
+          </div>
+        </div>
         <label className="col-span-2 block">
           <span className="text-xs text-muted">
             % LTHR ({(form.lthr_pct * 100).toFixed(0)} % HRR)

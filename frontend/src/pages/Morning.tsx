@@ -40,6 +40,7 @@ const MANUAL_METRICS: {
   { key: "sleep_hours", label: "Sommeil", unit: "h" },
   { key: "sleep_score", label: "Score sommeil", unit: "/100", isInt: true },
   { key: "stress_score", label: "Stress", unit: "/100", isInt: true },
+  { key: "weight_kg", label: "Poids", unit: "kg" },
 ];
 
 const ADVANCED_METRICS: {
@@ -68,6 +69,7 @@ interface MetricForm {
   sleep_hours: string;
   sleep_score: string;
   stress_score: string;
+  weight_kg: string;
 }
 
 const EMPTY: MetricForm = {
@@ -76,6 +78,7 @@ const EMPTY: MetricForm = {
   sleep_hours: "",
   sleep_score: "",
   stress_score: "",
+  weight_kg: "",
 };
 
 export default function Morning() {
@@ -103,6 +106,7 @@ export default function Morning() {
           sleep_hours: existing.sleep_hours?.toString() ?? "",
           sleep_score: existing.sleep_score?.toString() ?? "",
           stress_score: existing.stress_score?.toString() ?? "",
+          weight_kg: existing.weight_kg?.toString() ?? "",
         });
       } else {
         setForm(EMPTY);
@@ -128,6 +132,7 @@ export default function Morning() {
         sleep_hours: form.sleep_hours ? parseFloat(form.sleep_hours) : null,
         sleep_score: form.sleep_score ? parseInt(form.sleep_score, 10) : null,
         stress_score: form.stress_score ? parseInt(form.stress_score, 10) : null,
+        weight_kg: form.weight_kg ? parseFloat(form.weight_kg) : null,
       });
       push("Entrée enregistrée.", "success");
       await refresh();
@@ -348,7 +353,7 @@ export default function Morning() {
 
           <h3 className="label-eyebrow">Tendances 90 j</h3>
           <div className="grid grid-cols-2 gap-3">
-            {MANUAL_METRICS.slice(0, 4).map((m) => {
+            {MANUAL_METRICS.map((m) => {
               const b = data.baselines[m.key];
               if (!b || !b.available || b.latest == null) {
                 return (
@@ -362,13 +367,15 @@ export default function Morning() {
               }
               const delta = b.delta_pct ?? 0;
               const tone =
-                m.key === "resting_hr" || m.key === "stress_score"
-                  ? delta > 5
-                    ? "danger"
-                    : "good"
-                  : delta < -5
-                    ? "danger"
-                    : "good";
+                m.key === "weight_kg"
+                  ? "good"
+                  : m.key === "resting_hr" || m.key === "stress_score"
+                    ? delta > 5
+                      ? "danger"
+                      : "good"
+                    : delta < -5
+                      ? "danger"
+                      : "good";
               return (
                 <MetricCard
                   key={m.key}
@@ -385,7 +392,7 @@ export default function Morning() {
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            {MANUAL_METRICS.slice(0, 4).map((m) => (
+            {MANUAL_METRICS.map((m) => (
               <MorningChart
                 key={m.key}
                 title={m.label}

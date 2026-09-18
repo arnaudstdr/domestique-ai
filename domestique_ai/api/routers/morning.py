@@ -14,6 +14,8 @@ from domestique_ai.api.schemas import (
     MorningEntry,
     MorningResponse,
     MorningSubmit,
+    WeightResponse,
+    WeightSubmit,
 )
 from domestique_ai.athlete_context import AthleteContext
 from domestique_ai.processing.morning_metrics import (
@@ -21,7 +23,10 @@ from domestique_ai.processing.morning_metrics import (
     compute_baselines,
     detect_morning_alerts,
     fetch_morning_history,
+    latest_weight_entry,
+    power_to_weight,
     save_morning_entry,
+    set_weight,
 )
 
 router = APIRouter(prefix="/api/morning", tags=["morning"])
@@ -95,6 +100,37 @@ def post_morning(
         # Si l'utilisateur saisit un sleep_score manuel, on le marque comme tel
         # pour ne pas l'écraser lors du prochain sync Google Health.
         sleep_score_computed=0 if payload.sleep_score is not None else None,
+        weight_kg=payload.weight_kg,
         db_path=ctx.db_path,
     )
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+def _weight_response(ctx: AthleteContext) -> WeightResponse:
+    entry = latest_weight_entry(db_path=ctx.db_path)
+    weight = entry[1] if entry is not None else None
+    return WeightResponse(
+        weight_kg=weight,
+        date=entry[0] if entry is not None else None,
+        ftp_w=ctx.ftp,
+        wkg=power_to_weight(ctx.ftp, weight),
+    )
+
+
+@router.get("/weight", response_model=WeightResponse)
+def get_weight(
+    ctx: AthleteContext = Depends(get_athlete_context),  # noqa: B008
+) -> WeightResponse:
+    """Dernier poids connu + rapport poids/puissance dérivé."""
+    return _weight_response(ctx)
+
+
+@router.put("/weight", response_model=WeightResponse)
+def put_weight(
+    payload: WeightSubmit,
+    ctx: AthleteContext = Depends(get_athlete_context),  # noqa: B008
+) -> WeightResponse:
+    """Enregistre un poids (upsert ciblé) sans toucher aux autres métriques."""
+    target_date = payload.date or dt.date.today().isoformat()
+    set_weight(target_date, payload.weight_kg, db_path=ctx.db_path)
+    return _weight_response(ctx)

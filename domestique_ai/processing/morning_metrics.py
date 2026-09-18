@@ -35,6 +35,7 @@ METRIC_COLUMNS = (
     "skin_temp_delta_c",
     "steps",
     "active_calories",
+    "weight_kg",
 )
 
 # Sens d'alerte par métrique :
@@ -52,6 +53,7 @@ _ALERT_DIRECTION = {
     "skin_temp_delta_c": 1,
     "steps": 0,  # pas d'alerte automatique sur les pas
     "active_calories": 0,  # pas d'alerte automatique sur les calories
+    "weight_kg": 0,  # variabilité quotidienne normale, pas d'alerte
 }
 
 # Seuil par défaut : écart relatif (en %) à partir duquel on lève une alerte.
@@ -79,6 +81,7 @@ def save_morning_entry(
     active_calories: int | None = None,
     readiness_score: int | None = None,
     sleep_score_computed: int | None = None,
+    weight_kg: float | None = None,
     db_path: Path | None = None,
 ) -> bool:
     """
@@ -104,6 +107,7 @@ def save_morning_entry(
         active_calories,
         readiness_score,
         sleep_score_computed,
+        weight_kg,
     )
     if all(v is None for v in (*metric_values, notes, sleep_stages)):
         return False
@@ -117,8 +121,9 @@ def save_morning_entry(
             "sleep_hours, sleep_score, stress_score, notes, spo2_avg_pct, "
             "respiratory_rate_avg_bpm, skin_temp_delta_c, sleep_deep_min, "
             "sleep_rem_min, sleep_light_min, sleep_awake_min, sleep_stages_json, "
-            "steps, active_calories, readiness_score, sleep_score_computed) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+            "steps, active_calories, readiness_score, sleep_score_computed, "
+            "weight_kg) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
             "ON CONFLICT(date) DO UPDATE SET "
             "hrv_ms = excluded.hrv_ms, "
             "resting_hr = excluded.resting_hr, "
@@ -137,7 +142,8 @@ def save_morning_entry(
             "steps = excluded.steps, "
             "active_calories = excluded.active_calories, "
             "readiness_score = excluded.readiness_score, "
-            "sleep_score_computed = excluded.sleep_score_computed",
+            "sleep_score_computed = excluded.sleep_score_computed, "
+            "weight_kg = excluded.weight_kg",
             (
                 date,
                 hrv_ms,
@@ -158,6 +164,7 @@ def save_morning_entry(
                 active_calories,
                 readiness_score,
                 sleep_score_computed,
+                weight_kg,
             ),
         )
         conn.commit()
@@ -180,7 +187,7 @@ def fetch_morning_entry(
             "stress_score, notes, spo2_avg_pct, respiratory_rate_avg_bpm, "
             "skin_temp_delta_c, sleep_deep_min, sleep_rem_min, sleep_light_min, "
             "sleep_awake_min, sleep_stages_json, steps, active_calories, "
-            "readiness_score, sleep_score_computed "
+            "readiness_score, sleep_score_computed, weight_kg "
             "FROM morning_metrics WHERE date = ?",
             (date,),
         ).fetchone()
@@ -209,7 +216,7 @@ def fetch_morning_history(
             "stress_score, notes, spo2_avg_pct, respiratory_rate_avg_bpm, "
             "skin_temp_delta_c, sleep_deep_min, sleep_rem_min, sleep_light_min, "
             "sleep_awake_min, sleep_stages_json, steps, active_calories, "
-            "readiness_score, sleep_score_computed "
+            "readiness_score, sleep_score_computed, weight_kg "
             "FROM morning_metrics ORDER BY date ASC"
         ).fetchall()
     finally:
@@ -220,6 +227,60 @@ def fetch_morning_history(
     last_date = dt.date.fromisoformat(entries[-1]["date"])
     cutoff = last_date - dt.timedelta(days=days)
     return [e for e in entries if dt.date.fromisoformat(e["date"]) > cutoff]
+
+
+def set_weight(
+    date: str,
+    weight_kg: float,
+    db_path: Path | None = None,
+) -> bool:
+    """Enregistre le poids d'une date sans toucher aux autres métriques.
+
+    Contrairement à ``save_morning_entry`` (qui écrase toutes les colonnes),
+    cet upsert ciblé permet une saisie du poids seule (ex. depuis les réglages)
+    sans effacer HRV/sommeil/stress déjà saisis pour la même date.
+    """
+    path = Path(db_path) if db_path else get_db_path()
+    init_db(path)
+    conn = sqlite3.connect(path)
+    try:
+        conn.execute(
+            "INSERT INTO morning_metrics (date, weight_kg) VALUES (?, ?) "
+            "ON CONFLICT(date) DO UPDATE SET weight_kg = excluded.weight_kg",
+            (date, float(weight_kg)),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    return True
+
+
+def latest_weight_entry(db_path: Path | None = None) -> tuple[str, float] | None:
+    """Dernier poids connu sous forme ``(date, weight_kg)``, ou ``None``."""
+    path = Path(db_path) if db_path else get_db_path()
+    init_db(path)
+    conn = sqlite3.connect(path)
+    try:
+        row = conn.execute(
+            "SELECT date, weight_kg FROM morning_metrics "
+            "WHERE weight_kg IS NOT NULL ORDER BY date DESC LIMIT 1"
+        ).fetchone()
+    finally:
+        conn.close()
+    return (row[0], float(row[1])) if row is not None else None
+
+
+def latest_weight(db_path: Path | None = None) -> float | None:
+    """Dernier poids connu (colonne ``weight_kg`` non NULL), ou ``None``."""
+    entry = latest_weight_entry(db_path=db_path)
+    return entry[1] if entry is not None else None
+
+
+def power_to_weight(power_w: float | None, weight_kg: float | None) -> float | None:
+    """Rapport puissance/poids en W/kg, ou ``None`` si une donnée manque."""
+    if power_w is None or not weight_kg or weight_kg <= 0:
+        return None
+    return round(float(power_w) / float(weight_kg), 2)
 
 
 def compute_baselines(
@@ -321,6 +382,7 @@ def _row_to_dict(row: tuple) -> dict[str, Any]:
         "active_calories": row[16],
         "readiness_score": row[17],
         "sleep_score_computed": row[18],
+        "weight_kg": row[19],
     }
 
 

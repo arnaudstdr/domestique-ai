@@ -168,7 +168,8 @@ def init_db(db_path: Path | None = None, *, ctx: AthleteContext | None = None) -
                 steps INTEGER,
                 active_calories INTEGER,
                 readiness_score INTEGER,
-                sleep_score_computed INTEGER
+                sleep_score_computed INTEGER,
+                weight_kg REAL
             )
         """)
         for col, ddl in (
@@ -184,6 +185,7 @@ def init_db(db_path: Path | None = None, *, ctx: AthleteContext | None = None) -
             ("active_calories", "INTEGER"),
             ("readiness_score", "INTEGER"),
             ("sleep_score_computed", "INTEGER"),
+            ("weight_kg", "REAL"),
         ):
             _ensure_column(conn, "morning_metrics", col, ddl)
         conn.execute("""

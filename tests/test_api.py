@@ -297,6 +297,7 @@ def test_morning_get_empty(client: TestClient) -> None:
         "skin_temp_delta_c",
         "steps",
         "active_calories",
+        "weight_kg",
     }
 
 

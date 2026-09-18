@@ -342,3 +342,45 @@ def test_ftp_projection_delta_pct_clamped_to_minus_5(tmp_path, monkeypatch):
     result = get_ftp_projection(db_path=db, today=dt.date(2026, 5, 21))
     assert result["delta_pct"] == pytest.approx(-5.0)
     assert result["projected_ftp"] == pytest.approx(round(300.0 * 0.95, 1))
+
+
+def test_ftp_projection_exposes_wkg_when_weight_known(tmp_path, monkeypatch):
+    """Le poids le plus récent alimente le W/kg courant et projeté."""
+    monkeypatch.setenv("STRAVA_FTP", "280")
+    monkeypatch.setenv("DOMESTIQUE_AI_PROFILE_PATH", str(tmp_path / "no_profile.yaml"))
+
+    db = tmp_path / "ftp_wkg.db"
+    rows = []
+    base_date = dt.date(2026, 3, 23)
+    for i in range(60):
+        rows.append(
+            {
+                "strava_id": 3000 + i,
+                "date": f"{(base_date + dt.timedelta(days=i)).isoformat()}T08:00:00Z",
+                "training_load": 50.0 if i < 30 else 100.0,
+            }
+        )
+    _seed_activities(db, rows)
+
+    from domestique_ai.processing.morning_metrics import set_weight
+
+    set_weight("2026-05-20", 70.0, db_path=db)
+
+    result = get_ftp_projection(db_path=db, today=dt.date(2026, 5, 21))
+    assert result["weight_kg"] == 70.0
+    assert result["current_wkg"] == pytest.approx(4.0)
+    assert result["projected_wkg"] == pytest.approx(
+        round(result["projected_ftp"] / 70.0, 2)
+    )
+
+
+def test_ftp_projection_wkg_none_without_weight(tmp_path, monkeypatch):
+    monkeypatch.setenv("STRAVA_FTP", "280")
+    monkeypatch.setenv("DOMESTIQUE_AI_PROFILE_PATH", str(tmp_path / "no_profile.yaml"))
+
+    db = tmp_path / "ftp_nowkg.db"
+    _seed_activities(db, [])
+    result = get_ftp_projection(db_path=db, today=dt.date(2026, 5, 21))
+    assert result["weight_kg"] is None
+    assert result["current_wkg"] is None
+    assert result["projected_wkg"] is None

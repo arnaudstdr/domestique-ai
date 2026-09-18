@@ -84,6 +84,7 @@ export default function ActivityDetail() {
   const [detail, setDetail] = useState<ActivityDetailType | null>(null);
   const [streams, setStreams] = useState<ActivityStreamsType | null>(null);
   const [weather, setWeather] = useState<ActivityWeather | null>(null);
+  const [weightKg, setWeightKg] = useState<number | null>(null);
   const [similar, setSimilar] = useState<SimilarActivitiesResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [analyzing, setAnalyzing] = useState(false);
@@ -208,6 +209,15 @@ export default function ActivityDetail() {
       .catch(() => {
         // Silencieux : la météo ne doit jamais perturber la page.
       });
+    // Poids courant (pour le rapport poids/puissance approximatif).
+    api.morning
+      .weight()
+      .then((w) => {
+        if (!aborted) setWeightKg(w.weight_kg);
+      })
+      .catch(() => {
+        // Silencieux : le W/kg est optionnel.
+      });
     return () => {
       aborted = true;
     };
@@ -297,6 +307,13 @@ export default function ActivityDetail() {
               : undefined
           }
         />
+        {a.avg_power != null && weightKg != null && weightKg > 0 && (
+          <MetricCard
+            label="Poids/puissance"
+            value={`${(a.avg_power / weightKg).toFixed(2)} W/kg`}
+            hint={`poids actuel ${weightKg.toFixed(1)} kg`}
+          />
+        )}
         {hasSpeed && (
           <MetricCard
             label="Vitesse"

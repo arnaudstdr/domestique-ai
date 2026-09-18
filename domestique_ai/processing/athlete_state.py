@@ -179,10 +179,17 @@ def format_state_block(state: dict[str, Any]) -> str:
 
     level = profile.get("level")
     level_label = _LEVEL_LABELS.get(level or "", level or "—")
-    lines.append(
-        f"- Profil : niveau {level_label}"
-        + (f", FTP {_fmt(profile.get('ftp'), nd=0)} W" if profile.get("ftp") else "")
-    )
+    weight = profile.get("weight_kg")
+    ftp = profile.get("ftp")
+    wkg = (float(ftp) / float(weight)) if (ftp and weight) else None
+    profile_parts = [f"niveau {level_label}"]
+    if ftp:
+        profile_parts.append(f"FTP {_fmt(ftp, nd=0)} W")
+    if weight:
+        profile_parts.append(f"poids {_fmt(weight)} kg")
+    if wkg:
+        profile_parts.append(f"{_fmt(wkg)} W/kg")
+    lines.append("- Profil : " + ", ".join(profile_parts))
 
     if load.get("available"):
         trend = _TREND_LABELS.get(load.get("ctl_trend", "flat"), "stable")
@@ -268,12 +275,20 @@ def build_coach_state(
     load = summarize_load_state(curves)
     state["load"] = load
 
+    try:
+        from domestique_ai.processing.morning_metrics import latest_weight
+
+        weight_kg = latest_weight(db_path=ctx.db_path)
+    except Exception:  # noqa: BLE001
+        weight_kg = None
+
     state["profile"] = {
         "level": getattr(ctx, "level", None),
         "ftp": getattr(ctx, "ftp", None),
         "hr_rest": getattr(ctx, "hr_rest", None),
         "hr_max": getattr(ctx, "hr_max", None),
         "sex": getattr(ctx, "sex", None),
+        "weight_kg": weight_kg,
     }
 
     try:

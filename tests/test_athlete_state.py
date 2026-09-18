@@ -125,3 +125,13 @@ def test_format_block_mentions_facts_and_reprise() -> None:
     assert "déconditionné" in text
     # Le bloc ne doit JAMAIS prescrire lui-même une séance (il n'énonce que des faits).
     assert "Intervalles" not in text
+
+
+def test_format_block_includes_weight_and_wkg() -> None:
+    state = {
+        "load": {"available": False},
+        "profile": {"level": "intermediate", "ftp": 280, "weight_kg": 70.0},
+    }
+    text = format_state_block(state)
+    assert "poids 70" in text
+    assert "4" in text and "W/kg" in text
