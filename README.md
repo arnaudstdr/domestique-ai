@@ -22,7 +22,7 @@ lets you *talk* to a coach that grounds every claim in your real data, and
 <br/>
 ![CI](https://github.com/arnaudstdr/domestique-ai/actions/workflows/ci.yml/badge.svg)
 [![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
-![Tests](https://img.shields.io/badge/tests-630%2B-success)
+![Tests](https://img.shields.io/badge/tests-674-success)
 ![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)
 
 <br/>
@@ -134,6 +134,19 @@ so a crash on the Pi notifies *you*.
 
 </td>
 </tr>
+<tr>
+<td colspan="2" valign="top">
+
+### 🔐 Real auth you actually control
+Email + password (Argon2id) with **mandatory TOTP two-factor** and one-time
+recovery codes. Opaque, HMAC-hashed sessions per account, `coach` / `athlete`
+roles, and strict per-athlete data isolation (one SQLite file each). A coach
+onboards athletes with a one-time invite link; everyone manages their own
+credentials and 2FA. The upgrade is an **additive migration** — existing
+databases, athletes and sessions keep working.
+
+</td>
+</tr>
 </table>
 
 ---
@@ -143,6 +156,7 @@ so a crash on the Pi notifies *you*.
 | Layer | Choice | Why |
 |---|---|---|
 | **Backend** | FastAPI · Pydantic v2 · APScheduler · `sse-starlette` | Async, typed, one router per domain (13 of them) |
+| **Security** | Argon2id · TOTP (`pyotp`) + recovery codes · HMAC-hashed opaque sessions | Per-account login, mandatory 2FA, coach/athlete roles |
 | **Frontend** | React 18 · Vite · TypeScript · Tailwind · recharts · react-leaflet | Installable PWA, manual service worker |
 | **LLM** | Ollama (local) · agentic tool-calling loop | Privacy, zero API cost, no hallucinated metrics |
 | **Data** | SQLite (single source of truth) | Idempotent on external activity ids, soft migrations |
@@ -166,10 +180,13 @@ config.py  ──►  ingestion/  ──►  processing/  ──►  api/ + fron
 ```text
 domestique_ai/
 ├── config.py          # data paths, FTP, HR profile, secrets — single source via .env
+├── platform_db.py     # multi-tenant identity — accounts, sessions, invites, recovery codes
+├── security.py        # Argon2id password hashing, TOTP, signed 2FA challenge
+├── auth_cli.py        # bootstrap / lockout-recovery CLI (set credentials, enroll 2FA)
 ├── ingestion/         # Garmin Connect sync + SQLite persistence (schema, migrations)
 ├── processing/        # TSS / hr-TSS, CTL/ATL/TSB, HR zones, overtraining, trends, plans
 ├── llm/               # Ollama wrapper, tools, agentic coach loop, plan generator
-├── api/               # FastAPI app — one router per domain (+ SSE streaming)
+├── api/               # FastAPI app — one router per domain, Bearer/2FA middleware (+ SSE)
 └── export/            # GPX / FIT files + Garmin Connect push
 frontend/              # React 18 + Vite + TypeScript + Tailwind PWA
 ```
@@ -276,14 +293,40 @@ benefit at this scale.
 
 </details>
 
+<details>
+<summary><b>How does multi-user auth work without ever locking anyone out?</b></summary>
+
+<br/>
+
+The app is self-hosted and multi-tenant: a `coach` owns the roster, each `athlete`
+gets **its own SQLite file** under `data/athletes/<public_id>/`, and identity lives in
+a separate `data/platform.db` (accounts, sessions, invites, recovery codes).
+
+- **Credentials**: email + password hashed with **Argon2id**, then **mandatory TOTP
+  2FA** with single-use recovery codes. Sessions are opaque tokens, stored only as
+  HMAC digests — never in plaintext.
+- **Coach → athlete flow**: the coach generates a one-time invite link; the athlete
+  sets email + password and enrols 2FA themselves. A coach can read an athlete's data
+  (read-only) but never touches their credentials.
+- **No lockout**: the legacy `DOMESTIQUE_AI_API_TOKEN` stays valid as a break-glass,
+  a local CLI (`auth_cli`) can set credentials or reset 2FA from the Pi, and
+  pre-existing sessions are grandfathered so a deploy never disconnects everyone at
+  once.
+- **No data loss**: the schema change is additive (`_ensure_column`); activity
+  databases are untouched, and the upgrade path is covered by a test that migrates a
+  legacy database in place.
+
+</details>
+
 ---
 
 ## Quality &amp; rigor
 
-- **630+ tests** across **43 modules** — load math, HR zones, Garmin ingestion (mocked,
+- **674 tests** across **46 modules** — load math, HR zones, Garmin ingestion (mocked,
   no network), Google Health, source de-duplication, ICS/FIT export, webcal feed,
   conversations, coach tools, health metrics, overtraining, trends, plan generation, its
-  validators and the adaptive daily/weekly decision loops.
+  validators, the adaptive daily/weekly decision loops, and the full auth stack
+  (Argon2id, TOTP, recovery codes, session middleware, legacy-DB migration).
 - **Ruff** (`E, F, I, UP, B, SIM`), **Semgrep** scans and **GitHub Actions CI** green on every push.
 - Tests isolate state with `tmp_path` fixtures — **no shared DB, no flakiness**.
 
@@ -310,6 +353,22 @@ python -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev]"
 cp .env.example .env   # fill in the values
 ```
+
+### Authentication (accounts &amp; 2FA)
+
+The API is protected by per-account **email + password** with **mandatory TOTP 2FA**.
+Set `DOMESTIQUE_AI_API_TOKEN` (break-glass) and, recommended, a fixed
+`DOMESTIQUE_AI_SESSION_SECRET` in `.env`, then create the owner account once from the host:
+
+```bash
+python -m domestique_ai.auth_cli set-credentials --email you@example.com
+python -m domestique_ai.auth_cli enroll-totp   # prints a QR code + recovery codes
+```
+
+A coach then invites athletes from the **Roster** page: each opens a one-time link, sets
+their own email + password and enrols 2FA. To recover a locked-out account, use
+`auth_cli reset-2fa` (or set new credentials). See [DEPLOY.md](DEPLOY.md) for the
+Raspberry Pi procedure, including upgrading an existing deployment without data loss.
 
 ### Garmin Connect (activity ingestion)
 
@@ -351,6 +410,9 @@ cd frontend && npm run build
 uvicorn domestique_ai.api.main:app --port 8501   # → http://localhost:8501
 ```
 
+The first load redirects to `/login` — sign in with your **email**, **password** and
+**TOTP code** (or a one-time recovery code).
+
 The PWA is organised around a bottom nav: **Dashboard** (fitness state, proactive daily
 brief, alerts, HR zones), **Activités** (paginated history + rich detail), **Santé**
 (HRV / resting HR / sleep with a 90-day breakdown and an Apple-style hypnogram),
@@ -383,6 +445,7 @@ See [DEPLOY.md](DEPLOY.md) for the Pi 5 + Tailscale setup.
 - [x] iCalendar export + webcal subscription feed
 - [x] Sleep analytics (90-day breakdown, Apple-style hypnogram)
 - [x] Multi-athlete roster view for coaches
+- [x] Email/password auth with mandatory TOTP 2FA, recovery codes and per-account roles
 - [x] Error supervision (Sentry) + Healthchecks.io heartbeat
 - [ ] Per-activity HR profile to freeze historical CTL/ATL/TSB
 
