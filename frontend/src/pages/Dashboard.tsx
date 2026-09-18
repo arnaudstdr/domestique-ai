@@ -9,7 +9,6 @@ import { api, ApiError } from "../api/client";
 import type {
   LoadResponse,
   OvertrainingResponse,
-  ActivitiesList,
   DailyBriefResponse,
   RideVolumeResponse,
   WeeklyVolumeResponse,
@@ -18,7 +17,6 @@ import DailyBriefCard from "../components/DailyBriefCard";
 import LoadChart from "../components/LoadChart";
 import MetricCard from "../components/MetricCard";
 import WeeklyVolumeChart from "../components/WeeklyVolumeChart";
-import ZoneBar from "../components/ZoneBar";
 import { useToast } from "../hooks/useToast";
 import { useViewing } from "../hooks/useViewing";
 
@@ -53,7 +51,6 @@ function formatHours(seconds: number): string {
 export default function Dashboard() {
   const [load, setLoad] = useState<LoadResponse | null>(null);
   const [ot, setOt] = useState<OvertrainingResponse | null>(null);
-  const [activities, setActivities] = useState<ActivitiesList | null>(null);
   const [volume, setVolume] = useState<RideVolumeResponse | null>(null);
   const [weekly, setWeekly] = useState<WeeklyVolumeResponse | null>(null);
   const [brief, setBrief] = useState<DailyBriefResponse | null>(null);
@@ -66,16 +63,14 @@ export default function Dashboard() {
   async function refresh() {
     setLoading(true);
     try {
-      const [l, o, acts, vol, wk] = await Promise.all([
+      const [l, o, vol, wk] = await Promise.all([
         api.metrics.load(90),
         api.metrics.overtraining(),
-        api.activities.list(1, 50, { days: 28 }),
         api.metrics.rideVolume(),
         api.metrics.weeklyVolume(12),
       ]);
       setLoad(l);
       setOt(o);
-      setActivities(acts);
       setVolume(vol);
       setWeekly(wk);
     } catch (err) {
@@ -124,9 +119,6 @@ export default function Dashboard() {
       setBusy(null);
     }
   }
-
-  const zones = aggregateZones(activities?.items || []);
-  const hasZones = Object.values(zones).some((v) => v > 0);
 
   return (
     <div className="stagger space-y-4">
@@ -218,8 +210,6 @@ export default function Dashboard() {
         </Link>
       </div>
 
-      {hasZones && <ZoneBar zones={zones} />}
-
       {!viewing && (
       <div className="card space-y-3">
         <h3 className="label-eyebrow">Actions</h3>
@@ -270,15 +260,4 @@ export default function Dashboard() {
       {loading && <p className="text-center text-sm text-muted">Chargement…</p>}
     </div>
   );
-}
-
-function aggregateZones(items: { hr_zones_sec: Record<string, number | null> | null }[]) {
-  const totals: Record<string, number> = { z1: 0, z2: 0, z3: 0, z4: 0, z5: 0 };
-  for (const a of items) {
-    if (!a.hr_zones_sec) continue;
-    for (const key of Object.keys(totals)) {
-      totals[key] += Number(a.hr_zones_sec[key] || 0);
-    }
-  }
-  return totals;
 }
