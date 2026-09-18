@@ -89,8 +89,18 @@ def test_excludes_non_ride(tmp_path):
     _seed_activities(
         db,
         [
-            {"strava_id": 1, "date": "2026-05-20T08:00:00Z", "distance": 10000, "sport_type": "Ride"},
-            {"strava_id": 2, "date": "2026-05-20T09:00:00Z", "distance": 99999, "sport_type": "Run"},
+            {
+                "strava_id": 1,
+                "date": "2026-05-20T08:00:00Z",
+                "distance": 10000,
+                "sport_type": "Ride",
+            },
+            {
+                "strava_id": 2,
+                "date": "2026-05-20T09:00:00Z",
+                "distance": 99999,
+                "sport_type": "Run",
+            },
         ],
     )
     weeks = get_weekly_volume(weeks=1, db_path=db, today=TODAY)["weeks"]
