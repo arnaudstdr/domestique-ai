@@ -20,6 +20,7 @@ from domestique_ai.ingestion.garmin import (
     map_sport_type,
     parse_details_series,
     parse_details_streams,
+    parse_hr_time_in_zones,
     save_garmin_activity,
     sync_activities_garmin,
 )
@@ -348,6 +349,56 @@ def test_parse_details_streams_modern_shape():
     assert streams["temp"] == [21.0, 21.5, 22.0]
 
 
+# ---------------------------------------------------------------------------
+# Zones HR Garmin (hrTimeInZones)
+# ---------------------------------------------------------------------------
+
+
+def test_parse_hr_time_in_zones_list_shape():
+    payload = [
+        {"zoneNumber": 1, "secsInZone": 601.4, "zoneLowBoundary": 90},
+        {"zoneNumber": 2, "secsInZone": 1200.0, "zoneLowBoundary": 110},
+        {"zoneNumber": 3, "secsInZone": 0.0, "zoneLowBoundary": 130},
+        {"zoneNumber": 4, "secsInZone": 300.9, "zoneLowBoundary": 150},
+    ]
+    zones = parse_hr_time_in_zones(payload)
+    assert zones == {"z1": 601.4, "z2": 1200.0, "z3": 0.0, "z4": 300.9, "z5": 0.0}
+
+
+def test_parse_hr_time_in_zones_ignores_out_of_range():
+    payload = [
+        {"zoneNumber": 0, "secsInZone": 100.0},
+        {"zoneNumber": 3, "secsInZone": 50.0},
+        {"zoneNumber": 6, "secsInZone": 999.0},
+    ]
+    assert parse_hr_time_in_zones(payload) == {
+        "z1": 0.0,
+        "z2": 0.0,
+        "z3": 50.0,
+        "z4": 0.0,
+        "z5": 0.0,
+    }
+
+
+def test_parse_hr_time_in_zones_wrapped_dict():
+    payload = {"activityId": 42, "heartRateZones": [{"zoneNumber": 2, "secsInZone": 42.0}]}
+    assert parse_hr_time_in_zones(payload) == {
+        "z1": 0.0,
+        "z2": 42.0,
+        "z3": 0.0,
+        "z4": 0.0,
+        "z5": 0.0,
+    }
+
+
+def test_parse_hr_time_in_zones_unusable_returns_none():
+    assert parse_hr_time_in_zones(None) is None
+    assert parse_hr_time_in_zones([]) is None
+    assert parse_hr_time_in_zones({"unexpected": "payload"}) is None
+    assert parse_hr_time_in_zones([{"zoneNumber": 1}]) is None
+    assert parse_hr_time_in_zones([{"zoneNumber": 0, "secsInZone": 10.0}]) is None
+
+
 def test_encode_polyline_matches_reference():
     # Exemple de référence du format encodé Google/Strava.
     points = [(38.5, -120.2), (40.7, -120.95), (43.252, -126.453)]
@@ -453,10 +504,13 @@ def test_unique_index_blocks_duplicate_garmin_id(tmp_path):
 # ---------------------------------------------------------------------------
 
 
-def _mock_client(summaries: list[dict], details: dict | None = None) -> MagicMock:
+def _mock_client(
+    summaries: list[dict], details: dict | None = None, hr_zones: list[dict] | None = None
+) -> MagicMock:
     client = MagicMock()
     client.get_activities_by_date.return_value = summaries
     client.get_activity_details.return_value = details
+    client.get_activity_hr_in_timezones.return_value = hr_zones
     return client
 
 
@@ -528,6 +582,137 @@ def test_sync_activities_garmin_fetches_streams_when_hr_configured(tmp_path):
         conn.close()
     assert row[0] is not None
     assert row[1] is not None
+
+
+_GARMIN_HR_ZONES = [
+    {"zoneNumber": 1, "secsInZone": 300.0},
+    {"zoneNumber": 2, "secsInZone": 600.0},
+    {"zoneNumber": 3, "secsInZone": 300.0},
+    {"zoneNumber": 4, "secsInZone": 120.0},
+    {"zoneNumber": 5, "secsInZone": 60.0},
+]
+
+_LEGACY_HR_DETAILS = {
+    "metricsEntries": [
+        {"metricDescriptorDTOs": [{"key": "seconds"}], "metrics": [0, 1, 2]},
+        {"metricDescriptorDTOs": [{"key": "directHeartRate"}], "metrics": [100, 130, 150]},
+    ]
+}
+
+
+def _cycling_summary(garmin_id: int) -> dict:
+    return {
+        "activityId": garmin_id,
+        "startTimeGMT": "2026-08-30T08:12:33.0",
+        "duration": 3600,
+        "averageHR": 140.0,
+        "activityType": {"typeKey": "cycling"},
+    }
+
+
+def test_sync_cycling_uses_garmin_hr_zones(tmp_path):
+    db = tmp_path / "g.db"
+    init_db(db)
+    set_sync_meta(BACKFILL_FLAG, "2026-01-01", db)
+    client = _mock_client(
+        [_cycling_summary(501)], details=_modern_details(), hr_zones=_GARMIN_HR_ZONES
+    )
+    inserted = sync_activities_garmin(
+        client, dt.date(2026, 8, 1), dt.date(2026, 8, 31), ctx=_ctx(db, hr_rest=60, hr_max=200)
+    )
+    assert inserted == 1
+    client.get_activity_hr_in_timezones.assert_called_once_with("501")
+    conn = sqlite3.connect(db)
+    try:
+        row = conn.execute(
+            "SELECT hr_z1_time, hr_z2_time, hr_z3_time, hr_z4_time, hr_z5_time "
+            "FROM activities WHERE garmin_id = 501"
+        ).fetchone()
+    finally:
+        conn.close()
+    # Valeurs Garmin, pas le calcul local.
+    assert row == (300.0, 600.0, 300.0, 120.0, 60.0)
+
+
+def test_sync_cycling_garmin_zones_without_hr_config(tmp_path):
+    db = tmp_path / "g.db"
+    init_db(db)
+    set_sync_meta(BACKFILL_FLAG, "2026-01-01", db)
+    client = _mock_client([_cycling_summary(502)], hr_zones=_GARMIN_HR_ZONES)
+    inserted = sync_activities_garmin(
+        client,
+        dt.date(2026, 8, 1),
+        dt.date(2026, 8, 31),
+        ctx=_ctx(db),  # pas de HR config
+    )
+    assert inserted == 1
+    client.get_activity_details.assert_not_called()
+    conn = sqlite3.connect(db)
+    try:
+        row = conn.execute("SELECT hr_z1_time FROM activities WHERE garmin_id = 502").fetchone()
+    finally:
+        conn.close()
+    assert row == (300.0,)
+
+
+def test_sync_cycling_falls_back_to_local_when_garmin_empty(tmp_path):
+    db = tmp_path / "g.db"
+    init_db(db)
+    set_sync_meta(BACKFILL_FLAG, "2026-01-01", db)
+    client = _mock_client([_cycling_summary(503)], details=_LEGACY_HR_DETAILS, hr_zones=[])
+    inserted = sync_activities_garmin(
+        client, dt.date(2026, 8, 1), dt.date(2026, 8, 31), ctx=_ctx(db, hr_rest=60, hr_max=200)
+    )
+    assert inserted == 1
+    conn = sqlite3.connect(db)
+    try:
+        row = conn.execute(
+            "SELECT hr_z1_time, hr_z2_time FROM activities WHERE garmin_id = 503"
+        ).fetchone()
+    finally:
+        conn.close()
+    assert row == (2.0, 1.0)
+
+
+def test_sync_cycling_falls_back_when_garmin_endpoint_fails(tmp_path):
+    db = tmp_path / "g.db"
+    init_db(db)
+    set_sync_meta(BACKFILL_FLAG, "2026-01-01", db)
+    client = _mock_client([_cycling_summary(504)], details=_LEGACY_HR_DETAILS)
+    client.get_activity_hr_in_timezones.side_effect = RuntimeError("boom")
+    inserted = sync_activities_garmin(
+        client, dt.date(2026, 8, 1), dt.date(2026, 8, 31), ctx=_ctx(db, hr_rest=60, hr_max=200)
+    )
+    assert inserted == 1
+    conn = sqlite3.connect(db)
+    try:
+        row = conn.execute("SELECT hr_z1_time FROM activities WHERE garmin_id = 504").fetchone()
+    finally:
+        conn.close()
+    assert row == (2.0,)
+
+
+def test_sync_non_cycling_ignores_garmin_hr_zones(tmp_path):
+    db = tmp_path / "g.db"
+    init_db(db)
+    set_sync_meta(BACKFILL_FLAG, "2026-01-01", db)
+    summary = _cycling_summary(505)
+    summary["activityType"] = {"typeKey": "running"}
+    client = _mock_client([summary], details=_LEGACY_HR_DETAILS, hr_zones=_GARMIN_HR_ZONES)
+    inserted = sync_activities_garmin(
+        client, dt.date(2026, 8, 1), dt.date(2026, 8, 31), ctx=_ctx(db, hr_rest=60, hr_max=200)
+    )
+    assert inserted == 1
+    client.get_activity_hr_in_timezones.assert_not_called()
+    conn = sqlite3.connect(db)
+    try:
+        row = conn.execute(
+            "SELECT hr_z1_time, hr_z2_time FROM activities WHERE garmin_id = 505"
+        ).fetchone()
+    finally:
+        conn.close()
+    # Calcul local (pas les 300/600 Garmin).
+    assert row == (2.0, 1.0)
 
 
 def test_sync_activities_garmin_survives_details_failure(tmp_path):

@@ -11,9 +11,13 @@ Conventions conservées :
   ``init_db``). Les lignes Garmin ont ``strava_id`` NULL.
 - **Sync incrémentale** : la fenêtre par défaut démarre à la dernière activité
   Garmin connue (moins 1 j de marge), ``start_date=0``/ancien force le re-fetch.
-- **Zones HR + température** calculées depuis les streams de
-  ``get_activity_details`` quand HRrepos/HRmax sont configurés — mêmes helpers
-  que l'ex-ingestion Strava (``calculate_hr_zones``, ``summarize_temp_stream``).
+- **Zones HR** : pour le vélo (``_CYCLING_SPORT_TYPES``), les valeurs Garmin
+  (``/activity/{id}/hrTimeInZones``) sont prioritaires (config Garmin alignée
+  sur notre référentiel par l'athlète), avec repli sur le calcul %HRR local
+  (``calculate_hr_zones``). Les autres sports gardent le calcul local.
+- **Température** : réduite du stream ``get_activity_details``
+  (``summarize_temp_stream``) quand HRrepos/HRmax sont configurés — l'appel
+  détails reste donc nécessaire même quand Garmin fournit les zones.
 
 ⚠️ Endpoints non officiels : peuvent changer sans préavis. Le parsing des
 détails est défensif (orientation par descripteur ou par mesure) et logge le
@@ -90,6 +94,20 @@ def map_sport_type(type_key: str | None) -> str | None:
     if mapped:
         return mapped
     return type_key.replace("_", " ").title().replace(" ", "")
+
+
+# Sports dont les zones HR Garmin sont alignées sur notre référentiel (config
+# faite par l'athlète dans Garmin Connect). Pour ces sports, ``hrTimeInZones``
+# est la source prioritaire ; les autres sports gardent notre calcul %HRR local
+# (leurs zones Garmin ne sont pas alignées).
+_CYCLING_SPORT_TYPES = frozenset(
+    {"Ride", "VirtualRide", "GravelRide", "MountainBikeRide", "EBikeRide"}
+)
+
+
+def _is_cycling_sport(sport_type: str | None) -> bool:
+    """True si le sport relève du profil vélo (zones Garmin alignées)."""
+    return sport_type in _CYCLING_SPORT_TYPES
 
 
 def _parse_gmt(timestamp: str | None) -> dt.datetime | None:
@@ -356,6 +374,85 @@ def parse_details_streams(details: dict[str, Any] | None) -> dict[str, list[floa
     if series.get("temp"):
         streams["temp"] = series["temp"]
     return streams
+
+
+# ---------------------------------------------------------------------------
+# Zones HR Garmin (hrTimeInZones) — source prioritaire pour le vélo
+# ---------------------------------------------------------------------------
+
+# Écart toléré (en %) entre les zones Garmin et notre calcul local avant de
+# logguer un warning de correspondance (validation de l'alignement des zones).
+_ZONE_DELTA_WARN_PCT = 5.0
+
+
+def parse_hr_time_in_zones(payload: Any) -> dict[str, float] | None:
+    """Temps passé par zone HR renvoyé par Garmin (``/activity/{id}/hrTimeInZones``).
+
+    Payload attendu : liste de dicts ``{"zoneNumber": 1..5, "secsInZone": <s>}``
+    (certaines réponses encapsulent la liste dans un dict). Les zones 1..5 sont
+    mappées sur ``z1..z5`` ; les zones hors bornes (0, 6+) sont ignorées ; une
+    zone absente vaut ``0.0``. Retourne ``None`` si aucune zone exploitable —
+    l'appelant bascule alors sur le calcul local.
+    """
+    entries: Any = payload
+    if isinstance(payload, dict):
+        entries = None
+        for value in payload.values():
+            if isinstance(value, list):
+                entries = value
+                break
+    if not isinstance(entries, list):
+        return None
+
+    raw: dict[str, float] = {}
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        number = entry.get("zoneNumber")
+        secs = entry.get("secsInZone")
+        if number is None or secs is None:
+            continue
+        try:
+            number = int(number)
+            secs = float(secs)
+        except (TypeError, ValueError):
+            continue
+        if 1 <= number <= len(HR_ZONE_KEYS):
+            raw[HR_ZONE_KEYS[number - 1]] = secs
+    if not raw:
+        return None
+    return {key: round(raw.get(key, 0.0), 1) for key in HR_ZONE_KEYS}
+
+
+def _fetch_garmin_hr_zones(client: Any, garmin_id: Any) -> dict[str, float] | None:
+    """Zones HR Garmin pour une activité (best-effort, jamais bloquant)."""
+    try:
+        raw = client.get_activity_hr_in_timezones(str(garmin_id))
+    except Exception:  # noqa: BLE001 — une activité KO n'arrête pas la sync
+        log.warning("Garmin %s : zones HR (hrTimeInZones) indisponibles.", garmin_id, exc_info=True)
+        return None
+    return parse_hr_time_in_zones(raw)
+
+
+def _log_zone_source_delta(
+    garmin_id: Any,
+    garmin_zones: dict[str, float],
+    local_zones: dict[str, float],
+) -> None:
+    """Compare les zones Garmin vs le calcul local et logue un écart significatif."""
+    garmin_total = sum(garmin_zones.values())
+    local_total = sum(local_zones.values())
+    if garmin_total <= 0 or local_total <= 0:
+        return
+    delta_pct = abs(garmin_total - local_total) / local_total * 100
+    if delta_pct > _ZONE_DELTA_WARN_PCT:
+        log.warning(
+            "Garmin %s : zones hrTimeInZones (%.0fs) ≠ calcul local (%.0fs) — écart %.1f%%.",
+            garmin_id,
+            garmin_total,
+            local_total,
+            delta_pct,
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -851,13 +948,23 @@ def sync_activities_garmin(
         data = extract_activity_data(raw)
         if data is None:
             continue
-        zones: dict[str, float] | None = None
+        garmin_id = data.get("id")
+        avg_hr = data.get("avg_heart_rate")
+        garmin_zones: dict[str, float] | None = None
+        local_zones: dict[str, float] | None = None
         temp_summary: tuple[float, float, float] | None = None
-        if zone_params and data.get("avg_heart_rate") and data.get("id"):
+
+        # Vélo : zones Garmin (hrTimeInZones) prioritaires — config Garmin
+        # alignée sur notre référentiel par l'athlète.
+        if _is_cycling_sport(data.get("sport_type")) and avg_hr and garmin_id:
+            garmin_zones = _fetch_garmin_hr_zones(client, garmin_id)
+
+        # Détails : température (et calcul %HRR local, fallback / comparaison).
+        if zone_params and avg_hr and garmin_id:
             try:
-                details = client.get_activity_details(data["id"])
+                details = client.get_activity_details(garmin_id)
             except Exception:  # noqa: BLE001 — une activité KO n'arrête pas la sync
-                log.warning("Garmin %s : détails indisponibles.", data["id"], exc_info=True)
+                log.warning("Garmin %s : détails indisponibles.", garmin_id, exc_info=True)
                 details = None
             if details:
                 streams = parse_details_streams(details)
@@ -865,14 +972,20 @@ def sync_activities_garmin(
                     hr_stream = streams.get("heartrate")
                     time_stream = streams.get("time")
                     if hr_stream and time_stream:
-                        zones = calculate_hr_zones(hr_stream, time_stream, *zone_params)
+                        local_zones = calculate_hr_zones(hr_stream, time_stream, *zone_params)
                     temp_summary = summarize_temp_stream(streams.get("temp"))
                 else:
                     log.warning(
                         "Garmin %s : streams non extractibles des détails — payload : %s",
-                        data["id"],
+                        garmin_id,
                         json.dumps(details)[:400],
                     )
+
+        if garmin_zones is not None and local_zones is not None:
+            _log_zone_source_delta(garmin_id, garmin_zones, local_zones)
+
+        zones = garmin_zones if garmin_zones is not None else local_zones
+
         if save_garmin_activity(
             data, hr_zones=zones, temp_summary=temp_summary, ctx=ctx, db_path=db_path
         ):

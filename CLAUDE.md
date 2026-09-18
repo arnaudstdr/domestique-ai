@@ -107,7 +107,14 @@ Chaque activité est ventilée en 5 zones %HRR (Karvonen) — colonnes `hr_z1_ti
 - Les pauses d'enregistrement (saut > 5 s entre deux samples) ne sont pas comptabilisées (constante `_HR_ZONE_PAUSE_GAP_SEC`).
 - Convention DB : `NULL` = non calculé ; `0.0` = calculé mais aucune seconde dans cette zone.
 
-À l'ingestion (`sync_activities_garmin`), si `STRAVA_HR_REST` + `STRAVA_HR_MAX` sont configurés, un appel `get_activity_details` est fait par activité avec `avg_heart_rate` non null, et les séries HR/temps sont extraites par `parse_details_streams()` (parsing défensif, trois orientations de payload gérées : moderne `metricDescriptors` + `activityDetailMetrics` — shape réelle observée 09/2026 —, et legacy `metricsEntries` par métrique ou par échantillon). Les lignes restées à `NULL` (parsing cassé avant la correction 09/2026) sont **rattrapées par le backfill one-off** (voir « Ingestion Garmin Connect »).
+À l'ingestion (`sync_activities_garmin`), la source des zones dépend du sport :
+
+- **Vélo** (`Ride`, `VirtualRide`, `GravelRide`, `MountainBikeRide`, `EBikeRide` — set `_CYCLING_SPORT_TYPES`) : les valeurs **Garmin** sont prioritaires via `client.get_activity_hr_in_timezones(id)` (`/activity/{id}/hrTimeInZones`, parsing défensif `parse_hr_time_in_zones()`). L'athlète a aligné ses zones Garmin sur notre référentiel. **Repli** sur le calcul local `calculate_hr_zones()` si Garmin ne renvoie rien exploitable.
+- **Autres sports** : calcul local `calculate_hr_zones()` (leurs zones Garmin ne sont pas alignées).
+
+Le calcul local consomme les séries HR/temps de `get_activity_details` extraites par `parse_details_streams()` (parsing défensif, trois orientations : moderne `metricDescriptors` + `activityDetailMetrics` — shape réelle observée 09/2026 —, et legacy `metricsEntries` par métrique ou par échantillon). Cet appel détails reste nécessaire de toute façon pour la **température**. Quand Garmin et le local sont tous deux disponibles (vélo + `STRAVA_HR_REST`/`HR_MAX`), un warning est logué si les totaux divergent de plus de `_ZONE_DELTA_WARN_PCT` (validation de correspondance).
+
+⚠️ Les zones Garmin ne sont **pas rétroactives** : seules les **nouvelles** activités utilisent la source Garmin ; l'historique déjà ingéré (calcul local) n'est pas backfillé. Les lignes restées à `NULL` (parsing cassé avant la correction 09/2026) restent rattrapables par le backfill one-off (voir « Ingestion Garmin Connect »).
 
 ### Champs enrichis + streams + météo Garmin (09/2026)
 
