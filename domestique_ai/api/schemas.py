@@ -54,6 +54,7 @@ class OvertrainingResponse(BaseModel):
 class VolumePeriod(BaseModel):
     distance_km: float
     duration_sec: int
+    elevation_m: float
 
 
 class RideVolumeResponse(BaseModel):

@@ -43,6 +43,7 @@ export interface OvertrainingResponse {
 export interface VolumePeriod {
   distance_km: number;
   duration_sec: number;
+  elevation_m: number;
 }
 
 export interface RideVolumeResponse {

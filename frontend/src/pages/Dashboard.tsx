@@ -42,6 +42,10 @@ function formatKm(km: number): string {
   })} km`;
 }
 
+function formatElevation(m: number): string {
+  return `${Math.round(m).toLocaleString("fr-FR")} m`;
+}
+
 function formatHours(seconds: number): string {
   const h = Math.floor(seconds / 3600);
   const m = Math.floor((seconds % 3600) / 60);
@@ -160,7 +164,7 @@ export default function Dashboard() {
       )}
 
       {volume && (
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-3 gap-3">
           <MetricCard
             label="Km vélo (année)"
             value={formatKm(volume.year.distance_km)}
@@ -170,6 +174,10 @@ export default function Dashboard() {
             label="Km vélo (semaine)"
             value={formatKm(volume.week.distance_km)}
             hint={formatHours(volume.week.duration_sec)}
+          />
+          <MetricCard
+            label="D+ (semaine)"
+            value={formatElevation(volume.week.elevation_m)}
           />
         </div>
       )}

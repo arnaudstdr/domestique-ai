@@ -148,8 +148,8 @@ def get_ride_volume(
     year_start = dt.date(today.year, 1, 1)
     week_start = today - dt.timedelta(days=today.weekday())
 
-    year = {"distance_m": 0.0, "duration_sec": 0}
-    week = {"distance_m": 0.0, "duration_sec": 0}
+    year = {"distance_m": 0.0, "duration_sec": 0, "elevation_m": 0.0}
+    week = {"distance_m": 0.0, "duration_sec": 0, "elevation_m": 0.0}
 
     for act in fetch_activities_from_db(ctx=ctx):
         if not is_ride(act.get("sport_type")):
@@ -163,21 +163,26 @@ def get_ride_volume(
             continue
         distance = float(act.get("distance") or 0)
         duration = int(act.get("duration") or 0)
+        elevation = float(act.get("elevation_gain") or 0)
         if act_date >= year_start:
             year["distance_m"] += distance
             year["duration_sec"] += duration
+            year["elevation_m"] += elevation
         if act_date >= week_start:
             week["distance_m"] += distance
             week["duration_sec"] += duration
+            week["elevation_m"] += elevation
 
     return RideVolumeResponse(
         year=VolumePeriod(
             distance_km=round(year["distance_m"] / 1000, 1),
             duration_sec=int(year["duration_sec"]),
+            elevation_m=round(year["elevation_m"], 0),
         ),
         week=VolumePeriod(
             distance_km=round(week["distance_m"] / 1000, 1),
             duration_sec=int(week["duration_sec"]),
+            elevation_m=round(week["elevation_m"], 0),
         ),
     )
 
