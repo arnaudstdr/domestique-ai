@@ -178,6 +178,63 @@ def test_get_trends_n1_comparison_when_available(tmp_path):
     assert by_month["2026-05"]["tss_n1"] == pytest.approx(50.0)
 
 
+def test_get_trends_n1_zero_when_covered_but_empty(tmp_path):
+    """Un mois N-1 couvert par l'historique mais sans activité vaut 0.0.
+
+    Objectif : la courbe N-1 reste continue (retombe à 0) au lieu de disparaître
+    quand l'athlète n'a pas roulé le mois correspondant l'année précédente.
+    """
+    db = tmp_path / "trends_n1_gap.db"
+    _seed_activities(
+        db,
+        [
+            # Première activité de l'historique → borne de couverture (2025-05).
+            {
+                "strava_id": 1,
+                "date": "2025-05-10T08:00:00Z",
+                "distance": 30_000,
+                "training_load": 50.0,
+            },
+            # Juillet 2025 : activité présente.
+            {
+                "strava_id": 2,
+                "date": "2025-07-10T08:00:00Z",
+                "distance": 40_000,
+                "training_load": 60.0,
+            },
+            # Août/sept 2025 : trou (aucune activité).
+            # Année courante : juillet et septembre 2026. Le mois d'août 2026 est
+            # intercalé (aucune activité courante) → il est tout de même renvoyé.
+            {
+                "strava_id": 3,
+                "date": "2026-07-10T08:00:00Z",
+                "distance": 20_000,
+                "training_load": 30.0,
+            },
+            {
+                "strava_id": 4,
+                "date": "2026-09-10T08:00:00Z",
+                "distance": 25_000,
+                "training_load": 40.0,
+            },
+        ],
+    )
+
+    result = get_trends("all", db_path=db, today=dt.date(2026, 9, 21))
+    by_month = {entry["month"]: entry for entry in result["monthly"]}
+
+    # Août 2026 → N-1 = août 2025, couvert (entre mai 2025 et sept 2026) mais
+    # vide : 0.0 et non None.
+    assert by_month["2026-08"]["distance_km_n1"] == pytest.approx(0.0)
+    assert by_month["2026-08"]["tss_n1"] == pytest.approx(0.0)
+    # Septembre 2026 → N-1 = sept 2025, couvert mais vide également.
+    assert by_month["2026-09"]["distance_km_n1"] == pytest.approx(0.0)
+    # Avril 2026 → N-1 = avril 2025, antérieur à l'historique (1re activité
+    # mai 2025) : inconnu → None.
+    assert by_month["2026-04"]["distance_km_n1"] is None
+    assert by_month["2026-04"]["tss_n1"] is None
+
+
 def test_get_trends_zones_distribution_pct(tmp_path):
     db = tmp_path / "trends_zones.db"
     _seed_activities(

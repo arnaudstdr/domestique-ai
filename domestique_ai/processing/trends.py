@@ -291,8 +291,10 @@ def get_trends(
         }
 
     ``monthly`` est trié chronologiquement et couvre toute la période demandée
-    (mois sans activité = 0). Les champs ``_n1`` sont ``None`` si la donnée
-    N-1 n'existe pas pour ce mois.
+    (mois sans activité = 0). Les champs ``_n1`` valent ``None`` uniquement si
+    le mois N-1 tombe **hors de l'historique** de l'athlète ; s'il est couvert
+    par l'historique mais sans activité, la valeur est ``0.0`` (l'athlète n'a
+    pas roulé ce mois-là, ce n'est pas une donnée manquante).
     """
     if period not in _PERIOD_DAYS:
         raise ValueError(f"period inconnue : {period!r}")
@@ -341,11 +343,29 @@ def get_trends(
     )
     month_keys = _months_in_range(first_date, today)
 
+    # Mois couverts par l'historique (de la 1re à la dernière activité). Un mois
+    # N-1 couvert mais sans activité vaut 0.0 ; hors de cette fenêtre, la donnée
+    # est inconnue → None (évite une fausse ligne plate à zéro avant l'historique).
+    dated_activities = [
+        dt.date.fromisoformat(a["date"][:10]) for a in all_activities if a.get("date")
+    ]
+    coverage = (
+        set(_months_in_range(min(dated_activities), max(dated_activities)))
+        if dated_activities
+        else set()
+    )
+
     monthly_payload: list[dict[str, Any]] = []
     for month in month_keys:
         cur = monthly_current.get(month) or {}
         n1_key = _shift_month_one_year(month)
-        n1 = monthly_all.get(n1_key)
+        if n1_key in coverage:
+            n1 = monthly_all.get(n1_key) or {}
+            n1_distance = round(n1.get("distance_km", 0.0), 1)
+            n1_tss = round(n1.get("tss", 0.0), 1)
+        else:
+            n1_distance = None
+            n1_tss = None
         zones = zones_monthly.get(month)
         monthly_payload.append(
             {
@@ -355,8 +375,8 @@ def get_trends(
                 "duration_sec": int(cur.get("duration_sec", 0)),
                 "sessions": int(cur.get("sessions", 0)),
                 "tss": round(cur.get("tss", 0.0), 1),
-                "distance_km_n1": round(n1["distance_km"], 1) if n1 else None,
-                "tss_n1": round(n1["tss"], 1) if n1 else None,
+                "distance_km_n1": n1_distance,
+                "tss_n1": n1_tss,
                 "z1_pct": zones["z1"] if zones else None,
                 "z2_pct": zones["z2"] if zones else None,
                 "z3_pct": zones["z3"] if zones else None,
