@@ -541,13 +541,24 @@ export interface DailyBriefWorkout {
   notes: string | null;
 }
 
+export interface SleepPoint {
+  date: string;
+  hours: number | null;
+}
+
 export interface DailyBriefResponse {
   date: string;
   summary: string;
+  coach_tip: string | null;
   tsb: number | null;
   tsb_zone: string | null;
+  ctl: number | null;
+  atl: number | null;
   primary_alert: DailyBriefAlert | null;
   today_workout: DailyBriefWorkout;
+  sleep_history: SleepPoint[];
+  week_tss_planned: number | null;
+  week_tss_done: number | null;
   source: "cache" | "llm" | "fallback";
   morning_decision?: string | null;
   morning_reason?: string | null;

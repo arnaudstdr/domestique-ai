@@ -168,7 +168,9 @@
 
 @media (prefers-reduced-motion: reduce) {
   .stagger > *,
-  .animate-rise {
+  .animate-rise,
+  .animate-coach-halo,
+  .animate-alert-pulse {
     animation: none !important;
   }
 }

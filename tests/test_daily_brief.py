@@ -9,6 +9,7 @@ import pytest
 from domestique_ai.llm import daily_brief
 from domestique_ai.llm.daily_brief import (
     _build_fallback_summary,
+    _build_fallback_tip,
     _hash_alerts,
     _round_tsb,
     _select_primary_alert,
@@ -35,6 +36,8 @@ def stable_signals(monkeypatch):
             "today": today.isoformat(),
             "tsb": 5.2,
             "tsb_zone": "Frais",
+            "ctl": 48.0,
+            "atl": 42.8,
             "primary_alert": None,
             "workout": {
                 "rest_day": False,
@@ -46,6 +49,12 @@ def stable_signals(monkeypatch):
                 "tsb": 5.2,
                 "tsb_zone": "Frais",
             },
+            "sleep_history": [
+                {"date": "2026-05-20", "hours": 7.5},
+                {"date": "2026-05-21", "hours": 7.8},
+            ],
+            "week_tss_planned": 320.0,
+            "week_tss_done": 180.0,
         }
 
     monkeypatch.setattr(daily_brief, "_collect_signals", fake_collect)
@@ -194,18 +203,24 @@ def test_build_daily_brief_returns_fallback_when_llm_disabled(stable_signals):
 def test_build_daily_brief_uses_llm_when_available(stable_signals, monkeypatch):
     monkeypatch.setattr(
         daily_brief,
-        "_generate_summary_with_llm",
-        lambda signals: "Forme correcte, séance d'endurance prévue.",
+        "_generate_brief_with_llm",
+        lambda signals: {
+            "summary": "Forme correcte, séance d'endurance prévue.",
+            "tip": "Bois régulièrement sur la sortie.",
+        },
     )
     brief = build_daily_brief(today=dt.date(2026, 5, 21))
     assert brief["source"] == "llm"
     assert "Forme correcte" in brief["summary"]
+    assert brief["coach_tip"] == "Bois régulièrement sur la sortie."
 
 
 def test_build_daily_brief_falls_back_when_llm_returns_none(stable_signals, monkeypatch):
-    monkeypatch.setattr(daily_brief, "_generate_summary_with_llm", lambda signals: None)
+    monkeypatch.setattr(daily_brief, "_generate_brief_with_llm", lambda signals: None)
     brief = build_daily_brief(today=dt.date(2026, 5, 21))
     assert brief["source"] == "fallback"
+    # Le tip retombe sur le template déterministe — jamais vide.
+    assert brief["coach_tip"]
 
 
 # ---------- Cache journalier -------------------------------------------------
@@ -216,9 +231,9 @@ def test_build_daily_brief_caches_within_same_day(stable_signals, monkeypatch):
 
     def counting_llm(signals):
         call_count["value"] += 1
-        return f"call #{call_count['value']}"
+        return {"summary": f"call #{call_count['value']}", "tip": "tip"}
 
-    monkeypatch.setattr(daily_brief, "_generate_summary_with_llm", counting_llm)
+    monkeypatch.setattr(daily_brief, "_generate_brief_with_llm", counting_llm)
     a = build_daily_brief(today=dt.date(2026, 5, 21))
     b = build_daily_brief(today=dt.date(2026, 5, 21))
     assert call_count["value"] == 1
@@ -231,9 +246,9 @@ def test_build_daily_brief_refresh_bypasses_cache(stable_signals, monkeypatch):
 
     def counting_llm(signals):
         call_count["value"] += 1
-        return f"call #{call_count['value']}"
+        return {"summary": f"call #{call_count['value']}", "tip": "tip"}
 
-    monkeypatch.setattr(daily_brief, "_generate_summary_with_llm", counting_llm)
+    monkeypatch.setattr(daily_brief, "_generate_brief_with_llm", counting_llm)
     build_daily_brief(today=dt.date(2026, 5, 21))
     fresh = build_daily_brief(today=dt.date(2026, 5, 21), refresh=True)
     assert call_count["value"] == 2
@@ -241,12 +256,66 @@ def test_build_daily_brief_refresh_bypasses_cache(stable_signals, monkeypatch):
 
 
 def test_build_daily_brief_purges_old_cache_keys(stable_signals, monkeypatch):
-    monkeypatch.setattr(daily_brief, "_generate_summary_with_llm", lambda s: "x")
+    monkeypatch.setattr(daily_brief, "_generate_brief_with_llm", lambda s: {"summary": "x"})
     build_daily_brief(today=dt.date(2026, 5, 20))
     build_daily_brief(today=dt.date(2026, 5, 21))
     # Le cache ne doit plus contenir d'entrée pour la veille.
     # Clé = (db_path, date ISO, bucket TSB, hash alertes) → la date est en [1].
     assert all(key[1] == "2026-05-21" for key in daily_brief._BRIEF_CACHE)
+
+
+# ---------- coach tip --------------------------------------------------------
+
+
+def test_build_fallback_tip_prioritizes_alert():
+    tip = _build_fallback_tip({"primary_alert": {"message": "TSB bas"}, "workout": {}})
+    assert "récup" in tip.lower()
+
+
+def test_build_fallback_tip_rest_day():
+    tip = _build_fallback_tip({"primary_alert": None, "workout": {"rest_day": True}})
+    assert "off" in tip.lower()
+
+
+def test_build_fallback_tip_always_returns_text():
+    for kind in ("recovery", "intervals", "endurance", "tempo", "long"):
+        tip = _build_fallback_tip(
+            {"primary_alert": None, "workout": {"rest_day": False, "workout": {"kind": kind}}}
+        )
+        assert isinstance(tip, str) and tip
+
+
+# ---------- Enrichissements hero (palier 1 étendu) ---------------------------
+
+
+def test_build_daily_brief_exposes_hero_fields(stable_signals):
+    brief = build_daily_brief(today=dt.date(2026, 5, 21), use_llm=False)
+    assert brief["ctl"] == pytest.approx(48.0)
+    assert brief["atl"] == pytest.approx(42.8)
+    assert brief["week_tss_planned"] == pytest.approx(320.0)
+    assert brief["week_tss_done"] == pytest.approx(180.0)
+    assert len(brief["sleep_history"]) == 2
+    assert brief["sleep_history"][0]["hours"] == pytest.approx(7.5)
+
+
+def test_build_daily_brief_defaults_when_signals_lack_hero_fields(monkeypatch):
+    def minimal_collect(today, ctx=None):
+        return {
+            "today": today.isoformat(),
+            "tsb": 1.0,
+            "tsb_zone": "Optimal",
+            "primary_alert": None,
+            "workout": {"rest_day": True, "reason": "off"},
+        }
+
+    monkeypatch.setattr(daily_brief, "_collect_signals", minimal_collect)
+    brief = build_daily_brief(today=dt.date(2026, 5, 21), use_llm=False)
+    assert brief["ctl"] is None
+    assert brief["atl"] is None
+    assert brief["week_tss_planned"] is None
+    assert brief["week_tss_done"] is None
+    assert brief["sleep_history"] == []
+    assert brief["coach_tip"]
 
 
 # ---------- build_coach_context (palier 2) -----------------------------------
@@ -287,7 +356,7 @@ def test_build_coach_context_mentions_alert_when_present(monkeypatch):
         }
 
     monkeypatch.setattr(daily_brief, "_collect_signals", alerted_collect)
-    monkeypatch.setattr(daily_brief, "_generate_summary_with_llm", lambda s: None)
+    monkeypatch.setattr(daily_brief, "_generate_brief_with_llm", lambda s: None)
     ctx = build_coach_context(today=dt.date(2026, 5, 21))
     assert "TSB chronique" in ctx
 
@@ -303,6 +372,6 @@ def test_build_coach_context_handles_rest_day(monkeypatch):
         }
 
     monkeypatch.setattr(daily_brief, "_collect_signals", rest_collect)
-    monkeypatch.setattr(daily_brief, "_generate_summary_with_llm", lambda s: None)
+    monkeypatch.setattr(daily_brief, "_generate_brief_with_llm", lambda s: None)
     ctx = build_coach_context(today=dt.date(2026, 5, 21))
     assert "repos" in ctx.lower()

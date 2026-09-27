@@ -681,6 +681,13 @@ class DailyBriefAlert(BaseModel):
     message: str
 
 
+class SleepPoint(BaseModel):
+    """Un point de sommeil (date + heures) pour la mini-barre du brief."""
+
+    date: str
+    hours: float | None = None
+
+
 class DailyBriefWorkout(BaseModel):
     """Vue compacte de la séance du jour pour le brief Dashboard.
 
@@ -704,10 +711,17 @@ class DailyBriefResponse(BaseModel):
 
     date: str
     summary: str
+    coach_tip: str | None = None
     tsb: float | None = None
     tsb_zone: str | None = None
+    ctl: float | None = None
+    atl: float | None = None
     primary_alert: DailyBriefAlert | None = None
     today_workout: DailyBriefWorkout
+    # Mini-barre sommeil 7 j + TSS hebdo de la semaine courante (hero Dashboard).
+    sleep_history: list[SleepPoint] = Field(default_factory=list)
+    week_tss_planned: float | None = None
+    week_tss_done: float | None = None
     source: Literal["cache", "llm", "fallback"]
     # Check du matin : décision go / adjust / rest répercutée dans le plan.
     morning_decision: str | None = None

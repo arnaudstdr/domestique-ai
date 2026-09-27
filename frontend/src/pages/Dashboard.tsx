@@ -1,10 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import {
-  RefreshCcw,
-  RefreshCw,
-  TriangleAlert,
-} from "lucide-react";
+import { RefreshCcw, RefreshCw } from "lucide-react";
 import { api, ApiError } from "../api/client";
 import type {
   LoadResponse,
@@ -16,8 +12,22 @@ import type {
 import DailyBriefCard from "../components/DailyBriefCard";
 import LoadCard from "../components/LoadCard";
 import VolumeCard from "../components/VolumeCard";
+import { useMe } from "../hooks/useMe";
 import { useToast } from "../hooks/useToast";
 import { useViewing } from "../hooks/useViewing";
+
+const TODAY_FR = new Intl.DateTimeFormat("fr-FR", {
+  weekday: "long",
+  day: "numeric",
+  month: "long",
+});
+
+function greeting(hour: number): string {
+  if (hour < 6) return "Bonne nuit";
+  if (hour < 12) return "Bonjour";
+  if (hour < 18) return "Bon après-midi";
+  return "Bonsoir";
+}
 
 export default function Dashboard() {
   const [load, setLoad] = useState<LoadResponse | null>(null);
@@ -28,8 +38,11 @@ export default function Dashboard() {
   const [briefLoading, setBriefLoading] = useState(true);
   const [loading, setLoading] = useState(true);
   const viewing = useViewing();
+  const me = useMe();
   const [busy, setBusy] = useState<string | null>(null);
   const { push } = useToast();
+
+  const firstName = me?.display_name?.split(" ")[0] || me?.email?.split("@")[0] || null;
 
   async function refresh() {
     setLoading(true);
@@ -91,44 +104,27 @@ export default function Dashboard() {
     }
   }
 
+  // Les alertes overtraining remontent dans la surface unique du brief —
+  // celles non déjà portées par l'alerte primaire sont affichées en dépliable.
+  const secondaryAlerts = (ot?.alerts || [])
+    .filter((a) => a.message !== brief?.primary_alert?.message)
+    .map((a) => ({ message: a.message, level: a.level }));
+
   return (
     <div className="stagger space-y-4">
-      <DailyBriefCard data={brief} loading={briefLoading} />
+      <div className="px-1">
+        <h2 className="font-display text-xl font-extrabold tracking-tight">
+          {greeting(new Date().getHours())}
+          {firstName ? `, ${firstName}` : ""}
+        </h2>
+        <p className="text-xs text-muted capitalize">{TODAY_FR.format(new Date())}</p>
+      </div>
 
-      {ot && ot.alerts.length > 0 && (
-        <div
-          className={`card border-l-4 ${
-            ot.alerts.some((a) => a.level === "danger")
-              ? "border-red-500"
-              : "border-orange-500"
-          }`}
-        >
-          <h3 className="flex items-center gap-2 font-medium mb-2 text-sm">
-            <TriangleAlert
-              className={`h-4 w-4 ${
-                ot.alerts.some((a) => a.level === "danger")
-                  ? "text-red-400"
-                  : "text-orange-400"
-              }`}
-              strokeWidth={1.75}
-              aria-hidden="true"
-            />
-            Signaux d'alerte
-          </h3>
-          <ul className="space-y-1.5 text-sm">
-            {ot.alerts.map((a, i) => (
-              <li
-                key={i}
-                className={
-                  a.level === "danger" ? "text-red-300" : "text-orange-300"
-                }
-              >
-                {a.message}
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
+      <DailyBriefCard
+        data={brief}
+        loading={briefLoading}
+        secondaryAlerts={secondaryAlerts}
+      />
 
       <VolumeCard volume={volume} weeks={weekly?.weeks || []} />
 

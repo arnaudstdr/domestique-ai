@@ -16,7 +16,7 @@ import SetupTwoFactor from "./pages/SetupTwoFactor";
 import Roster from "./pages/Roster";
 import Prescribe from "./pages/Prescribe";
 import { clearViewingAthlete } from "./api/client";
-import { useMe } from "./hooks/useMe";
+import { MeProvider, useMe } from "./hooks/useMe";
 import { useViewing } from "./hooks/useViewing";
 
 function ViewingBanner({ name }: { name: string | null }) {
@@ -50,6 +50,17 @@ function ViewingBanner({ name }: { name: string | null }) {
 }
 
 function AuthenticatedLayout() {
+  // Le provider est monté au niveau de la coquille authentifiée : un seul
+  // appel `/me` partagé par l'en-tête et les pages, et un fetch frais à
+  // chaque connexion (la coquille remonte après login).
+  return (
+    <MeProvider>
+      <AuthedShell />
+    </MeProvider>
+  );
+}
+
+function AuthedShell() {
   const me = useMe();
   const viewing = useViewing();
   const isCoach = me?.role === "coach";

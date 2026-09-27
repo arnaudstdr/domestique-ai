@@ -36,9 +36,11 @@ _BRIEF_CACHE: dict[tuple[str, str, int, str], dict[str, Any]] = {}
 _BRIEF_LOCK = threading.Lock()
 
 _LLM_SYSTEM_PROMPT = (
-    "Tu es un coach d'endurance francophone. Tu dois résumer l'état du jour "
-    "d'un cycliste en une phrase concise et concrète (max 25 mots, 1 phrase). "
-    "Tu DOIS répondre en JSON strict avec une clé `summary` (string).\n\n"
+    "Tu es un coach d'endurance francophone. Tu dois produire DEUX phrases "
+    "concises pour un cycliste, en JSON strict :\n"
+    "- `summary` : l'état du jour, une phrase (max 25 mots).\n"
+    "- `tip` : un conseil actionnable pour la journée, une phrase "
+    "(max 15 mots) — sommeil, nutrition, intensité, récupération.\n\n"
     "Règles :\n"
     "- N'invente AUCUN chiffre — ne cite que ceux fournis dans le dossier.\n"
     "- Cite le TSB et la zone d'état seulement quand pertinent.\n"
@@ -103,6 +105,64 @@ def _select_primary_alert(
     return None
 
 
+def _collect_sleep_history(today: _dt.date, ctx: AthleteContext, days: int = 7) -> list[dict[str, Any]]:
+    """Derniers points de sommeil (date + heures) pour la mini-barre du hero.
+
+    Best-effort : renvoie une liste vide si la table est absente ou vide. Les
+    jours sans sommeil sont conservés avec ``hours=None`` pour garder l'axe
+    temporel continu côté UI.
+    """
+    try:
+        from domestique_ai.processing.morning_metrics import fetch_morning_history
+
+        history = fetch_morning_history(days=days, db_path=ctx.db_path)
+    except Exception:  # noqa: BLE001
+        log.debug("Échec sleep history", exc_info=True)
+        return []
+    points: list[dict[str, Any]] = []
+    for entry in history[-days:]:
+        hours = entry.get("sleep_hours")
+        points.append(
+            {
+                "date": entry.get("date"),
+                "hours": round(float(hours), 1) if hours is not None else None,
+            }
+        )
+    return points
+
+
+def _collect_week_tss(today: _dt.date, ctx: AthleteContext) -> dict[str, Any]:
+    """TSS planifié vs réalisé de la semaine courante (lundi → dimanche).
+
+    Best-effort : ``None`` des deux côtés si aucun plan actif. Réutilise la
+    compliance existante pour rester cohérent avec la revue hebdo.
+    """
+    try:
+        from domestique_ai.llm.plan_storage import list_decisions, load_active_plan
+        from domestique_ai.processing.analyzer import fetch_activities_from_db
+        from domestique_ai.processing.compliance import compute_week_compliance
+
+        plan_meta = load_active_plan(ctx.db_path)
+        if plan_meta is None:
+            return {"week_tss_planned": None, "week_tss_done": None}
+        plan_id, workouts = plan_meta
+        decisions = list_decisions(plan_id, db_path=ctx.db_path)
+        monday = today - _dt.timedelta(days=today.weekday())
+        report = compute_week_compliance(
+            workouts,
+            fetch_activities_from_db(ctx=ctx),
+            week_start=monday,
+            decisions=decisions,
+        )
+        return {
+            "week_tss_planned": report.get("planned_tss"),
+            "week_tss_done": report.get("realized_tss"),
+        }
+    except Exception:  # noqa: BLE001
+        log.debug("Échec week TSS", exc_info=True)
+        return {"week_tss_planned": None, "week_tss_done": None}
+
+
 def _collect_signals(today: _dt.date, ctx: AthleteContext) -> dict[str, Any]:
     """Construit le dossier de signaux : TSB, séance, alerte. Best-effort, ne lève pas."""
     workout = propose_workout_today(today=today, ctx=ctx)
@@ -121,8 +181,11 @@ def _collect_signals(today: _dt.date, ctx: AthleteContext) -> dict[str, Any]:
 
     tsb = workout.get("tsb")
     tsb_zone = workout.get("tsb_zone")
-    # Quand jour off, propose_workout_today n'expose pas tsb. On le recalcule
-    # à partir des signaux disponibles si possible.
+    # `propose_workout_today` expose CTL/ATL dans ses signaux, jamais au top
+    # level. Sur jour off (pas de séance), on recalcule la grille ici.
+    wsignals = workout.get("signals") or {}
+    ctl = wsignals.get("ctl")
+    atl = wsignals.get("atl")
     if tsb is None:
         from domestique_ai.processing.analyzer import (
             calculate_ctl_atl_tsb,
@@ -131,17 +194,26 @@ def _collect_signals(today: _dt.date, ctx: AthleteContext) -> dict[str, Any]:
 
         curves = calculate_ctl_atl_tsb(fetch_activities_from_db(ctx=ctx), end_date=today)
         if curves:
-            tsb = float(curves[-1]["TSB"])
+            last = curves[-1]
+            tsb = float(last["TSB"])
+            ctl = float(last.get("CTL", 0.0))
+            atl = float(last.get("ATL", 0.0))
             from domestique_ai.processing.today import _tsb_zone_label
 
             tsb_zone = _tsb_zone_label(tsb)
+
+    week_tss = _collect_week_tss(today, ctx)
 
     return {
         "today": today.isoformat(),
         "tsb": round(float(tsb), 1) if tsb is not None else None,
         "tsb_zone": tsb_zone,
+        "ctl": round(float(ctl), 1) if ctl is not None else None,
+        "atl": round(float(atl), 1) if atl is not None else None,
         "primary_alert": primary_alert,
         "workout": workout,
+        "sleep_history": _collect_sleep_history(today, ctx),
+        **week_tss,
     }
 
 
@@ -170,8 +242,27 @@ def _build_fallback_summary(signals: dict[str, Any]) -> str:
     return base
 
 
-def _generate_summary_with_llm(signals: dict[str, Any]) -> str | None:
-    """Demande au LLM une phrase courte. Retourne ``None`` si échec."""
+def _build_fallback_tip(signals: dict[str, Any]) -> str:
+    """Conseil template — utilisé si le LLM n'a pas produit de ``tip`` exploitable."""
+    alert = signals.get("primary_alert")
+    if alert:
+        return "Priorise la récupération aujourd'hui : hydratation et sommeil."
+    workout = signals.get("workout") or {}
+    if workout.get("rest_day"):
+        return "Jour off : marche douce et étirements, sans chercher la performance."
+    w = workout.get("workout") or {}
+    kind = w.get("kind")
+    if kind == "recovery":
+        return "Reste en Z1, l'objectif est de faciliter la récupération."
+    if kind == "intervals":
+        return "Échauffement progressif, bois régulièrement, soigne la sortie de séance."
+    if kind in ("endurance", "long"):
+        return "Tiens un effort régulier et mange toutes les 45 min sur la sortie."
+    return "Soigne l'échauffement et mélange les allures sans forcer."
+
+
+def _generate_brief_with_llm(signals: dict[str, Any]) -> dict[str, str] | None:
+    """Demande au LLM une phrase d'état + un conseil. ``None`` si échec."""
     payload = json.dumps(signals, ensure_ascii=False, default=str)
     messages = [
         {"role": "system", "content": _LLM_SYSTEM_PROMPT},
@@ -179,7 +270,7 @@ def _generate_summary_with_llm(signals: dict[str, Any]) -> str | None:
             "role": "user",
             "content": (
                 "Voici les signaux du jour. Renvoie UNIQUEMENT le JSON "
-                '{"summary": "..."} avec une phrase de synthèse.\n\n' + payload
+                '{"summary": "...", "tip": "..."}.\n\n' + payload
             ),
         },
     ]
@@ -189,7 +280,11 @@ def _generate_summary_with_llm(signals: dict[str, Any]) -> str | None:
     summary = response.get("summary")
     if not isinstance(summary, str) or not summary.strip():
         return None
-    return summary.strip()
+    tip = response.get("tip")
+    result = {"summary": summary.strip()}
+    if isinstance(tip, str) and tip.strip():
+        result["tip"] = tip.strip()
+    return result
 
 
 def _workout_to_brief(workout: dict[str, Any]) -> dict[str, Any]:
@@ -239,10 +334,16 @@ def build_daily_brief(
     ``{
         "date": "YYYY-MM-DD",
         "summary": "Phrase de synthèse",
+        "coach_tip": "Conseil du jour" | None,
         "tsb": float | None,
         "tsb_zone": str | None,
+        "ctl": float | None,
+        "atl": float | None,
         "primary_alert": {"type", "severity", "message"} | None,
         "today_workout": {"rest_day", "kind", "duration_min", "name", "reason"},
+        "sleep_history": [{"date", "hours"}],
+        "week_tss_planned": float | None,
+        "week_tss_done": float | None,
         "source": "cache" | "llm" | "fallback",
       }``
 
@@ -270,21 +371,32 @@ def build_daily_brief(
             return {**cached, "source": "cache"}
 
     summary: str | None = None
+    tip: str | None = None
     source = "fallback"
     if use_llm:
-        summary = _generate_summary_with_llm(signals)
-        if summary:
+        generated = _generate_brief_with_llm(signals)
+        if generated:
+            summary = generated["summary"]
+            tip = generated.get("tip")
             source = "llm"
     if summary is None:
         summary = _build_fallback_summary(signals)
+    if tip is None:
+        tip = _build_fallback_tip(signals)
 
     payload = {
         "date": target.isoformat(),
         "summary": summary,
+        "coach_tip": tip,
         "tsb": signals.get("tsb"),
         "tsb_zone": signals.get("tsb_zone"),
+        "ctl": signals.get("ctl"),
+        "atl": signals.get("atl"),
         "primary_alert": signals.get("primary_alert"),
         "today_workout": _workout_to_brief(signals.get("workout") or {}),
+        "sleep_history": signals.get("sleep_history") or [],
+        "week_tss_planned": signals.get("week_tss_planned"),
+        "week_tss_done": signals.get("week_tss_done"),
         "source": source,
     }
     # Check du matin : décision go / alléger / repos répercutée dans le plan,

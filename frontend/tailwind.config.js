@@ -43,9 +43,19 @@ export default {
           from: { opacity: "0", transform: "translateY(10px)" },
           to: { opacity: "1", transform: "none" },
         },
+        "coach-halo": {
+          "0%, 100%": { opacity: "0.35", transform: "scale(1)" },
+          "50%": { opacity: "0.6", transform: "scale(1.12)" },
+        },
+        "alert-pulse": {
+          "0%, 100%": { opacity: "1" },
+          "50%": { opacity: "0.55" },
+        },
       },
       animation: {
         rise: "rise 0.5s cubic-bezier(0.22, 1, 0.36, 1) both",
+        "coach-halo": "coach-halo 3.2s ease-in-out infinite",
+        "alert-pulse": "alert-pulse 1.8s ease-in-out infinite",
       },
     },
   },

@@ -334,16 +334,19 @@ Coach qui s'exprime sans être interpellé, en deux étages d'intrusion croissan
 
 **Palier 1 — Briefing quotidien.** `GET /api/coach/daily-brief` agrège :
 
-- TSB courant + zone (Frais / Optimal / Fatigué / Surentraîné).
+- TSB courant + zone (Frais / Optimal / Fatigué / Surentraîné) + CTL/ATL (repris des signaux de `propose_workout_today`, recalculés sur jour off).
 - Séance suggérée du jour (via `propose_workout_today`).
 - Alerte la plus saillante (priorité TSB chronique / strain > monotony / saut volume > dérive matinale).
-- Phrase de synthèse générée par LLM (~25 mots, JSON strict, mode `chat_structured_sync`) avec **fallback déterministe** si Ollama injoignable.
+- **Enrichissements hero** : `sleep_history` (7 j, `StepPoint` `{date, hours}`), `week_tss_planned`/`week_tss_done` (compliance de la semaine courante via `compute_week_compliance`), et `coach_tip` (2ᵉ phrase actionnable).
+- Phrase de synthèse **+ conseil** générés par LLM (~25 mots / ~15 mots, JSON strict `{summary, tip}`, mode `chat_structured_sync`) avec **fallbacks déterministes** (`_build_fallback_summary` / `_build_fallback_tip`) si Ollama injoignable — un `coach_tip` n'est jamais vide.
 
-Cache en mémoire avec clé `(date_iso, round(tsb/5), sha1(alerts_sorted))` — un seul appel LLM par jour et par état même si le Dashboard est rouvert. Le cache des jours antérieurs est purgé au passage d'une nouvelle journée. Composant frontal : `DailyBriefCard` en tête du Dashboard avec skeleton loader (le brief peut prendre quelques secondes au premier chargement).
+Cache en mémoire avec clé `(db_path, date_iso, round(tsb/5), sha1(alerts_sorted))` — un seul appel LLM par jour et par état même si le Dashboard est rouvert. Le cache des jours antérieurs est purgé au passage d'une nouvelle journée.
+
+Composant frontal : `DailyBriefCard` en tête du Dashboard (hero). Refonte visuelle : **anneau TSB** (`TsbGauge`, SVG animé, couleur par zone), **halo d'ambiance** teinté par l'état, **avatar coach** (`CoachAvatar`, halo pulsant), barre séance (durée + TSS estimé), **mini-barres sommeil** (`SleepBars`, repère baseline), ligne `coach_tip`, et **surface d'alerte unique** (primaire visible + secondaires dépliables — la carte « Signaux d'alerte » séparée a été supprimée). Animations gated `prefers-reduced-motion`. Le nom affiché dans la salutation vient du contexte `MeProvider` (`hooks/useMe.tsx`) — un seul appel `/me` partagé, plus de fetch par page.
 
 **Palier 2 — Injection contextuelle dans le chat.** `build_initial_messages()` dans `llm/coach.py` ajoute désormais un **message system additionnel** quand `history` est vide (nouvelle session) avec : date, TSB, séance du jour, alerte saillante. Le coach démarre informé sans avoir à appeler ses tools sur la 1re question banale (« comment ça va ? »). Sur les tours suivants, ce contexte n'est **pas** réinjecté — il vit déjà dans la conversation, inutile de gonfler le prompt. Si le builder de contexte échoue (DB vide, Ollama KO), on continue sans contexte plutôt que de bloquer le chat.
 
-**Tests** : 21 tests dans `tests/test_daily_brief.py` (sélection alerte, fallback summary, cache + invalidation par jour, build_coach_context avec/sans alerte/repos) + 4 tests d'injection dans `test_coach.py` (présence/absence selon history, robustesse au crash du builder).
+**Tests** : `tests/test_daily_brief.py` (sélection alerte, fallback summary + tip, cache + invalidation par jour, champs hero ctl/atl/week_tss/sleep_history, build_coach_context avec/sans alerte/repos) + 4 tests d'injection dans `test_coach.py` (présence/absence selon history, robustesse au crash du builder).
 
 ### Génération de plan par LLM (`llm/plan_generator.py` + `processing/plan_validator.py`)
 
