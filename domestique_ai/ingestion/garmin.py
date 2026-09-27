@@ -981,6 +981,17 @@ def sync_activities_garmin(
                         garmin_id,
                         json.dumps(details)[:400],
                     )
+                # Tracé GPS persisté au sync (l'appel détails est déjà en main) —
+                # alimente l'aperçu des cartes de la liste sans re-fetch.
+                has_polyline = (
+                    raw.get("hasPolyline")
+                    and (data.get("distance") or 0) >= _BACKFILL_MIN_DISTANCE_M
+                )
+                if has_polyline:
+                    points = _downsample_points(
+                        _polyline_from_details(details), _MAX_POLYLINE_POINTS
+                    )
+                    data["map_polyline"] = encode_polyline(points)
 
         if garmin_zones is not None and local_zones is not None:
             _log_zone_source_delta(garmin_id, garmin_zones, local_zones)

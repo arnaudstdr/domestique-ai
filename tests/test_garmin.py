@@ -584,6 +584,75 @@ def test_sync_activities_garmin_fetches_streams_when_hr_configured(tmp_path):
     assert row[1] is not None
 
 
+def _gps_summary(garmin_id: int, **overrides) -> dict:
+    summary = {
+        "activityId": garmin_id,
+        "startTimeGMT": "2026-08-30T08:12:33.0",
+        "duration": 3600,
+        "averageHR": 140.0,
+        "distance": 36616.0,
+        "hasPolyline": True,
+        "activityType": {"typeKey": "cycling"},
+    }
+    summary.update(overrides)
+    return summary
+
+
+def test_sync_persists_polyline_when_hr_configured(tmp_path):
+    db = tmp_path / "g.db"
+    init_db(db)
+    set_sync_meta(BACKFILL_FLAG, "2026-01-01", db)  # backfill one-off déjà fait
+    client = _mock_client([_gps_summary(601)], details=_modern_details())
+    inserted = sync_activities_garmin(
+        client, dt.date(2026, 8, 1), dt.date(2026, 8, 31), ctx=_ctx(db, hr_rest=60, hr_max=200)
+    )
+    assert inserted == 1
+    # Tracé persisté au sync, sans appel détails supplémentaire.
+    client.get_activity_details.assert_called_once_with(601)
+    conn = sqlite3.connect(db)
+    try:
+        row = conn.execute("SELECT map_polyline FROM activities WHERE garmin_id = 601").fetchone()
+    finally:
+        conn.close()
+    assert row[0] == encode_polyline([(48.2542, 7.4457), (48.2543, 7.4458), (48.2550, 7.4460)])
+
+
+def test_sync_skips_polyline_without_gps_or_hr(tmp_path):
+    db = tmp_path / "g.db"
+    init_db(db)
+    set_sync_meta(BACKFILL_FLAG, "2026-01-01", db)
+    # hasPolyline False → pas de tracé, et pas de HR config → pas d'appel détails.
+    client = _mock_client([_gps_summary(602, hasPolyline=False)], details=_modern_details())
+    inserted = sync_activities_garmin(
+        client, dt.date(2026, 8, 1), dt.date(2026, 8, 31), ctx=_ctx(db)
+    )
+    assert inserted == 1
+    client.get_activity_details.assert_not_called()
+    conn = sqlite3.connect(db)
+    try:
+        row = conn.execute("SELECT map_polyline FROM activities WHERE garmin_id = 602").fetchone()
+    finally:
+        conn.close()
+    assert row[0] is None
+
+
+def test_sync_skips_polyline_when_distance_below_threshold(tmp_path):
+    db = tmp_path / "g.db"
+    init_db(db)
+    set_sync_meta(BACKFILL_FLAG, "2026-01-01", db)
+    client = _mock_client([_gps_summary(603, distance=500.0)], details=_modern_details())
+    inserted = sync_activities_garmin(
+        client, dt.date(2026, 8, 1), dt.date(2026, 8, 31), ctx=_ctx(db, hr_rest=60, hr_max=200)
+    )
+    assert inserted == 1
+    conn = sqlite3.connect(db)
+    try:
+        row = conn.execute("SELECT map_polyline FROM activities WHERE garmin_id = 603").fetchone()
+    finally:
+        conn.close()
+    assert row[0] is None
+
+
 _GARMIN_HR_ZONES = [
     {"zoneNumber": 1, "secsInZone": 300.0},
     {"zoneNumber": 2, "secsInZone": 600.0},
