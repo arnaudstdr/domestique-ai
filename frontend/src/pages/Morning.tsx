@@ -26,6 +26,7 @@ import type {
   GoogleHealthStatusResponse,
 } from "../api/types";
 import MetricCard from "../components/MetricCard";
+import StatStrip from "../components/StatStrip";
 import { CHART, axisProps, legendStyle, tooltipStyle } from "../chartTheme";
 import { useToast } from "../hooks/useToast";
 
@@ -48,7 +49,6 @@ const ADVANCED_METRICS: {
   label: string;
   unit: string;
 }[] = [
-  { key: "readiness_score", label: "Readiness", unit: "/100" },
   { key: "spo2_avg_pct", label: "SpO2 moyen", unit: "%" },
   { key: "respiratory_rate_avg_bpm", label: "Freq. resp.", unit: "rpm" },
   { key: "skin_temp_delta_c", label: "Δ temp. peau", unit: "°C" },
@@ -307,47 +307,56 @@ export default function Morning() {
 
       {data && (
         <>
-          <h3 className="label-eyebrow">Métriques avancées</h3>
-          <div className="grid grid-cols-2 gap-3">
-            {ADVANCED_METRICS.map((m) => {
-              const value = latestEntry?.[m.key];
-              if (value == null) return null;
-              return (
-                <MetricCard
-                  key={m.key}
-                  label={m.label}
-                  value={`${Number(value).toFixed(m.key === "skin_temp_delta_c" ? 2 : 0)} ${m.unit}`}
-                  hint="Google Health"
-                />
-              );
-            })}
+          <div className="card space-y-3">
+            <h3 className="label-eyebrow">Métriques avancées</h3>
+            <StatStrip
+              columns="3-responsive"
+              items={ADVANCED_METRICS.map((m) => {
+                const value = latestEntry?.[m.key];
+                return {
+                  label: m.label,
+                  value:
+                    value == null
+                      ? "—"
+                      : Number(value).toFixed(m.key === "skin_temp_delta_c" ? 2 : 0),
+                  unit: m.unit || undefined,
+                };
+              })}
+            />
           </div>
 
-          {latestEntry && hasSleepStages(latestEntry) && (
-            <div className="card space-y-2">
-              <h4 className="label-eyebrow">Stades de sommeil (dernière nuit)</h4>
-              <div className="grid grid-cols-2 gap-2">
-                {SLEEP_STAGES.map((s) => {
-                  const min = latestEntry[s.key];
-                  if (min == null) return null;
-                  return (
-                    <div key={s.key} className="flex items-center justify-between rounded-lg bg-white/[0.04] px-3 py-2">
-                      <span className="flex items-center gap-2 text-sm">
-                        <span
-                          className="inline-block h-2 w-2 rounded-full"
-                          style={{ backgroundColor: s.color }}
-                        />
-                        {s.label}
-                      </span>
-                      <span className="text-sm font-medium">{formatMin(min as number)}</span>
-                    </div>
-                  );
-                })}
-              </div>
+          {latestEntry && (
+            hasSleepStages(latestEntry) || parseSleepStages(latestEntry) != null
+          ) && (
+            <div className="card space-y-3">
+              <h3 className="label-eyebrow flex items-center gap-2">
+                <BedDouble className="h-4 w-4 text-accent" strokeWidth={1.75} />
+                Sommeil (dernière nuit)
+              </h3>
+              {hasSleepStages(latestEntry) && (
+                <div className="grid grid-cols-2 gap-2">
+                  {SLEEP_STAGES.map((s) => {
+                    const min = latestEntry[s.key];
+                    return (
+                      <div key={s.key} className="flex items-center justify-between rounded-lg bg-white/[0.04] px-3 py-2">
+                        <span className="flex items-center gap-2 text-sm">
+                          <span
+                            className="inline-block h-2 w-2 rounded-full"
+                            style={{ backgroundColor: s.color }}
+                          />
+                          {s.label}
+                        </span>
+                        <span className="text-sm font-medium">
+                          {min == null ? "—" : formatMin(min as number)}
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+              <HypnogramBody entry={latestEntry} />
             </div>
           )}
-
-          {latestEntry && <SleepHypnogram entry={latestEntry} />}
 
           <SleepStackedChart history={data.history} />
 
@@ -571,20 +580,14 @@ const HYPNO_ROW_LABELS: Record<string, string> = {
   OTHER: "Autre",
 };
 
-function SleepHypnogram({ entry }: { entry: MorningEntry }) {
+function HypnogramBody({ entry }: { entry: MorningEntry }) {
   const stages = parseSleepStages(entry);
   if (!stages) {
     return (
-      <div className="card">
-        <h4 className="label-eyebrow mb-1 flex items-center gap-2">
-          <BedDouble className="h-4 w-4 text-accent" strokeWidth={1.75} />
-          Hypnogramme (dernière nuit)
-        </h4>
-        <p className="text-sm text-muted">
-          Données de stades horodatées non disponibles pour cette nuit
-          (saisie manuelle ou nuit non re-synchronisée).
-        </p>
-      </div>
+      <p className="text-sm text-muted">
+        Données de stades horodatées non disponibles pour cette nuit
+        (saisie manuelle ou nuit non re-synchronisée).
+      </p>
     );
   }
 
@@ -610,11 +613,8 @@ function SleepHypnogram({ entry }: { entry: MorningEntry }) {
   }
 
   return (
-    <div className="card space-y-2">
-      <h4 className="label-eyebrow flex items-center gap-2">
-        <BedDouble className="h-4 w-4 text-accent" strokeWidth={1.75} />
-        Hypnogramme (dernière nuit)
-      </h4>
+    <div className="space-y-2 pt-1">
+      <h4 className="label-eyebrow">Hypnogramme</h4>
       <div className="space-y-1">
         {rows.map((row) => (
           <div key={row.key} className="flex items-center gap-2">

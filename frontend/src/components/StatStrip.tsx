@@ -10,14 +10,15 @@ export interface StatItem {
 
 interface Props {
   items: StatItem[];
-  columns?: 2 | 3 | 4;
+  columns?: 2 | 3 | 4 | "3-responsive";
   className?: string;
 }
 
-const GRID_COLS: Record<number, string> = {
+const GRID_COLS: Record<2 | 3 | 4 | "3-responsive", string> = {
   2: "grid-cols-2",
   3: "grid-cols-3",
   4: "grid-cols-2 sm:grid-cols-4",
+  "3-responsive": "grid-cols-2 sm:grid-cols-3",
 };
 
 export default function StatStrip({ items, columns = 3, className = "" }: Props) {
