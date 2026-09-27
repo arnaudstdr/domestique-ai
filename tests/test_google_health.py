@@ -415,6 +415,73 @@ def test_sync_google_health_morning_metrics_writes_db(client: GoogleHealthClient
     assert entry["sleep_hours"] == 8.0
     assert entry["readiness_score"] is not None
     assert entry["sleep_score_computed"] == 1
+    assert entry["stress_score"] is not None
+    assert entry["stress_score_computed"] == 1
+
+
+def test_sync_respects_manual_stress_score(client: GoogleHealthClient, tmp_path: Path):
+    from domestique_ai.ingestion.db import init_db
+    from domestique_ai.processing.morning_metrics import save_morning_entry
+
+    db_path = tmp_path / "test.db"
+    init_db(db_path)
+    save_morning_entry(
+        "2026-05-10",
+        stress_score=88,
+        stress_score_computed=0,
+        db_path=db_path,
+    )
+
+    import datetime as dt
+
+    def side_effect(method, url, **kwargs):
+        if DATA_TYPE_DAILY_HRV in url:
+            return _mock_response(
+                {
+                    "dataPoints": [
+                        {
+                            "dataSource": {},
+                            "dailyHeartRateVariability": {
+                                "date": {"year": 2026, "month": 5, "day": 10},
+                                "averageHeartRateVariabilityMilliseconds": 60.0,
+                            },
+                        }
+                    ]
+                }
+            )
+        if DATA_TYPE_SLEEP in url:
+            return _mock_response(
+                {
+                    "dataPoints": [
+                        {
+                            "dataSource": {},
+                            "sleep": {
+                                "interval": {
+                                    "startTime": "2026-05-09T22:00:00Z",
+                                    "endTime": "2026-05-10T06:00:00Z",
+                                },
+                                "type": "STAGES",
+                                "stages": [],
+                            },
+                        }
+                    ]
+                }
+            )
+        return _mock_response({"dataPoints": []})
+
+    with patch("requests.request", side_effect=side_effect):
+        sync_google_health_morning_metrics(
+            client,
+            start_date=dt.date(2026, 5, 10),
+            end_date=dt.date(2026, 5, 10),
+            db_path=db_path,
+        )
+
+    from domestique_ai.processing.morning_metrics import fetch_morning_entry
+
+    entry = fetch_morning_entry("2026-05-10", db_path=db_path)
+    assert entry["stress_score"] == 88
+    assert entry["stress_score_computed"] == 0
 
 
 def test_sync_respects_manual_sleep_score(client: GoogleHealthClient, tmp_path: Path):

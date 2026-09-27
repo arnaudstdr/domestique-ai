@@ -293,6 +293,7 @@ export interface MorningEntry {
   active_calories: number | null;
   readiness_score: number | null;
   sleep_score_computed: number | null;
+  stress_score_computed: number | null;
   weight_kg: number | null;
 }
 

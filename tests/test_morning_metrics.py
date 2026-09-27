@@ -12,6 +12,7 @@ from domestique_ai.processing.morning_metrics import (
     METRIC_COLUMNS,
     calculate_readiness_score,
     calculate_sleep_score,
+    calculate_stress_score,
     compute_baselines,
     detect_morning_alerts,
     fetch_morning_entry,
@@ -22,6 +23,7 @@ from domestique_ai.processing.morning_metrics import (
     readiness_band,
     save_morning_entry,
     set_weight,
+    stress_band,
 )
 
 
@@ -102,6 +104,7 @@ def test_save_and_fetch_full_entry(db_path: Path):
         "readiness_score": 72,
         "sleep_score_computed": 1,
         "weight_kg": None,
+        "stress_score_computed": None,
     }
 
 
@@ -262,6 +265,88 @@ def test_readiness_band():
     assert readiness_band(40) == "LOW"
     assert readiness_band(20) == "VERY_LOW"
     assert readiness_band(None) is None
+
+
+# ---------------------------------------------------------------------------
+# Score de stress calculé
+# ---------------------------------------------------------------------------
+
+
+def _seed_autonomic(db_path: Path, days: int = 4, hrv: float = 60.0, hr: float = 48.0) -> None:
+    for i in range(days):
+        save_morning_entry(f"2026-05-0{i + 1}", hrv_ms=hrv, resting_hr=hr, db_path=db_path)
+
+
+def test_calculate_stress_score_low(db_path: Path):
+    for i, (hrv, hr) in enumerate([(60, 48)] * 4):
+        save_morning_entry(
+            f"2026-05-0{i + 1}",
+            hrv_ms=hrv,
+            resting_hr=hr,
+            steps=8000,
+            active_calories=400,
+            db_path=db_path,
+        )
+    # HRV légèrement haute, FC repos basse, bonne nuit, activité stable → faible.
+    score = calculate_stress_score(62.0, 47.0, 8.0, 85, 14.0, -0.1, 8000, 400, db_path=db_path)
+    assert score is not None
+    assert score < 40
+
+
+def test_calculate_stress_score_high(db_path: Path):
+    _seed_autonomic(db_path)
+    # HRV en chute, FC repos élevée, nuit courte/mauvaise, temp cutanée haute → élevé.
+    score = calculate_stress_score(45.0, 56.0, 5.0, 40, None, 0.6, None, None, db_path=db_path)
+    assert score is not None
+    assert score > 70
+
+
+def test_calculate_stress_score_no_data():
+    assert calculate_stress_score(None, None, None, None, None, None, None, None) is None
+
+
+def test_calculate_stress_score_redistributes_weights(db_path: Path):
+    _seed_autonomic(db_path)
+    # Aucune donnée respi / temp / exertion : le score reste calculé sur
+    # autonome + sommeil uniquement.
+    score = calculate_stress_score(60.0, 48.0, 7.5, None, None, None, None, None, db_path=db_path)
+    assert score is not None
+    assert score < 40
+
+
+def test_calculate_stress_score_sleep_only(db_path: Path):
+    # Pas de baseline autonome (une seule entrée) mais sommeil court → calculé.
+    save_morning_entry("2026-05-01", sleep_hours=5.0, db_path=db_path)
+    score = calculate_stress_score(None, None, 5.0, None, None, None, None, None, db_path=db_path)
+    assert score is not None
+    assert score > 25
+
+
+def test_stress_band():
+    assert stress_band(10) == "LOW"
+    assert stress_band(39) == "LOW"
+    assert stress_band(40) == "MODERATE"
+    assert stress_band(70) == "MODERATE"
+    assert stress_band(71) == "HIGH"
+    assert stress_band(None) is None
+
+
+def test_alerts_skip_computed_stress(db_path: Path):
+    for i, s in enumerate([30, 30, 30, 50]):
+        save_morning_entry(
+            f"2026-05-0{i + 1}", stress_score=s, stress_score_computed=1, db_path=db_path
+        )
+    alerts = detect_morning_alerts(db_path=db_path)
+    assert all(a["metric"] != "stress_score" for a in alerts)
+
+
+def test_alerts_manual_stress_triggers(db_path: Path):
+    for i, s in enumerate([30, 30, 30, 50]):
+        save_morning_entry(
+            f"2026-05-0{i + 1}", stress_score=s, stress_score_computed=0, db_path=db_path
+        )
+    alerts = detect_morning_alerts(db_path=db_path)
+    assert any(a["metric"] == "stress_score" for a in alerts)
 
 
 # ---------------------------------------------------------------------------

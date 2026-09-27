@@ -81,6 +81,7 @@ def save_morning_entry(
     active_calories: int | None = None,
     readiness_score: int | None = None,
     sleep_score_computed: int | None = None,
+    stress_score_computed: int | None = None,
     weight_kg: float | None = None,
     db_path: Path | None = None,
 ) -> bool:
@@ -107,6 +108,7 @@ def save_morning_entry(
         active_calories,
         readiness_score,
         sleep_score_computed,
+        stress_score_computed,
         weight_kg,
     )
     if all(v is None for v in (*metric_values, notes, sleep_stages)):
@@ -122,8 +124,8 @@ def save_morning_entry(
             "respiratory_rate_avg_bpm, skin_temp_delta_c, sleep_deep_min, "
             "sleep_rem_min, sleep_light_min, sleep_awake_min, sleep_stages_json, "
             "steps, active_calories, readiness_score, sleep_score_computed, "
-            "weight_kg) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+            "weight_kg, stress_score_computed) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
             "ON CONFLICT(date) DO UPDATE SET "
             "hrv_ms = excluded.hrv_ms, "
             "resting_hr = excluded.resting_hr, "
@@ -143,7 +145,8 @@ def save_morning_entry(
             "active_calories = excluded.active_calories, "
             "readiness_score = excluded.readiness_score, "
             "sleep_score_computed = excluded.sleep_score_computed, "
-            "weight_kg = excluded.weight_kg",
+            "weight_kg = excluded.weight_kg, "
+            "stress_score_computed = excluded.stress_score_computed",
             (
                 date,
                 hrv_ms,
@@ -165,6 +168,7 @@ def save_morning_entry(
                 readiness_score,
                 sleep_score_computed,
                 weight_kg,
+                stress_score_computed,
             ),
         )
         conn.commit()
@@ -187,7 +191,8 @@ def fetch_morning_entry(
             "stress_score, notes, spo2_avg_pct, respiratory_rate_avg_bpm, "
             "skin_temp_delta_c, sleep_deep_min, sleep_rem_min, sleep_light_min, "
             "sleep_awake_min, sleep_stages_json, steps, active_calories, "
-            "readiness_score, sleep_score_computed, weight_kg "
+            "readiness_score, sleep_score_computed, weight_kg, "
+            "stress_score_computed "
             "FROM morning_metrics WHERE date = ?",
             (date,),
         ).fetchone()
@@ -216,7 +221,8 @@ def fetch_morning_history(
             "stress_score, notes, spo2_avg_pct, respiratory_rate_avg_bpm, "
             "skin_temp_delta_c, sleep_deep_min, sleep_rem_min, sleep_light_min, "
             "sleep_awake_min, sleep_stages_json, steps, active_calories, "
-            "readiness_score, sleep_score_computed, weight_kg "
+            "readiness_score, sleep_score_computed, weight_kg, "
+            "stress_score_computed "
             "FROM morning_metrics ORDER BY date ASC"
         ).fetchall()
     finally:
@@ -344,6 +350,12 @@ def detect_morning_alerts(
         baseline = compute_baselines(metric, window=window, db_path=db_path)
         if not baseline.get("available"):
             continue
+        # Un stress calculé dérive des mêmes signaux (HRV/FC/sommeil) déjà
+        # alertés séparément : on n'alerte que sur une valeur saisie à la main.
+        if metric == "stress_score":
+            entry = fetch_morning_entry(baseline["latest_date"], db_path=db_path)
+            if entry is not None and entry.get("stress_score_computed") == 1:
+                continue
         direction = _ALERT_DIRECTION[metric]
         delta = baseline["delta_pct"]
         # delta * direction > 0 = écart dans le sens défavorable
@@ -383,6 +395,7 @@ def _row_to_dict(row: tuple) -> dict[str, Any]:
         "readiness_score": row[17],
         "sleep_score_computed": row[18],
         "weight_kg": row[19],
+        "stress_score_computed": row[20],
     }
 
 
@@ -534,3 +547,140 @@ def readiness_band(score: int | None) -> str | None:
     if score >= 30:
         return "LOW"
     return "VERY_LOW"
+
+
+def _autonomic_stress_component(
+    hrv_ms: float | None,
+    resting_hr: float | None,
+    db_path: Path | None,
+) -> float | None:
+    """Composante autonome (HRV + FC repos vs baseline 14 j), 0-100.
+
+    HRV sous la baseline et/ou FC repos au-dessus → stress plus élevé.
+    """
+    parts: list[float] = []
+    hrv_baseline = compute_baselines("hrv_ms", window=14, db_path=db_path)
+    if hrv_ms is not None and hrv_baseline.get("available"):
+        baseline = hrv_baseline["baseline"]
+        if baseline > 0:
+            delta_pct = (hrv_ms - baseline) / baseline * 100.0
+            parts.append(max(0.0, min(100.0, 50.0 - delta_pct)))
+    rhr_baseline = compute_baselines("resting_hr", window=14, db_path=db_path)
+    if resting_hr is not None and rhr_baseline.get("available"):
+        baseline = rhr_baseline["baseline"]
+        if baseline > 0:
+            delta_bpm = resting_hr - baseline
+            parts.append(max(0.0, min(100.0, 50.0 + delta_bpm * 6.0)))
+    if not parts:
+        return None
+    return sum(parts) / len(parts)
+
+
+def _sleep_stress_component(
+    sleep_hours: float | None,
+    sleep_score: int | None,
+) -> float | None:
+    """Composante sommeil (0-100) : nuit courte/mauvaise → stress élevé."""
+    quality: float | None = None
+    if sleep_hours is not None:
+        quality = max(0.0, min(100.0, (sleep_hours / 7.5) * 100.0))
+    if sleep_score is not None:
+        score = max(0.0, min(100.0, float(sleep_score)))
+        quality = score if quality is None else (quality + score) / 2.0
+    if quality is None:
+        return None
+    return max(0.0, min(100.0, 100.0 - quality))
+
+
+def _delta_stress_component(
+    value: float | None,
+    metric: str,
+    factor: float,
+    db_path: Path | None,
+) -> float | None:
+    """Composante dérivée d'un écart relatif vs baseline : 50 + Δ% × facteur."""
+    if value is None:
+        return None
+    baseline = compute_baselines(metric, window=14, db_path=db_path)
+    if not baseline.get("available"):
+        return None
+    base = baseline["baseline"]
+    if not base:
+        return None
+    delta_pct = (value - base) / base * 100.0
+    return max(0.0, min(100.0, 50.0 + delta_pct * factor))
+
+
+def calculate_stress_score(
+    hrv_ms: float | None,
+    resting_hr: float | None,
+    sleep_hours: float | None,
+    sleep_score: int | None,
+    respiratory_rate_avg_bpm: float | None,
+    skin_temp_delta_c: float | None,
+    steps: int | None,
+    active_calories: int | None,
+    db_path: Path | None = None,
+) -> int | None:
+    """Calcule un score de stress maison (0-100, haut = stress élevé).
+
+    Google Health n'expose ni score de stress ni réponse électrodermale (EDA) :
+    ce score est un **proxy** bâti sur les signaux réellement ingérés. Il
+    complète le readiness (qui n'utilise que HRV/FC repos/sommeil) en intégrant
+    fréquence respiratoire, Δ température cutanée et exertion.
+
+    Composantes (poids, redistribués sur celles disponibles) :
+    - 35 % autonome : HRV et FC repos vs baseline 14 j.
+    - 25 % sommeil : durée (cible 7h30) + score de sommeil.
+    - 15 % fréquence respiratoire vs baseline.
+    - 10 % Δ température cutanée.
+    - 15 % exertion : pas + calories actives vs baseline.
+
+    Retourne ``None`` si ni signal autonome ni sommeil n'est exploitable.
+    """
+    components: list[tuple[float, float]] = []
+
+    autonomic = _autonomic_stress_component(hrv_ms, resting_hr, db_path)
+    if autonomic is not None:
+        components.append((0.35, autonomic))
+
+    sleep = _sleep_stress_component(sleep_hours, sleep_score)
+    if sleep is not None:
+        components.append((0.25, sleep))
+
+    if autonomic is None and sleep is None:
+        return None
+
+    respiratory = _delta_stress_component(
+        respiratory_rate_avg_bpm, "respiratory_rate_avg_bpm", 2.0, db_path
+    )
+    if respiratory is not None:
+        components.append((0.15, respiratory))
+
+    if skin_temp_delta_c is not None:
+        components.append((0.10, max(0.0, min(100.0, 50.0 + skin_temp_delta_c * 100.0))))
+
+    exertion_parts: list[float] = []
+    for value, metric in ((steps, "steps"), (active_calories, "active_calories")):
+        comp = _delta_stress_component(value, metric, 0.5, db_path)
+        if comp is not None:
+            exertion_parts.append(comp)
+    if exertion_parts:
+        components.append((0.15, sum(exertion_parts) / len(exertion_parts)))
+
+    total_weight = sum(w for w, _ in components)
+    if total_weight <= 0:
+        return None
+    score = sum(w * v for w, v in components) / total_weight
+    return int(round(max(0.0, min(100.0, score))))
+
+
+def stress_band(score: int | None) -> str | None:
+    """Qualificatif qualitatif du score de stress."""
+    if score is None:
+        return None
+    if score < 40:
+        return "LOW"
+    if score <= 70:
+        return "MODERATE"
+    return "HIGH"

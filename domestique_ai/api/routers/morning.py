@@ -100,6 +100,7 @@ def post_morning(
         # Si l'utilisateur saisit un sleep_score manuel, on le marque comme tel
         # pour ne pas l'écraser lors du prochain sync Google Health.
         sleep_score_computed=0 if payload.sleep_score is not None else None,
+        stress_score_computed=0 if payload.stress_score is not None else None,
         weight_kg=payload.weight_kg,
         db_path=ctx.db_path,
     )

@@ -339,6 +339,7 @@ class MorningEntry(BaseModel):
     active_calories: int | None = None
     readiness_score: int | None = None
     sleep_score_computed: int | None = None
+    stress_score_computed: int | None = None
     weight_kg: float | None = None
 
 

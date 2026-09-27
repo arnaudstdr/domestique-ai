@@ -554,6 +554,11 @@ exigence de clé, fenêtre 2 semaines, flux désactivé sans clé).
 
 ## Conventions
 
+- **⚠️ Outils `rtk` (proxy token-killer)** : ne jamais préfixer `pytest`, `ruff`
+  ou `vitest` par `rtk` (ex. `rtk pytest …` → « No tests collected »). De plus,
+  `source .venv/bin/activate` n'expose pas toujours `pytest` comme binaire dans
+  le shell de l'agent. **Toujours lancer les tests/lint via le Python du venv** :
+  `.venv/bin/python -m pytest …` et `.venv/bin/python -m ruff check .`.
 - **Ruff** : `line-length = 100`, ignore `E501`. Règles activées : `E, F, I, UP, B, SIM` (voir `pyproject.toml`).
 - **Imports** : `from __future__ import annotations` en tête de chaque module Python.
 - **Fixtures de test** : utiliser `tmp_path` + `init_db(tmp_path/"x.db")` pour isoler la base. Neutraliser les vars HR via `monkeypatch.delenv("STRAVA_HR_REST", ...)` quand un test cible explicitement la branche TSS power (sinon la config locale du dev peut faire basculer le calcul).

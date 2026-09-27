@@ -296,6 +296,7 @@ def get_morning_trends(days: int = 30, *, ctx: AthleteContext | None = None) -> 
         detect_morning_alerts,
         fetch_morning_history,
         readiness_band,
+        stress_band,
     )
 
     ctx = ctx or context_from_env()
@@ -328,6 +329,8 @@ def get_morning_trends(days: int = 30, *, ctx: AthleteContext | None = None) -> 
     advanced_latest = {
         "readiness_score": latest.get("readiness_score"),
         "readiness_band": readiness_band(latest.get("readiness_score")),
+        "stress_score": latest.get("stress_score"),
+        "stress_band": stress_band(latest.get("stress_score")),
         "spo2_avg_pct": latest.get("spo2_avg_pct"),
         "respiratory_rate_avg_bpm": latest.get("respiratory_rate_avg_bpm"),
         "skin_temp_delta_c": latest.get("skin_temp_delta_c"),
@@ -342,6 +345,7 @@ def get_morning_trends(days: int = 30, *, ctx: AthleteContext | None = None) -> 
             "awake": latest.get("sleep_awake_min"),
         },
         "sleep_score_computed": latest.get("sleep_score_computed"),
+        "stress_score_computed": latest.get("stress_score_computed"),
     }
 
     return {

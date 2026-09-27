@@ -232,6 +232,7 @@ def init_db(db_path: Path | None = None, *, ctx: AthleteContext | None = None) -
                 active_calories INTEGER,
                 readiness_score INTEGER,
                 sleep_score_computed INTEGER,
+                stress_score_computed INTEGER,
                 weight_kg REAL
             )
         """)
@@ -248,6 +249,7 @@ def init_db(db_path: Path | None = None, *, ctx: AthleteContext | None = None) -
             ("active_calories", "INTEGER"),
             ("readiness_score", "INTEGER"),
             ("sleep_score_computed", "INTEGER"),
+            ("stress_score_computed", "INTEGER"),
             ("weight_kg", "REAL"),
         ):
             _ensure_column(conn, "morning_metrics", col, ddl)

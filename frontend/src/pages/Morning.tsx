@@ -258,6 +258,26 @@ export default function Morning() {
         </div>
       )}
 
+      {latestEntry && latestEntry.stress_score != null && (
+        <div className="card">
+          <div className="flex items-center justify-between">
+            <span className="inline-flex items-center gap-2 text-sm text-muted">
+              Stress aujourd'hui
+              {latestEntry.stress_score_computed === 1 && (
+                <span className="rounded-full bg-accent/10 px-2 py-0.5 text-[10px] font-medium text-accent">
+                  calculé
+                </span>
+              )}
+            </span>
+            <StressBadge score={latestEntry.stress_score} />
+          </div>
+          <div className="mt-1 font-display text-3xl font-bold">
+            {latestEntry.stress_score}
+            <span className="text-base font-normal text-muted">/100</span>
+          </div>
+        </div>
+      )}
+
       <div className="card space-y-3">
         <h2 className="flex items-center gap-2 font-display text-lg font-bold tracking-tight">
           <Sunrise className="h-5 w-5 text-accent" strokeWidth={1.75} aria-hidden="true" />
@@ -440,6 +460,31 @@ function ReadinessBadge({ score }: { score: number }) {
             : tone === "accent"
               ? "bg-accent/10 text-accent"
               : "bg-emerald-500/10 text-emerald-500"
+      }`}
+    >
+      {label}
+    </span>
+  );
+}
+
+function StressBadge({ score }: { score: number }) {
+  let label = "Faible";
+  let tone: "danger" | "warning" | "good" = "good";
+  if (score > 70) {
+    label = "Élevé";
+    tone = "danger";
+  } else if (score >= 40) {
+    label = "Modéré";
+    tone = "warning";
+  }
+  return (
+    <span
+      className={`rounded-full px-2 py-0.5 text-xs font-medium ${
+        tone === "danger"
+          ? "bg-red-500/10 text-red-500"
+          : tone === "warning"
+            ? "bg-amber-500/10 text-amber-500"
+            : "bg-emerald-500/10 text-emerald-500"
       }`}
     >
       {label}

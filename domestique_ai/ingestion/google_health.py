@@ -979,6 +979,7 @@ def sync_google_health_morning_metrics(
     from domestique_ai.processing.morning_metrics import (
         calculate_readiness_score,
         calculate_sleep_score,
+        calculate_stress_score,
         fetch_morning_entry,
         save_morning_entry,
     )
@@ -1038,6 +1039,30 @@ def sync_google_health_morning_metrics(
             db_path=db_path,
         )
 
+        # Une valeur de stress saisie à la main (flag != 1, y compris les lignes
+        # historiques au flag NULL) n'est jamais écrasée par le score calculé.
+        manual_stress_score = (
+            existing is not None
+            and existing.get("stress_score") is not None
+            and existing.get("stress_score_computed") != 1
+        )
+        if manual_stress_score:
+            stress_score = existing.get("stress_score")
+            stress_score_computed = 0
+        else:
+            stress_score = calculate_stress_score(
+                data.get("hrv_ms"),
+                data.get("resting_hr"),
+                data.get("sleep_hours"),
+                sleep_score,
+                data.get("respiratory_rate_avg_bpm"),
+                data.get("skin_temp_delta_c"),
+                data.get("steps"),
+                data.get("active_calories"),
+                db_path=db_path,
+            )
+            stress_score_computed = 1 if stress_score is not None else None
+
         kwargs: dict[str, Any] = {
             "date": date_str,
             "hrv_ms": data.get("hrv_ms"),
@@ -1056,6 +1081,8 @@ def sync_google_health_morning_metrics(
             "steps": data.get("steps"),
             "active_calories": data.get("active_calories"),
             "readiness_score": readiness_score,
+            "stress_score": stress_score,
+            "stress_score_computed": stress_score_computed,
             "weight_kg": data.get("weight_kg"),
         }
 
@@ -1065,10 +1092,11 @@ def sync_google_health_morning_metrics(
             skipped.append(date_str)
             continue
 
-        # Conserve les champs manuels existants (stress, notes, poids) si présents
+        # Conserve les champs manuels existants (notes, poids) si présents
         # et non fournis par la source auto (ex. balance absente ce jour-là).
+        # Le stress est traité plus haut (calculé ou préservé selon le flag).
         if existing:
-            for manual_field in ("stress_score", "notes", "weight_kg"):
+            for manual_field in ("notes", "weight_kg"):
                 if (
                     existing.get(manual_field) is not None
                     and metric_values.get(manual_field) is None
