@@ -228,6 +228,60 @@ def test_reconnect_link_forbidden_for_athlete(client: TestClient) -> None:
     assert r.status_code == 403
 
 
+# ---- Photo de profil --------------------------------------------------------
+
+_JPEG = b"\xff\xd8\xff\xe0" + b"\x00" * 16
+
+
+def test_avatar_upload_and_clear(client: TestClient) -> None:
+    session_token = _invite_and_accept(client, role="athlete")
+    # Pas de photo au départ.
+    assert client.get("/api/auth/me", headers=_bearer(session_token)).json()["avatar_url"] is None
+
+    up = client.put(
+        "/api/auth/me/avatar",
+        headers=_bearer(session_token),
+        files={"file": ("a.jpg", _JPEG, "image/jpeg")},
+    )
+    assert up.status_code == 200, up.text
+    assert up.json()["avatar_url"].startswith("data:image/jpeg;base64,")
+    assert client.get("/api/auth/me", headers=_bearer(session_token)).json()[
+        "avatar_url"
+    ] == up.json()["avatar_url"]
+
+    d = client.delete("/api/auth/me/avatar", headers=_bearer(session_token))
+    assert d.status_code == 204
+    assert client.get("/api/auth/me", headers=_bearer(session_token)).json()["avatar_url"] is None
+
+
+def test_avatar_rejects_non_image(client: TestClient) -> None:
+    session_token = _invite_and_accept(client, role="athlete")
+    r = client.put(
+        "/api/auth/me/avatar",
+        headers=_bearer(session_token),
+        files={"file": ("x.txt", b"not an image", "text/plain")},
+    )
+    assert r.status_code == 422
+
+
+def test_avatar_rejects_oversize(client: TestClient) -> None:
+    session_token = _invite_and_accept(client, role="athlete")
+    big = b"\xff\xd8\xff\xe0" + b"\x00" * (500 * 1024)
+    r = client.put(
+        "/api/auth/me/avatar",
+        headers=_bearer(session_token),
+        files={"file": ("a.jpg", big, "image/jpeg")},
+    )
+    assert r.status_code == 422
+
+
+def test_avatar_requires_auth(client: TestClient) -> None:
+    assert (
+        client.put("/api/auth/me/avatar", files={"file": ("a.jpg", _JPEG, "image/jpeg")}).status_code
+        == 401
+    )
+
+
 # ---- Mode auth-off (dev) ----------------------------------------------------
 
 

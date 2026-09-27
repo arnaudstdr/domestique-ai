@@ -463,6 +463,16 @@ export const api = {
   },
   auth: {
     me: () => http<MeResponse>(`/api/auth/me`),
+    uploadAvatar: (file: File) => {
+      const form = new FormData();
+      form.append("file", file);
+      return http<{ avatar_url: string | null }>(`/api/auth/me/avatar`, {
+        method: "PUT",
+        body: form,
+      });
+    },
+    removeAvatar: () =>
+      http<void>(`/api/auth/me/avatar`, { method: "DELETE" }),
     login: (email: string, password: string) =>
       http<LoginResponse>(`/api/auth/login`, {
         method: "POST",

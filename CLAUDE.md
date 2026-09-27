@@ -285,6 +285,32 @@ historique orpheline `weight_history` n'est plus utilisée.
   champ + W/kg), Santé (formulaire + graphes), détail d'activité
   (« Poids/puissance », puissance moy. / poids actuel).
 
+### Photo de profil (avatar)
+
+Métadonnée d'identité du compte (pas du profil athlète YAML) : colonne
+`avatar TEXT` sur `users` de `platform.db` (migration `_ensure_column`),
+stockant une **data URL** `data:image/<type>;base64,…`, `NULL` par défaut.
+Écrite par `set_user_avatar()` et exposée par `_user_dict` (donc
+`get_current_user`).
+
+- **Upload** : `PUT /api/auth/me/avatar` (multipart) — l'image est
+  redimensionnée **côté navigateur** (`frontend/src/lib/image.ts`,
+  `resizeImageToSquare` : recadrage carré centré 256 px → JPEG q0.85) avant
+  envoi. Pas de Pillow côté serveur : le router valide la taille (≤ 500 Ko) et
+  les **magic bytes** (JPEG/PNG/GIF/WebP), jamais le Content-Type client.
+  `DELETE /api/auth/me/avatar` efface.
+- **Exposition** : `MeResponse.avatar_url` (en-tête, `MeProvider`) et
+  `AthleteSummary.avatar_url` (liste du roster coach, `GET /api/auth/athletes`).
+  Affichage direct en `<img src>` (pas d'endpoint image ni montage statique —
+  une balise `<img>` ne peut pas porter le Bearer).
+- **UI** : section « Photo de profil » en tête de `/profil` (`Profil.tsx`,
+  `AvatarSection`) ; l'en-tête (`App.tsx`) remplace l'icône `UserRound` par la
+  miniature quand une photo existe ; `Roster.tsx` affiche l'avatar (ou les
+  initiales) de chaque athlète.
+- **Édition = compte courant** : les routes `/api/auth/*` ignorent le
+  paramètre `?athlete=` (`withAthlete` les exclut) — un coach en consultation
+  n'édite jamais la photo de l'athlète.
+
 ### Coach LLM — `domestique_ai/llm/`
 
 Coach conversationnel via Ollama (modèle par défaut `gemma4:31b-cloud`, override `OLLAMA_MODEL`). Branché sur le dashboard dans l'onglet « Coach ».

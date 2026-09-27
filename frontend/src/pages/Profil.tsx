@@ -1,12 +1,13 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   CalendarDays,
+  Camera,
   Dna,
   Link2,
   LogOut,
   Save,
-  Settings,
   ShieldCheck,
+  Trash2,
   UserRound,
 } from "lucide-react";
 import { api, ApiError, clearApiToken } from "../api/client";
@@ -20,6 +21,8 @@ import type {
 } from "../api/types";
 import MemoryPanel from "../components/MemoryPanel";
 import { useToast } from "../hooks/useToast";
+import { useMe, useMeRefresh } from "../hooks/useMe";
+import { resizeImageToSquare } from "../lib/image";
 
 const WEEKDAYS: { key: WeekdayName; label: string }[] = [
   { key: "monday", label: "Lundi" },
@@ -60,7 +63,7 @@ export default function Profil() {
     <div className="stagger space-y-4">
       <header>
         <h2 className="flex items-center gap-2 font-display text-2xl font-extrabold tracking-tight text-gray-50">
-          <Settings className="h-6 w-6 text-accent" strokeWidth={1.75} aria-hidden="true" />
+          <UserRound className="h-6 w-6 text-accent" strokeWidth={1.75} aria-hidden="true" />
           Profil
         </h2>
         <p className="text-xs text-muted">
@@ -68,6 +71,7 @@ export default function Profil() {
           disponibilité hebdomadaire. Chacune se sauvegarde indépendamment.
         </p>
       </header>
+      <AvatarSection />
       <GarminSection />
       <ProfileSection />
       <AvailabilitySection />
@@ -75,6 +79,106 @@ export default function Profil() {
       <AccountSection />
       <SecuritySection />
     </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// 0. Photo de profil
+// ---------------------------------------------------------------------------
+
+function AvatarSection() {
+  const me = useMe();
+  const refreshMe = useMeRefresh();
+  const [busy, setBusy] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const { push } = useToast();
+
+  async function onFile(event: React.ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    // Réinitialise l'input pour permettre de re-choisir le même fichier.
+    event.target.value = "";
+    if (!file) return;
+    setBusy(true);
+    try {
+      const blob = await resizeImageToSquare(file);
+      const upload = new File([blob], "avatar.jpg", { type: "image/jpeg" });
+      await api.auth.uploadAvatar(upload);
+      refreshMe();
+      push("Photo de profil mise à jour.", "success");
+    } catch (err) {
+      const msg = err instanceof ApiError ? err.message : String(err);
+      push(`Photo : ${msg}`, "error");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function remove() {
+    setBusy(true);
+    try {
+      await api.auth.removeAvatar();
+      refreshMe();
+      push("Photo de profil supprimée.", "success");
+    } catch (err) {
+      const msg = err instanceof ApiError ? err.message : String(err);
+      push(`Photo : ${msg}`, "error");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <section className="card space-y-3">
+      <h3 className="flex items-center gap-2 text-sm font-medium text-gray-200">
+        <Camera className="h-4 w-4 text-accent" strokeWidth={1.75} aria-hidden="true" />
+        Photo de profil
+      </h3>
+      <div className="flex items-center gap-4">
+        <div className="grid h-16 w-16 shrink-0 place-items-center overflow-hidden rounded-2xl border border-white/10 bg-white/[0.04]">
+          {me?.avatar_url ? (
+            <img
+              src={me.avatar_url}
+              alt="Photo de profil"
+              className="h-full w-full object-cover"
+            />
+          ) : (
+            <UserRound className="h-7 w-7 text-muted" strokeWidth={1.5} aria-hidden="true" />
+          )}
+        </div>
+        <div className="flex min-w-0 flex-1 flex-col gap-2">
+          <input
+            ref={inputRef}
+            type="file"
+            accept="image/*"
+            className="hidden"
+            onChange={onFile}
+          />
+          <button
+            type="button"
+            onClick={() => inputRef.current?.click()}
+            disabled={busy}
+            className="btn-ghost w-full"
+          >
+            {busy ? "Traitement…" : me?.avatar_url ? "Changer la photo" : "Ajouter une photo"}
+          </button>
+          {me?.avatar_url && (
+            <button
+              type="button"
+              onClick={remove}
+              disabled={busy}
+              className="btn-ghost w-full text-red-400"
+            >
+              <Trash2 className="h-4 w-4" strokeWidth={1.75} aria-hidden="true" />
+              Retirer la photo
+            </button>
+          )}
+        </div>
+      </div>
+      <p className="text-xs text-muted">
+        L'image est recadrée en carré et redimensionnée (256 px) avant l'envoi.
+        Elle remplace l'icône profil en haut à droite.
+      </p>
+    </section>
   );
 }
 

@@ -124,6 +124,21 @@ def test_list_athletes_forbidden_for_athlete(env):
     assert c.get("/api/auth/athletes", headers=_bearer(a_sess)).status_code == 403
 
 
+def test_list_athletes_includes_avatar(env):
+    c = env["client"]
+    a_sess, a_pid = _new_athlete(c)
+    jpeg = b"\xff\xd8\xff\xe0" + b"\x00" * 16
+    up = c.put(
+        "/api/auth/me/avatar",
+        headers=_bearer(a_sess),
+        files={"file": ("a.jpg", jpeg, "image/jpeg")},
+    )
+    assert up.status_code == 200, up.text
+    roster = c.get("/api/auth/athletes", headers=_bearer(_LEGACY)).json()
+    row = next(a for a in roster if a["public_id"] == a_pid)
+    assert row["avatar_url"] == up.json()["avatar_url"]
+
+
 # --- Impersonation autorisée --------------------------------------------------
 
 

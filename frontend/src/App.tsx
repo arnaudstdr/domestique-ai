@@ -1,5 +1,5 @@
 import { Link, Navigate, Route, Routes, useNavigate } from "react-router-dom";
-import { Eye, Settings, Users, X } from "lucide-react";
+import { Eye, UserRound, Users, X } from "lucide-react";
 import BottomNav from "./components/BottomNav";
 import Dashboard from "./pages/Dashboard";
 import Activities from "./pages/Activities";
@@ -103,11 +103,20 @@ function AuthedShell() {
                 to="/profil"
                 aria-label="Profil"
                 title="Profil & paramètres"
-                className="grid h-9 w-9 place-items-center rounded-xl text-gray-300
+                className="grid h-9 w-9 place-items-center overflow-hidden rounded-xl text-gray-300
                            border border-white/[0.06] bg-white/[0.03]
                            hover:text-accent hover:border-accent/40 transition-colors"
               >
-                <Settings className="h-5 w-5" strokeWidth={1.75} aria-hidden="true" />
+                {me?.avatar_url ? (
+                  <img
+                    src={me.avatar_url}
+                    alt=""
+                    aria-hidden="true"
+                    className="h-full w-full object-cover"
+                  />
+                ) : (
+                  <UserRound className="h-5 w-5" strokeWidth={1.75} aria-hidden="true" />
+                )}
               </Link>
             )}
           </div>

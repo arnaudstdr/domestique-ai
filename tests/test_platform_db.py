@@ -266,3 +266,22 @@ def test_session_default_ttl_from_env(monkeypatch):
     monkeypatch.setenv("DOMESTIQUE_AI_SESSION_TTL_DAYS", "0")
     eternal, _ = pdb.create_session(user["id"])
     assert eternal["expires_at"] is None
+
+
+def test_set_user_avatar_roundtrip_and_clear():
+    user = pdb.create_user(role="athlete")
+    # Par défaut, aucune photo.
+    assert user["avatar"] is None
+
+    data_url = "data:image/jpeg;base64,AAAA"
+    pdb.set_user_avatar(user["id"], data_url)
+    assert pdb.get_user_by_id(user["id"])["avatar"] == data_url
+    # La liste des athlètes porte aussi l'avatar (roster coach).
+    coach = pdb.get_or_create_bootstrap_coach()
+    pdb.link_coach_athlete(coach["id"], user["id"])
+    roster = pdb.list_athletes_for_coach(coach["id"])
+    assert next(a for a in roster if a["id"] == user["id"])["avatar"] == data_url
+
+    pdb.set_user_avatar(user["id"], None)
+    assert pdb.get_user_by_id(user["id"])["avatar"] is None
+

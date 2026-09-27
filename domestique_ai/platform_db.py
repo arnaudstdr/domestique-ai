@@ -110,7 +110,8 @@ def init_platform_db(path: Path | None = None) -> None:
                 totp_enabled INTEGER NOT NULL DEFAULT 0,
                 password_changed_at TEXT,
                 failed_attempts INTEGER NOT NULL DEFAULT 0,
-                locked_until TEXT
+                locked_until TEXT,
+                avatar TEXT
             )
         """)
         conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_users_public_id ON users(public_id)")
@@ -128,6 +129,9 @@ def init_platform_db(path: Path | None = None) -> None:
         _ensure_column(conn, "users", "password_changed_at", "TEXT")
         _ensure_column(conn, "users", "failed_attempts", "INTEGER NOT NULL DEFAULT 0")
         _ensure_column(conn, "users", "locked_until", "TEXT")
+        # Photo de profil (data URL `data:image/<type>;base64,…`, redimensionnée
+        # côté client). Migration additive : ``NULL`` = aucune photo.
+        _ensure_column(conn, "users", "avatar", "TEXT")
         conn.execute(
             "CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email "
             "ON users(email) WHERE email IS NOT NULL"
@@ -226,6 +230,7 @@ def _user_dict(row: sqlite3.Row) -> dict[str, Any]:
         "email": row["email"],
         "totp_enabled": bool(row["totp_enabled"]),
         "has_password": bool(row["password_hash"]),
+        "avatar": row["avatar"],
     }
 
 
@@ -385,6 +390,16 @@ def set_password(user_id: int, password_hash: str, path: Path | None = None) -> 
             "UPDATE users SET password_hash = ?, password_changed_at = ? WHERE id = ?",
             (password_hash, _now(), user_id),
         )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def set_user_avatar(user_id: int, avatar: str | None, path: Path | None = None) -> None:
+    """Pose ou efface la photo de profil (data URL). ``None`` efface la colonne."""
+    conn = _connect(path)
+    try:
+        conn.execute("UPDATE users SET avatar = ? WHERE id = ?", (avatar, user_id))
         conn.commit()
     finally:
         conn.close()

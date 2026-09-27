@@ -6,12 +6,13 @@ clair n'est renvoyé qu'une seule fois (création d'invitation, acceptation).
 
 from __future__ import annotations
 
+import base64
 import datetime as dt
 import sqlite3
 from functools import lru_cache
 from typing import Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile, status
 from pydantic import BaseModel, Field
 
 from domestique_ai import security
@@ -41,6 +42,7 @@ from domestique_ai.platform_db import (
     revoke_session,
     set_password,
     set_totp_secret,
+    set_user_avatar,
     set_user_credentials,
     user_is_locked,
 )
@@ -77,6 +79,7 @@ class MeResponse(BaseModel):
     display_name: str | None = None
     email: str | None = None
     totp_enabled: bool = False
+    avatar_url: str | None = None
 
 
 class InvitationCreate(BaseModel):
@@ -171,6 +174,50 @@ class AthleteSummary(BaseModel):
     display_name: str | None = None
     last_activity_date: str | None = None
     n_activities: int = 0
+    avatar_url: str | None = None
+
+
+# Plafond de la photo de profil reçue (data URL incluse). Le client redimensionne
+# déjà à ~256 px (~20-30 Ko) ; ce plafond garde une marge et borne le stockage.
+_AVATAR_MAX_BYTES = 500 * 1024
+
+# Signatures des formats image acceptés (vérification des magic bytes — sans
+# Pillow, on ne se fie ni au Content-Type ni au nom de fichier du client).
+_AVATAR_MAGIC: tuple[tuple[bytes, str], ...] = (
+    (b"\xff\xd8\xff", "image/jpeg"),
+    (b"\x89PNG\r\n\x1a\n", "image/png"),
+    (b"GIF87a", "image/gif"),
+    (b"GIF89a", "image/gif"),
+)
+
+
+def _decode_avatar(upload: UploadFile) -> str:
+    """Valide un upload d'image et le convertit en data URL.
+
+    Lève 422 si le contenu est trop volumineux, vide, ou d'un format non
+    reconnu (magic bytes). Le format est déduit des octets, jamais du header
+    client. WebP (RIFF....WEBP) est aussi accepté.
+    """
+    data = upload.file.read()
+    if not data:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Fichier image vide.",
+        )
+    if len(data) > _AVATAR_MAX_BYTES:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Image trop volumineuse (500 Ko maximum).",
+        )
+    mime = next((m for sig, m in _AVATAR_MAGIC if data.startswith(sig)), None)
+    if mime is None and data.startswith(b"RIFF") and data[8:12] == b"WEBP":
+        mime = "image/webp"
+    if mime is None:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Format d'image non reconnu (JPEG, PNG, GIF ou WebP).",
+        )
+    return f"data:{mime};base64,{base64.b64encode(data).decode('ascii')}"
 
 
 def _athlete_activity_stats(db_path) -> tuple[int, str | None]:
@@ -201,7 +248,31 @@ def me(user: dict = Depends(get_current_user)) -> MeResponse:  # noqa: B008
         display_name=user.get("display_name"),
         email=user.get("email"),
         totp_enabled=bool(user.get("totp_enabled")),
+        avatar_url=user.get("avatar"),
     )
+
+
+class AvatarResponse(BaseModel):
+    avatar_url: str | None = None
+
+
+@router.put("/me/avatar", response_model=AvatarResponse)
+def put_avatar(
+    file: UploadFile = File(...),  # noqa: B008
+    user: dict = Depends(get_current_user),  # noqa: B008
+) -> AvatarResponse:
+    """Pose/remplace la photo de profil du compte courant (multipart)."""
+    avatar_url = _decode_avatar(file)
+    set_user_avatar(user["id"], avatar_url)
+    log.info("Photo de profil mise à jour pour %s", user["public_id"][:8])
+    return AvatarResponse(avatar_url=avatar_url)
+
+
+@router.delete("/me/avatar", status_code=status.HTTP_204_NO_CONTENT)
+def delete_avatar(user: dict = Depends(get_current_user)) -> None:  # noqa: B008
+    """Supprime la photo de profil du compte courant."""
+    set_user_avatar(user["id"], None)
+    log.info("Photo de profil supprimée pour %s", user["public_id"][:8])
 
 
 @lru_cache(maxsize=1)
@@ -373,6 +444,7 @@ def list_athletes(coach: dict = Depends(require_coach)) -> list[AthleteSummary]:
                 display_name=athlete.get("display_name"),
                 last_activity_date=last_date,
                 n_activities=n_activities,
+                avatar_url=athlete.get("avatar"),
             )
         )
     return out

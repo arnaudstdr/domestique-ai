@@ -43,6 +43,33 @@ function formatDate(iso: string | null): string {
   return `Dernière activité le ${day}`;
 }
 
+function initials(name: string | null): string {
+  const parts = (name || "").trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return "?";
+  const first = parts[0][0] ?? "";
+  const last = parts.length > 1 ? parts[parts.length - 1][0] ?? "" : "";
+  return (first + last).toUpperCase();
+}
+
+function AthleteAvatar({ athlete }: { athlete: AthleteSummary }) {
+  return (
+    <div className="grid h-10 w-10 shrink-0 place-items-center overflow-hidden rounded-xl border border-white/[0.08] bg-white/[0.04]">
+      {athlete.avatar_url ? (
+        <img
+          src={athlete.avatar_url}
+          alt=""
+          aria-hidden="true"
+          className="h-full w-full object-cover"
+        />
+      ) : (
+        <span className="text-xs font-semibold text-muted" aria-hidden="true">
+          {initials(athlete.display_name)}
+        </span>
+      )}
+    </div>
+  );
+}
+
 function AthletesSection() {
   const [athletes, setAthletes] = useState<AthleteSummary[] | null>(null);
   const [linking, setLinking] = useState<string | null>(null);
@@ -103,17 +130,20 @@ function AthletesSection() {
               key={a.public_id}
               className="flex items-center justify-between gap-3 rounded-xl border border-white/[0.06] bg-white/[0.03] px-3 py-2.5"
             >
-              <div className="min-w-0">
-                <p className="truncate text-sm font-medium text-gray-100">
-                  {a.display_name || "Sans nom"}
-                </p>
-                <p className="flex items-center gap-1.5 text-[11px] text-muted">
-                  <span className="inline-flex items-center gap-1">
-                    <Activity className="h-3 w-3" strokeWidth={1.75} aria-hidden="true" />
-                    {a.n_activities} act.
-                  </span>
-                </p>
-                <p className="text-[11px] text-muted">{formatDate(a.last_activity_date)}</p>
+              <div className="flex min-w-0 items-center gap-3">
+                <AthleteAvatar athlete={a} />
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-medium text-gray-100">
+                    {a.display_name || "Sans nom"}
+                  </p>
+                  <p className="flex items-center gap-1.5 text-[11px] text-muted">
+                    <span className="inline-flex items-center gap-1">
+                      <Activity className="h-3 w-3" strokeWidth={1.75} aria-hidden="true" />
+                      {a.n_activities} act.
+                    </span>
+                  </p>
+                  <p className="text-[11px] text-muted">{formatDate(a.last_activity_date)}</p>
+                </div>
               </div>
               <div className="flex shrink-0 items-center gap-1.5">
                 <button

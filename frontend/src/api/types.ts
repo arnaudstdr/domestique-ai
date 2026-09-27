@@ -593,6 +593,7 @@ export interface MeResponse {
   display_name: string | null;
   email: string | null;
   totp_enabled: boolean;
+  avatar_url: string | null;
 }
 
 export interface AcceptInviteResponse {
@@ -630,6 +631,7 @@ export interface AthleteSummary {
   display_name: string | null;
   last_activity_date: string | null;
   n_activities: number;
+  avatar_url: string | null;
 }
 
 export interface InvitationCreated {

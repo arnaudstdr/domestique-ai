@@ -63,3 +63,8 @@ export function MeProvider({ children }: { children: ReactNode }) {
 export function useMe(): MeResponse | null {
   return useContext(MeContext).me;
 }
+
+/** Force un re-fetch de `/me` (ex. après une mise à jour de la photo de profil). */
+export function useMeRefresh(): () => void {
+  return useContext(MeContext).refresh;
+}
