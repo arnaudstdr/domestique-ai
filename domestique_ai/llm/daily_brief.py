@@ -105,7 +105,9 @@ def _select_primary_alert(
     return None
 
 
-def _collect_sleep_history(today: _dt.date, ctx: AthleteContext, days: int = 7) -> list[dict[str, Any]]:
+def _collect_sleep_history(
+    today: _dt.date, ctx: AthleteContext, days: int = 7
+) -> list[dict[str, Any]]:
     """Derniers points de sommeil (date + heures) pour la mini-barre du hero.
 
     Best-effort : renvoie une liste vide si la table est absente ou vide. Les

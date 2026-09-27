@@ -245,9 +245,10 @@ def test_avatar_upload_and_clear(client: TestClient) -> None:
     )
     assert up.status_code == 200, up.text
     assert up.json()["avatar_url"].startswith("data:image/jpeg;base64,")
-    assert client.get("/api/auth/me", headers=_bearer(session_token)).json()[
-        "avatar_url"
-    ] == up.json()["avatar_url"]
+    assert (
+        client.get("/api/auth/me", headers=_bearer(session_token)).json()["avatar_url"]
+        == up.json()["avatar_url"]
+    )
 
     d = client.delete("/api/auth/me/avatar", headers=_bearer(session_token))
     assert d.status_code == 204
@@ -277,7 +278,9 @@ def test_avatar_rejects_oversize(client: TestClient) -> None:
 
 def test_avatar_requires_auth(client: TestClient) -> None:
     assert (
-        client.put("/api/auth/me/avatar", files={"file": ("a.jpg", _JPEG, "image/jpeg")}).status_code
+        client.put(
+            "/api/auth/me/avatar", files={"file": ("a.jpg", _JPEG, "image/jpeg")}
+        ).status_code
         == 401
     )
 

@@ -284,4 +284,3 @@ def test_set_user_avatar_roundtrip_and_clear():
 
     pdb.set_user_avatar(user["id"], None)
     assert pdb.get_user_by_id(user["id"])["avatar"] is None
-
