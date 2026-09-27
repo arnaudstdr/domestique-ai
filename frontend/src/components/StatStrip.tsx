@@ -5,6 +5,7 @@ export interface StatItem {
   value: string;
   unit?: string;
   hint?: string;
+  wrapHint?: boolean;
   badge?: { label: string; tone?: "accent" | "good" | "warn" | "danger" };
 }
 
@@ -44,7 +45,13 @@ export default function StatStrip({ items, columns = 3, className = "" }: Props)
             </span>
             {item.unit && <span className="text-xs text-muted">{item.unit}</span>}
           </span>
-          {item.hint && <span className="text-[11px] text-muted truncate">{item.hint}</span>}
+          {item.hint && (
+            <span
+              className={`text-[11px] text-muted ${item.wrapHint ? "whitespace-normal" : "truncate"}`}
+            >
+              {item.hint}
+            </span>
+          )}
         </div>
       ))}
     </div>

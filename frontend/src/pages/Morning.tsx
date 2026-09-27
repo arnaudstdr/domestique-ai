@@ -25,7 +25,6 @@ import type {
   MorningResponse,
   GoogleHealthStatusResponse,
 } from "../api/types";
-import MetricCard from "../components/MetricCard";
 import StatStrip from "../components/StatStrip";
 import { CHART, axisProps, legendStyle, tooltipStyle } from "../chartTheme";
 import { useToast } from "../hooks/useToast";
@@ -360,44 +359,43 @@ export default function Morning() {
 
           <SleepStackedChart history={data.history} />
 
-          <h3 className="label-eyebrow">Tendances 90 j</h3>
-          <div className="grid grid-cols-2 gap-3">
-            {MANUAL_METRICS.map((m) => {
-              const b = data.baselines[m.key];
-              if (!b || !b.available || b.latest == null) {
-                return (
-                  <MetricCard
-                    key={m.key}
-                    label={m.label}
-                    value="—"
-                    hint={b?.reason || "indisponible"}
-                  />
-                );
-              }
-              const delta = b.delta_pct ?? 0;
-              const tone =
-                m.key === "weight_kg"
-                  ? "good"
-                  : m.key === "resting_hr" || m.key === "stress_score"
-                    ? delta > 5
-                      ? "danger"
-                      : "good"
-                    : delta < -5
-                      ? "danger"
-                      : "good";
-              return (
-                <MetricCard
-                  key={m.key}
-                  label={m.label}
-                  value={`${b.latest.toFixed(1)} ${m.unit}`}
-                  hint={`vs base ${b.baseline?.toFixed(1)} ${m.unit}`}
-                  badge={{
+          <div className="card space-y-3">
+            <h3 className="label-eyebrow">Tendances 90 j</h3>
+            <StatStrip
+              columns="3-responsive"
+              items={MANUAL_METRICS.map((m) => {
+                const b = data.baselines[m.key];
+                if (!b || !b.available || b.latest == null) {
+                  return {
+                    label: m.label,
+                    value: "—",
+                    hint: b?.reason || "indisponible",
+                    wrapHint: true,
+                  };
+                }
+                const delta = b.delta_pct ?? 0;
+                const tone =
+                  m.key === "weight_kg"
+                    ? "good"
+                    : m.key === "resting_hr" || m.key === "stress_score"
+                      ? delta > 5
+                        ? "danger"
+                        : "good"
+                      : delta < -5
+                        ? "danger"
+                        : "good";
+                return {
+                  label: m.label,
+                  value: b.latest.toFixed(1),
+                  unit: m.unit || undefined,
+                  hint: `vs base ${b.baseline?.toFixed(1)} ${m.unit}`,
+                  badge: {
                     label: `${delta >= 0 ? "+" : ""}${delta.toFixed(1)}%`,
                     tone: tone as "danger" | "good",
-                  }}
-                />
-              );
-            })}
+                  },
+                };
+              })}
+            />
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
