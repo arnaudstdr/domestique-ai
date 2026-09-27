@@ -6,6 +6,7 @@ import {
   Download,
   Dumbbell,
   Library,
+  Pencil,
   RefreshCw,
   Sparkles,
   Target,
@@ -26,6 +27,7 @@ import type {
   WeeklyReviewResult,
   Workout,
 } from "../api/types";
+import ObjectiveForm from "../components/ObjectiveForm";
 import PlanCalendar from "../components/PlanCalendar";
 import { useToast } from "../hooks/useToast";
 import { useViewing } from "../hooks/useViewing";
@@ -114,6 +116,7 @@ export default function Plan() {
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [detail, setDetail] = useState<PlanDetail | null>(null);
   const [objective, setObjective] = useState<Objective | null>(null);
+  const [editingObjective, setEditingObjective] = useState(false);
   const [sessionsPerWeek, setSessionsPerWeek] = useState(4);
   const [focus, setFocus] = useState("");
   const [generating, setGenerating] = useState(false);
@@ -389,11 +392,33 @@ export default function Plan() {
   return (
     <div className="stagger space-y-4">
       <div className="card space-y-2">
-        <h2 className="flex items-center gap-2 font-display text-lg font-bold tracking-tight">
-          <Target className="h-4 w-4 text-accent" strokeWidth={1.75} aria-hidden="true" />
-          Objectif courant
-        </h2>
-        {!objective ? (
+        <div className="flex items-center justify-between gap-2">
+          <h2 className="flex items-center gap-2 font-display text-lg font-bold tracking-tight">
+            <Target className="h-4 w-4 text-accent" strokeWidth={1.75} aria-hidden="true" />
+            Objectif courant
+          </h2>
+          {!viewing && !editingObjective && (
+            <button
+              onClick={() => setEditingObjective(true)}
+              className="btn-ghost px-3 py-1.5 text-sm"
+              title="Modifier l'objectif"
+            >
+              <span className="inline-flex items-center justify-center gap-2">
+                <Pencil className="h-4 w-4" strokeWidth={1.75} aria-hidden="true" />
+                Modifier
+              </span>
+            </button>
+          )}
+        </div>
+        {editingObjective ? (
+          <ObjectiveForm
+            onSaved={(o) => {
+              setObjective(o);
+              setEditingObjective(false);
+            }}
+            onCancel={() => setEditingObjective(false)}
+          />
+        ) : !objective ? (
           <div className="text-sm text-muted">
             Aucun objectif défini. Le plan sera généré en mode « maintenance ».
             Renseignez{" "}
