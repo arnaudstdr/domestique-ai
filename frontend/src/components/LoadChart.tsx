@@ -13,20 +13,29 @@ import { CHART, axisProps, legendStyle, tooltipStyle } from "../chartTheme";
 
 interface Props {
   data: LoadPoint[];
+  embedded?: boolean;
 }
 
-export default function LoadChart({ data }: Props) {
+export default function LoadChart({ data, embedded = false }: Props) {
   if (data.length === 0) {
     return (
-      <div className="card flex h-48 items-center justify-center text-muted text-sm">
+      <div
+        className={
+          embedded
+            ? "flex h-48 items-center justify-center text-muted text-sm"
+            : "card flex h-48 items-center justify-center text-muted text-sm"
+        }
+      >
         Pas de données sur la période.
       </div>
     );
   }
   return (
-    <div className="card">
-      <h3 className="label-eyebrow mb-2">Évolution charge — CTL / ATL / TSB</h3>
-      <div className="h-64">
+    <div className={embedded ? "" : "card"}>
+      {!embedded && (
+        <h3 className="label-eyebrow mb-2">Évolution charge — CTL / ATL / TSB</h3>
+      )}
+      <div className={embedded ? "h-56" : "h-64"}>
         <ResponsiveContainer width="100%" height="100%">
           <LineChart data={data} margin={{ top: 8, right: 8, left: -16, bottom: 0 }}>
             <CartesianGrid stroke={CHART.grid} strokeDasharray="3 3" />

@@ -13,6 +13,7 @@ import { CHART, axisProps, tooltipStyle } from "../chartTheme";
 
 interface Props {
   data: WeeklyVolumeEntry[];
+  embedded?: boolean;
 }
 
 const MONTH_FR = [
@@ -29,21 +30,29 @@ function formatMonth(iso: string): string {
   return MONTH_FR[idx] ?? iso.slice(5, 7);
 }
 
-export default function WeeklyVolumeChart({ data }: Props) {
+export default function WeeklyVolumeChart({ data, embedded = false }: Props) {
   if (data.length === 0) {
     return (
-      <div className="card flex h-56 items-center justify-center text-muted text-sm">
+      <div
+        className={
+          embedded
+            ? "flex h-56 items-center justify-center text-muted text-sm"
+            : "card flex h-56 items-center justify-center text-muted text-sm"
+        }
+      >
         Pas de volumes à afficher.
       </div>
     );
   }
   const currentWeek = data[data.length - 1]?.week_starting;
   return (
-    <div className="card">
-      <h3 className="label-eyebrow mb-2">
-        Km vélo par semaine — {data.length} dernières semaines
-      </h3>
-      <div className="h-64">
+    <div className={embedded ? "" : "card"}>
+      {!embedded && (
+        <h3 className="label-eyebrow mb-2">
+          Km vélo par semaine — {data.length} dernières semaines
+        </h3>
+      )}
+      <div className={embedded ? "h-56" : "h-64"}>
         <ResponsiveContainer width="100%" height="100%">
           <AreaChart data={data} margin={{ top: 8, right: 8, left: -8, bottom: 0 }}>
             <defs>

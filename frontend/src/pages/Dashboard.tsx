@@ -14,43 +14,10 @@ import type {
   WeeklyVolumeResponse,
 } from "../api/types";
 import DailyBriefCard from "../components/DailyBriefCard";
-import LoadChart from "../components/LoadChart";
-import MetricCard from "../components/MetricCard";
-import WeeklyVolumeChart from "../components/WeeklyVolumeChart";
+import LoadCard from "../components/LoadCard";
+import VolumeCard from "../components/VolumeCard";
 import { useToast } from "../hooks/useToast";
 import { useViewing } from "../hooks/useViewing";
-
-function zoneTone(zone: string | undefined) {
-  switch (zone) {
-    case "freshness":
-      return "good" as const;
-    case "optimal":
-      return "accent" as const;
-    case "overreaching":
-      return "warn" as const;
-    case "overtraining":
-      return "danger" as const;
-    default:
-      return "accent" as const;
-  }
-}
-
-function formatKm(km: number): string {
-  return `${km.toLocaleString("fr-FR", {
-    minimumFractionDigits: 1,
-    maximumFractionDigits: 1,
-  })} km`;
-}
-
-function formatElevation(m: number): string {
-  return `${Math.round(m).toLocaleString("fr-FR")} m`;
-}
-
-function formatHours(seconds: number): string {
-  const h = Math.floor(seconds / 3600);
-  const m = Math.floor((seconds % 3600) / 60);
-  return `${h}h ${m.toString().padStart(2, "0")}`;
-}
 
 export default function Dashboard() {
   const [load, setLoad] = useState<LoadResponse | null>(null);
@@ -163,51 +130,9 @@ export default function Dashboard() {
         </div>
       )}
 
-      {volume && (
-        <div className="grid grid-cols-3 gap-3">
-          <MetricCard
-            label="Km vélo (année)"
-            value={formatKm(volume.year.distance_km)}
-            hint={formatHours(volume.year.duration_sec)}
-          />
-          <MetricCard
-            label="Km vélo (semaine)"
-            value={formatKm(volume.week.distance_km)}
-            hint={formatHours(volume.week.duration_sec)}
-          />
-          <MetricCard
-            label="D+ (semaine)"
-            value={formatElevation(volume.week.elevation_m)}
-          />
-        </div>
-      )}
+      <VolumeCard volume={volume} weeks={weekly?.weeks || []} />
 
-      <WeeklyVolumeChart data={weekly?.weeks || []} />
-
-      <div className="grid grid-cols-3 gap-3">
-        <MetricCard
-          label="CTL"
-          value={load?.current ? load.current.ctl.toFixed(1) : "—"}
-          hint="Forme (42 j)"
-        />
-        <MetricCard
-          label="ATL"
-          value={load?.current ? load.current.atl.toFixed(1) : "—"}
-          hint="Fatigue (7 j)"
-        />
-        <MetricCard
-          label="TSB"
-          value={load?.current ? load.current.tsb.toFixed(1) : "—"}
-          hint="Fraîcheur"
-          badge={
-            load?.current
-              ? { label: load.current.zone_label_fr, tone: zoneTone(load.current.zone) }
-              : undefined
-          }
-        />
-      </div>
-
-      <LoadChart data={load?.history || []} />
+      <LoadCard load={load} />
 
       <div className="flex justify-end">
         <Link

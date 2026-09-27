@@ -5,7 +5,7 @@ interface Props {
   badge?: { label: string; tone?: "accent" | "good" | "warn" | "danger" };
 }
 
-const BADGE_TONES: Record<string, string> = {
+export const BADGE_TONES: Record<string, string> = {
   accent: "bg-accent/15 text-accent",
   good: "bg-green-500/15 text-green-400",
   warn: "bg-orange-500/15 text-orange-300",
@@ -25,7 +25,7 @@ export default function MetricCard({ label, value, hint, badge }: Props) {
           </span>
         )}
       </div>
-      <span className="metric-num text-[28px] font-semibold leading-none text-gray-50">
+      <span className="metric-num text-xl sm:text-[28px] font-semibold leading-none text-gray-50 whitespace-nowrap">
         {value}
       </span>
       {hint && <span className="text-xs text-muted">{hint}</span>}
