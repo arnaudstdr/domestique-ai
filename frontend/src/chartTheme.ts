@@ -35,6 +35,11 @@ export const tooltipStyle = {
   fontSize: 12,
 } as const;
 
+// Couleur du texte des items du tooltip. Indispensable pour les <Bar> dont la
+// couleur est définie par cellule (fill dans les données) et non via la prop
+// `fill` : recharts retombe sinon sur un item noir, illisible sur fond sombre.
+export const tooltipItemStyle = { color: "#edeff3" } as const;
+
 export const legendStyle = { fontSize: 12, color: CHART.muted } as const;
 
 // Props communs aux axes (police mono pour des graduations « instrument »).

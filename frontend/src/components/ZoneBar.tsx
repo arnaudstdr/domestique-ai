@@ -8,7 +8,13 @@ import {
   YAxis,
 } from "recharts";
 
-import { CHART, ZONE_COLORS, axisProps, tooltipStyle } from "../chartTheme";
+import {
+  CHART,
+  ZONE_COLORS,
+  axisProps,
+  tooltipItemStyle,
+  tooltipStyle,
+} from "../chartTheme";
 
 interface Props {
   zones: Record<string, number>; // z1..z5 en secondes
@@ -49,6 +55,7 @@ export default function ZoneBar({ zones }: Props) {
             <Tooltip
               cursor={{ fill: "rgba(255,255,255,0.04)" }}
               contentStyle={tooltipStyle}
+              itemStyle={tooltipItemStyle}
               formatter={(v) => [`${v} min`, "Temps"]}
             />
             <Bar dataKey="minutes" radius={[0, 6, 6, 0]} />
