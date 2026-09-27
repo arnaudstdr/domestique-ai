@@ -444,7 +444,15 @@ export default function ActivityDetail() {
               value: a.elevation_loss != null ? String(Math.round(a.elevation_loss)) : "—",
               unit: "m",
             },
-            { label: "TSS", value: a.tss.toFixed(0) },
+            {
+              label: "Vitesse",
+              value: a.speed_avg_kmh != null ? a.speed_avg_kmh.toFixed(1) : "—",
+              unit: "km/h",
+              hint:
+                a.speed_max_kmh != null
+                  ? `max ${a.speed_max_kmh.toFixed(1)} km/h`
+                  : undefined,
+            },
             {
               label: "Calories",
               value: a.calories != null ? String(Math.round(a.calories)) : "—",
@@ -469,15 +477,7 @@ export default function ActivityDetail() {
               value: a.max_hr != null ? String(Math.round(a.max_hr)) : "—",
               unit: "bpm",
             },
-            {
-              label: "Vitesse",
-              value: a.speed_avg_kmh != null ? a.speed_avg_kmh.toFixed(1) : "—",
-              unit: "km/h",
-              hint:
-                a.speed_max_kmh != null
-                  ? `max ${a.speed_max_kmh.toFixed(1)} km/h`
-                  : undefined,
-            },
+            { label: "TSS", value: a.tss.toFixed(0) },
             {
               label: "Puissance",
               value: a.avg_power != null ? String(Math.round(a.avg_power)) : "—",
