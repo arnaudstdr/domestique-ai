@@ -19,8 +19,8 @@ import type {
 } from "../api/types";
 import ActivityMap from "../components/ActivityMap";
 import ChatBubble from "../components/ChatBubble";
-import MetricCard from "../components/MetricCard";
 import SimilarActivities from "../components/SimilarActivities";
+import StatStrip from "../components/StatStrip";
 import ZoneBar from "../components/ZoneBar";
 import { sportOptions } from "../components/sports";
 import { CHART, axisProps, tooltipStyle } from "../chartTheme";
@@ -279,11 +279,6 @@ export default function ActivityDetail() {
   const a = detail.activity;
   const s = streams ?? detail.streams;
 
-  const hasCadence =
-    a.cadence_avg != null || a.cadence_max != null;
-  const hasSpeed =
-    a.speed_avg_kmh != null || a.speed_max_kmh != null;
-
   return (
     <div className="stagger space-y-3">
       <button
@@ -432,84 +427,88 @@ export default function ActivityDetail() {
 
       {s.latlng && <ActivityMap latlng={s.latlng} />}
 
-      <div className="grid grid-cols-3 gap-3">
-        <MetricCard label="Distance" value={`${a.distance_km.toFixed(1)} km`} />
-        <MetricCard label="Durée" value={formatHms(a.duration_sec)} />
-        <MetricCard
-          label="D+"
-          value={a.elevation_m != null ? `${Math.round(a.elevation_m)} m` : "—"}
+      <div className="card space-y-3">
+        <h3 className="label-eyebrow">Séance</h3>
+        <StatStrip
+          columns={4}
+          items={[
+            { label: "Distance", value: a.distance_km.toFixed(1), unit: "km" },
+            { label: "Durée", value: formatHms(a.duration_sec) },
+            {
+              label: "D+",
+              value: a.elevation_m != null ? String(Math.round(a.elevation_m)) : "—",
+              unit: "m",
+            },
+            {
+              label: "D−",
+              value: a.elevation_loss != null ? String(Math.round(a.elevation_loss)) : "—",
+              unit: "m",
+            },
+            { label: "TSS", value: a.tss.toFixed(0) },
+            {
+              label: "Calories",
+              value: a.calories != null ? String(Math.round(a.calories)) : "—",
+              unit: "kcal",
+            },
+          ]}
         />
-        <MetricCard label="TSS" value={a.tss.toFixed(0)} />
-        <MetricCard
-          label="FC moy"
-          value={a.avg_hr != null ? `${Math.round(a.avg_hr)} bpm` : "—"}
+      </div>
+
+      <div className="card space-y-3">
+        <h3 className="label-eyebrow">Intensité</h3>
+        <StatStrip
+          columns={4}
+          items={[
+            {
+              label: "FC moy",
+              value: a.avg_hr != null ? String(Math.round(a.avg_hr)) : "—",
+              unit: "bpm",
+            },
+            {
+              label: "FC max",
+              value: a.max_hr != null ? String(Math.round(a.max_hr)) : "—",
+              unit: "bpm",
+            },
+            {
+              label: "Vitesse",
+              value: a.speed_avg_kmh != null ? a.speed_avg_kmh.toFixed(1) : "—",
+              unit: "km/h",
+              hint:
+                a.speed_max_kmh != null
+                  ? `max ${a.speed_max_kmh.toFixed(1)} km/h`
+                  : undefined,
+            },
+            {
+              label: "Puissance",
+              value: a.avg_power != null ? String(Math.round(a.avg_power)) : "—",
+              unit: "W",
+              hint: a.max_power != null ? `max ${Math.round(a.max_power)} W` : undefined,
+            },
+            {
+              label: "Cadence",
+              value: a.cadence_avg != null ? String(Math.round(a.cadence_avg)) : "—",
+              hint: a.cadence_max != null ? `max ${Math.round(a.cadence_max)}` : undefined,
+            },
+            {
+              label: "Poids/puiss.",
+              value:
+                a.avg_power != null && weightKg != null && weightKg > 0
+                  ? (a.avg_power / weightKg).toFixed(2)
+                  : "—",
+              unit: "W/kg",
+              hint: weightKg != null ? `poids ${weightKg.toFixed(1)} kg` : undefined,
+            },
+            {
+              label: "Température",
+              value: a.avg_temp != null ? a.avg_temp.toFixed(1) : "—",
+              unit: "°C",
+              hint:
+                a.min_temp != null && a.max_temp != null
+                  ? `${a.min_temp.toFixed(0)} → ${a.max_temp.toFixed(0)} °C`
+                  : undefined,
+            },
+          ]}
         />
-        <MetricCard
-          label="FC max"
-          value={a.max_hr != null ? `${Math.round(a.max_hr)} bpm` : "—"}
-        />
-        <MetricCard
-          label="Puissance"
-          value={a.avg_power != null ? `${Math.round(a.avg_power)} W` : "—"}
-          hint={
-            a.max_power != null
-              ? `max ${Math.round(a.max_power)} W`
-              : undefined
-          }
-        />
-        {a.avg_power != null && weightKg != null && weightKg > 0 && (
-          <MetricCard
-            label="Poids/puissance"
-            value={`${(a.avg_power / weightKg).toFixed(2)} W/kg`}
-            hint={`poids actuel ${weightKg.toFixed(1)} kg`}
-          />
-        )}
-        {hasSpeed && (
-          <MetricCard
-            label="Vitesse"
-            value={
-              a.speed_avg_kmh != null ? `${a.speed_avg_kmh.toFixed(1)} km/h` : "—"
-            }
-            hint={
-              a.speed_max_kmh != null
-                ? `max ${a.speed_max_kmh.toFixed(1)} km/h`
-                : undefined
-            }
-          />
-        )}
-        {hasCadence && (
-          <MetricCard
-            label="Cadence"
-            value={
-              a.cadence_avg != null ? `${Math.round(a.cadence_avg)}` : "—"
-            }
-            hint={
-              a.cadence_max != null
-                ? `max ${Math.round(a.cadence_max)}`
-                : undefined
-            }
-          />
-        )}
-        {a.elevation_loss != null && (
-          <MetricCard
-            label="D−"
-            value={`${Math.round(a.elevation_loss)} m`}
-          />
-        )}
-        {a.calories != null && (
-          <MetricCard label="Calories" value={`${Math.round(a.calories)} kcal`} />
-        )}
-        {a.avg_temp != null && (
-          <MetricCard
-            label="Température"
-            value={`${a.avg_temp.toFixed(1)} °C`}
-            hint={
-              a.min_temp != null && a.max_temp != null
-                ? `${a.min_temp.toFixed(0)} → ${a.max_temp.toFixed(0)} °C`
-                : undefined
-            }
-          />
-        )}
       </div>
 
       {(a.notes || a.rpe != null) && (

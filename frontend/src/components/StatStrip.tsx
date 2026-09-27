@@ -10,11 +10,19 @@ export interface StatItem {
 
 interface Props {
   items: StatItem[];
+  columns?: 2 | 3 | 4;
+  className?: string;
 }
 
-export default function StatStrip({ items }: Props) {
+const GRID_COLS: Record<number, string> = {
+  2: "grid-cols-2",
+  3: "grid-cols-3",
+  4: "grid-cols-2 sm:grid-cols-4",
+};
+
+export default function StatStrip({ items, columns = 3, className = "" }: Props) {
   return (
-    <div className="grid grid-cols-3 gap-x-3">
+    <div className={`grid ${GRID_COLS[columns]} gap-x-3 gap-y-3 ${className}`}>
       {items.map((item, i) => (
         <div key={i} className="flex min-w-0 flex-col gap-0.5">
           <div className="flex items-center justify-between gap-2">
