@@ -73,10 +73,11 @@ function AthleteAvatar({ athlete }: { athlete: AthleteSummary }) {
 function AthletesSection() {
   const [athletes, setAthletes] = useState<AthleteSummary[] | null>(null);
   const [linking, setLinking] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState<string | null>(null);
   const navigate = useNavigate();
   const { push } = useToast();
 
-  useEffect(() => {
+  function refresh() {
     api.auth
       .athletes()
       .then(setAthletes)
@@ -85,11 +86,33 @@ function AthletesSection() {
         push(`Athlètes : ${msg}`, "error");
         setAthletes([]);
       });
-  }, []);
+  }
+
+  useEffect(refresh, []);
 
   function consult(a: AthleteSummary) {
     setViewingAthlete(a.public_id, a.display_name);
     navigate("/");
+  }
+
+  async function remove(a: AthleteSummary) {
+    const name = a.display_name || "cet athlète";
+    const ok = window.confirm(
+      `Supprimer définitivement ${name} et toutes ses données (activités, plan, profil) ? ` +
+        "Cette action est irréversible.",
+    );
+    if (!ok) return;
+    setDeleting(a.public_id);
+    try {
+      await api.roster.deleteAthlete(a.public_id);
+      push(`${name} supprimé.`, "success");
+      refresh();
+    } catch (err) {
+      const msg = err instanceof ApiError ? err.message : String(err);
+      push(`Suppression : ${msg}`, "error");
+    } finally {
+      setDeleting(null);
+    }
   }
 
   async function reconnectLink(a: AthleteSummary) {
@@ -164,6 +187,16 @@ function AthletesSection() {
                 >
                   <Eye className="h-4 w-4" strokeWidth={1.75} aria-hidden="true" />
                   Consulter
+                </button>
+                <button
+                  type="button"
+                  onClick={() => remove(a)}
+                  disabled={deleting === a.public_id}
+                  aria-label="Supprimer l'athlète"
+                  title="Supprimer définitivement cet athlète et ses données"
+                  className="rounded-md border border-red-500/30 bg-red-500/10 p-2 text-red-400 hover:bg-red-500/20 disabled:opacity-50"
+                >
+                  <Trash2 className="h-4 w-4" strokeWidth={1.75} aria-hidden="true" />
                 </button>
               </div>
             </li>

@@ -588,6 +588,8 @@ export const api = {
       http<ReconnectLink>(`/api/roster/athletes/${publicId}/reconnect-link`, {
         method: "POST",
       }),
+    deleteAthlete: (publicId: string) =>
+      http<void>(`/api/roster/athletes/${publicId}`, { method: "DELETE" }),
   },
 };
 

@@ -985,3 +985,30 @@ def list_athletes_for_coach(coach_id: int, path: Path | None = None) -> list[dic
         return [_user_dict(r) for r in rows]
     finally:
         conn.close()
+
+
+def delete_user(user_id: int, path: Path | None = None) -> bool:
+    """Supprime un utilisateur et tout ce qui lui est rattaché en DB plateforme.
+
+    Sessions, invitations acceptées, codes de secours, tokens de reconnexion et
+    liens ``coach_athlete`` sont supprimés en cascade (contraintes
+    ``ON DELETE CASCADE`` + ``PRAGMA foreign_keys = ON``). Les invitations
+    *créées* par l'utilisateur passent ``created_by`` à ``NULL`` (``ON DELETE SET
+    NULL``). Ne touche PAS aux données athlète sur disque (base activités,
+    tokens, YAML) — c'est le rôle de l'appelant (router roster).
+
+    Retourne ``True`` si une ligne a été supprimée, ``False`` si l'utilisateur
+    n'existe pas. Refuse le bootstrap (propriétaire) — ``ValueError``.
+    """
+    conn = _connect(path)
+    try:
+        row = conn.execute("SELECT is_bootstrap FROM users WHERE id = ?", (user_id,)).fetchone()
+        if row is None:
+            return False
+        if row["is_bootstrap"]:
+            raise ValueError("Le compte propriétaire (bootstrap) ne peut pas être supprimé.")
+        conn.execute("DELETE FROM users WHERE id = ?", (user_id,))
+        conn.commit()
+        return conn.total_changes > 0
+    finally:
+        conn.close()

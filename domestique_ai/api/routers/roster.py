@@ -9,8 +9,9 @@ passent **pas** par la garde d'impersonation lecture seule (``?athlete=``) — l
 from __future__ import annotations
 
 import datetime as dt
+import shutil
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Response, status
 
 from domestique_ai.api.deps import require_coach
 from domestique_ai.api.logging import get_logger
@@ -38,6 +39,7 @@ from domestique_ai.llm.prescription_storage import (
 )
 from domestique_ai.platform_db import (
     create_reconnect_token,
+    delete_user,
     get_user_by_public_id,
     list_athletes_for_coach,
 )
@@ -207,3 +209,69 @@ def assign_plan(
         weeks=summary["weeks"] if summary else None,
         workouts=[WorkoutSchema(**w.to_dict()) for w in plan],
     )
+
+
+@router.delete(
+    "/athletes/{public_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+def delete_roster_athlete(
+    public_id: str,
+    coach: dict = Depends(require_coach),  # noqa: B008
+) -> Response:
+    """Supprime définitivement un athlète du roster (coach propriétaire).
+
+    Efface à la fois :
+
+    - le compte plateforme et tout ce qui en dépend (sessions, tokens de
+      reconnexion, codes de secours, lien ``coach_athlete``) — ``delete_user`` ;
+    - son espace données sur disque (``data/athletes/<public_id>/`` : base
+      activités, tokens Garmin/Google Health, YAML profil/objectif/dispo).
+
+    Irréversible. Le bootstrap (propriétaire) est protégé (403)."""
+    target = get_user_by_public_id(public_id)
+    roster = {a["public_id"] for a in list_athletes_for_coach(coach["id"])}
+    if target is None or public_id not in roster:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Athlète hors de votre roster.",
+        )
+    if target.get("is_bootstrap"):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Le compte propriétaire ne peut pas être supprimé.",
+        )
+
+    try:
+        deleted = delete_user(target["id"])
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
+    if not deleted:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Athlète introuvable.",
+        )
+
+    _remove_athlete_dir(public_id)
+    log.info(
+        "Coach %s supprime l'athlète %s du roster",
+        coach["public_id"][:8],
+        public_id[:8],
+    )
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+def _remove_athlete_dir(public_id: str) -> None:
+    """Supprime l'espace de données disque de l'athlète (best-effort)."""
+    if not public_id:
+        return
+    from domestique_ai.config import get_athletes_root
+
+    target_dir = get_athletes_root() / public_id
+    try:
+        if target_dir.exists():
+            shutil.rmtree(target_dir, ignore_errors=True)
+    except OSError:  # noqa: BLE001 — best-effort, on n'échoue pas la suppression du compte
+        log.warning(
+            "Suppression du dossier athlète %s échouée.", target_dir, exc_info=True
+        )
