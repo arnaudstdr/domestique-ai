@@ -111,9 +111,7 @@ def get_google_health_callback(
         log.warning("Callback Google Health : state OAuth invalide.")
         return _redirect_front("google-health=error")
 
-    user = (
-        get_user_by_public_id(public_id) if public_id else get_or_create_bootstrap_coach()
-    )
+    user = get_user_by_public_id(public_id) if public_id else get_or_create_bootstrap_coach()
     if user is None:
         log.warning("Callback Google Health : athlète %s introuvable.", public_id[:8])
         return _redirect_front("google-health=error")

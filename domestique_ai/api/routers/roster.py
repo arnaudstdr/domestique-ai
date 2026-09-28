@@ -330,6 +330,4 @@ def _remove_athlete_dir(public_id: str) -> None:
         if target_dir.exists():
             shutil.rmtree(target_dir, ignore_errors=True)
     except OSError:  # noqa: BLE001 — best-effort, on n'échoue pas la suppression du compte
-        log.warning(
-            "Suppression du dossier athlète %s échouée.", target_dir, exc_info=True
-        )
+        log.warning("Suppression du dossier athlète %s échouée.", target_dir, exc_info=True)

@@ -240,9 +240,7 @@ def _user_dict(row: sqlite3.Row) -> dict[str, Any]:
         "has_password": bool(row["password_hash"]),
         "avatar": row["avatar"],
         "garmin_email": row["garmin_email"],
-        "has_garmin_credentials": bool(
-            row["garmin_email"] and row["garmin_password"]
-        ),
+        "has_garmin_credentials": bool(row["garmin_email"] and row["garmin_password"]),
     }
 
 

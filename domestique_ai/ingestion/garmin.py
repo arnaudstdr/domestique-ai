@@ -970,8 +970,7 @@ def get_ingest_client(
         )
     if not token_cache_present(token_dir):
         raise GarminIngestError(
-            "Pas de tokens Garmin Connect — connecte Garmin depuis les réglages "
-            "(login + code MFA)."
+            "Pas de tokens Garmin Connect — connecte Garmin depuis les réglages (login + code MFA)."
         )
     try:
         return get_client(token_dir=token_dir, email=email, password=password)

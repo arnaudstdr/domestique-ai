@@ -128,5 +128,7 @@ def test_delete_roster_athlete_logs_summary(client: TestClient, caplog):
     with caplog.at_level("INFO"):
         r = client.delete(f"/api/roster/athletes/{athlete['public_id']}", headers=_headers())
     assert r.status_code == 204
-    assert any("supprime l'athlète" in rec.message and "1 activités" in rec.message
-               for rec in caplog.records)
+    assert any(
+        "supprime l'athlète" in rec.message and "1 activités" in rec.message
+        for rec in caplog.records
+    )

@@ -86,7 +86,9 @@ def test_connect_mfa_flow_then_submit(client: TestClient, monkeypatch):
     from domestique_ai.export import garmin_connect as gc
 
     fake = _FakeGarminClient()
-    monkeypatch.setattr(gc, "start_login", lambda email, password, token_dir: ("mfa_required", fake))
+    monkeypatch.setattr(
+        gc, "start_login", lambda email, password, token_dir: ("mfa_required", fake)
+    )
 
     r = client.post(
         "/api/garmin/connect",
@@ -216,7 +218,5 @@ def test_garmin_status_orphan_tokens_flag(client: TestClient, monkeypatch, tmp_p
     assert r.json()["orphan_tokens"] is False
 
     # Un athlète ciblé sans token propre → True.
-    r2 = client.get(
-        f"/api/garmin/status?athlete={coach['public_id']}", headers=_headers()
-    )
+    r2 = client.get(f"/api/garmin/status?athlete={coach['public_id']}", headers=_headers())
     assert r2.status_code == 200

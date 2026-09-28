@@ -161,9 +161,7 @@ def _new_client(
     )
 
 
-def _resolve_credentials(
-    email: str | None, password: str | None
-) -> tuple[str | None, str | None]:
+def _resolve_credentials(email: str | None, password: str | None) -> tuple[str | None, str | None]:
     """Credentials explicites si fournis (même partiellement), sinon ``.env``."""
     if email is None and password is None:
         return get_garmin_credentials()
@@ -207,9 +205,7 @@ def get_client(
 # ---------------------------------------------------------------------------
 
 
-def start_login(
-    email: str, password: str, token_dir: Path
-) -> tuple[str, Any]:
+def start_login(email: str, password: str, token_dir: Path) -> tuple[str, Any]:
     """Démarre un login Garmin sans MFA interactif (primitives API).
 
     Retourne ``("connected", client)`` si l'authentification aboutit directement,
@@ -252,9 +248,7 @@ def finish_login(client: Any, mfa_code: str, token_dir: Path) -> Any:
         cache.mkdir(parents=True, exist_ok=True)
         client.client.dump(str(cache))
     except Exception as exc:  # noqa: BLE001 — le login a réussi ; on signale sans perdre
-        raise GarminPushError(
-            f"MFA validé mais persistance du token échouée : {exc}"
-        ) from exc
+        raise GarminPushError(f"MFA validé mais persistance du token échouée : {exc}") from exc
     return client
 
 
