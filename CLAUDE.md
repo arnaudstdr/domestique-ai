@@ -570,6 +570,15 @@ exigence de clé, fenêtre 2 semaines, flux désactivé sans clé).
   le shell de l'agent. **Toujours lancer les tests/lint via le Python du venv** :
   `.venv/bin/python -m pytest …` et `.venv/bin/python -m ruff check .`.
 - **Ruff** : `line-length = 100`, ignore `E501`. Règles activées : `E, F, I, UP, B, SIM` (voir `pyproject.toml`).
+- **⚠️ Avant CHAQUE commit** : la CI exige `ruff check .` **et** `ruff format --check .`
+  (voir `.github/workflows/ci.yml` — l'étape `lint` fait échouer le build sinon).
+  Toujours formater avant de committer :
+  ```bash
+  .venv/bin/python -m ruff format .
+  .venv/bin/python -m ruff check .
+  ```
+  Ne jamais committer du code non passé par `ruff format` (piège récurrent :
+  les blocs réécrits à la main ne respectent pas le format Black-like du projet).
 - **Imports** : `from __future__ import annotations` en tête de chaque module Python.
 - **Fixtures de test** : utiliser `tmp_path` + `init_db(tmp_path/"x.db")` pour isoler la base. Neutraliser les vars HR via `monkeypatch.delenv("STRAVA_HR_REST", ...)` quand un test cible explicitement la branche TSS power (sinon la config locale du dev peut faire basculer le calcul).
 
