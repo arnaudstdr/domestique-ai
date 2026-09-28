@@ -111,7 +111,9 @@ def init_platform_db(path: Path | None = None) -> None:
                 password_changed_at TEXT,
                 failed_attempts INTEGER NOT NULL DEFAULT 0,
                 locked_until TEXT,
-                avatar TEXT
+                avatar TEXT,
+                garmin_email TEXT,
+                garmin_password TEXT
             )
         """)
         conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_users_public_id ON users(public_id)")
@@ -132,6 +134,12 @@ def init_platform_db(path: Path | None = None) -> None:
         # Photo de profil (data URL `data:image/<type>;base64,…`, redimensionnée
         # côté client). Migration additive : ``NULL`` = aucune photo.
         _ensure_column(conn, "users", "avatar", "TEXT")
+        # Credentials Garmin Connect *par athlète* (le compte Garmin est celui de
+        # l'athlète, pas un compte global). Migration additive : ``NULL`` = pas de
+        # connexion Garmin. ``garmin_password`` n'est jamais exposé dans
+        # ``_user_dict`` (cf. ``get_user_garmin_credentials``).
+        _ensure_column(conn, "users", "garmin_email", "TEXT")
+        _ensure_column(conn, "users", "garmin_password", "TEXT")
         conn.execute(
             "CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email "
             "ON users(email) WHERE email IS NOT NULL"
@@ -231,6 +239,10 @@ def _user_dict(row: sqlite3.Row) -> dict[str, Any]:
         "totp_enabled": bool(row["totp_enabled"]),
         "has_password": bool(row["password_hash"]),
         "avatar": row["avatar"],
+        "garmin_email": row["garmin_email"],
+        "has_garmin_credentials": bool(
+            row["garmin_email"] and row["garmin_password"]
+        ),
     }
 
 
@@ -401,6 +413,58 @@ def set_user_avatar(user_id: int, avatar: str | None, path: Path | None = None) 
     try:
         conn.execute("UPDATE users SET avatar = ? WHERE id = ?", (avatar, user_id))
         conn.commit()
+    finally:
+        conn.close()
+
+
+def set_user_garmin_credentials(
+    user_id: int, email: str | None, password: str | None, path: Path | None = None
+) -> None:
+    """Pose/remplace les credentials Garmin Connect d'un athlète.
+
+    ``email``/``password`` ``None`` (ou vides) effacent la connexion. Le mot de
+    passe est stocké en clair dans ``platform.db`` — même niveau de protection
+    que ``password_hash`` (fichier local non chiffré) ; il n'est **jamais** exposé
+    par ``_user_dict``.
+    """
+    conn = _connect(path)
+    try:
+        conn.execute(
+            "UPDATE users SET garmin_email = ?, garmin_password = ? WHERE id = ?",
+            (
+                (email or "").strip() or None,
+                password or None,
+                user_id,
+            ),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def clear_user_garmin_credentials(user_id: int, path: Path | None = None) -> None:
+    """Efface la connexion Garmin d'un athlète (email + mot de passe)."""
+    set_user_garmin_credentials(user_id, None, None, path=path)
+
+
+def get_user_garmin_credentials(
+    user_id: int, path: Path | None = None
+) -> tuple[str | None, str | None]:
+    """Credentials Garmin d'un athlète, lus explicitement (réservé au backend).
+
+    Séparé de ``_user_dict`` exprès : le mot de passe ne doit jamais partir dans
+    un payload API. Retourne ``(None, None)`` si l'utilisateur n'existe pas ou
+    n'a pas de connexion Garmin.
+    """
+    conn = _connect(path)
+    try:
+        row = conn.execute(
+            "SELECT garmin_email, garmin_password FROM users WHERE id = ?",
+            (user_id,),
+        ).fetchone()
+        if row is None:
+            return (None, None)
+        return (row["garmin_email"], row["garmin_password"])
     finally:
         conn.close()
 

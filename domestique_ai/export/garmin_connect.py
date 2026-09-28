@@ -125,35 +125,66 @@ def build_workout_payload(
 # ---------------------------------------------------------------------------
 
 
-def credentials_present() -> bool:
-    """True si email/password sont configurés dans ``.env``."""
-    email, password = get_garmin_credentials()
+def credentials_present(email: str | None = None, password: str | None = None) -> bool:
+    """True si email/password Garmin sont disponibles.
+
+    ``email``/``password`` explicites (credentials de l'athlète) prioritaires ;
+    sinon repli sur le ``.env`` (compte bootstrap legacy).
+    """
+    if email is None and password is None:
+        email, password = get_garmin_credentials()
     return bool(email and password)
 
 
-def token_cache_present() -> bool:
+def token_cache_present(token_dir: Path | None = None) -> bool:
     """True si un cache token est déjà présent (pas besoin de relog interactif)."""
-    token_dir = get_garmin_token_dir()
-    if not token_dir.exists():
+    path = Path(token_dir) if token_dir else get_garmin_token_dir()
+    if not path.exists():
         return False
-    return any(token_dir.iterdir())
+    return any(path.iterdir())
 
 
-def _new_client(email: str | None, password: str | None, prompt_mfa: Any = None) -> Any:
+def _new_client(
+    email: str | None,
+    password: str | None,
+    prompt_mfa: Any = None,
+    *,
+    return_on_mfa: bool = False,
+) -> Any:
     from garminconnect import Garmin
 
-    return Garmin(email=email, password=password, prompt_mfa=prompt_mfa)
+    return Garmin(
+        email=email,
+        password=password,
+        prompt_mfa=prompt_mfa,
+        return_on_mfa=return_on_mfa,
+    )
 
 
-def get_client(token_dir: Path | None = None) -> Any:
+def _resolve_credentials(
+    email: str | None, password: str | None
+) -> tuple[str | None, str | None]:
+    """Credentials explicites si fournis (même partiellement), sinon ``.env``."""
+    if email is None and password is None:
+        return get_garmin_credentials()
+    return email, password
+
+
+def get_client(
+    token_dir: Path | None = None,
+    *,
+    email: str | None = None,
+    password: str | None = None,
+) -> Any:
     """Retourne un client Garmin authentifié.
 
-    Lit `.env` pour les credentials et tente de réutiliser le cache token. Si
-    le cache est absent ou invalide ET qu'aucun MFA n'est attendu, fait un login
-    complet. Si le compte demande un MFA, lève ``GarminPushError`` pour forcer
-    le passage par ``login_interactive()``.
+    ``token_dir``/``email``/``password`` explicites (compte de l'athlète)
+    prioritaires ; sinon repli sur le ``.env`` et le dossier de cache global
+    (bootstrap). Si le cache est absent ou invalide ET qu'aucun MFA n'est
+    attendu, fait un login complet. Si le compte demande un MFA, lève
+    ``GarminPushError``.
     """
-    email, password = get_garmin_credentials()
+    email, password = _resolve_credentials(email, password)
     cache = Path(token_dir) if token_dir else get_garmin_token_dir()
 
     client = _new_client(email, password)
@@ -167,9 +198,64 @@ def get_client(token_dir: Path | None = None) -> Any:
     except Exception as exc:  # noqa: BLE001 — on remap toutes les erreurs auth
         raise GarminPushError(
             f"Échec d'authentification Garmin Connect : {exc}. "
-            f"Lancer `python -m domestique_ai.export.garmin_connect` pour "
-            f"initialiser la connexion (MFA inclus)."
+            f"Relancer la connexion Garmin (MFA inclus)."
         ) from exc
+
+
+# ---------------------------------------------------------------------------
+# Connexion interactive pilotée par l'API (email/mdp + MFA en 2 étapes)
+# ---------------------------------------------------------------------------
+
+
+def start_login(
+    email: str, password: str, token_dir: Path
+) -> tuple[str, Any]:
+    """Démarre un login Garmin sans MFA interactif (primitives API).
+
+    Retourne ``("connected", client)`` si l'authentification aboutit directement,
+    ou ``("mfa_required", client)`` si Garmin réclame un code MFA. Dans ce cas,
+    l'appelant **doit conserver l'instance ``client``** en mémoire et appeler
+    ``finish_login(client, code, token_dir)`` : l'état MFA (session SSO) vit dans
+    l'instance (cf. ``garminconnect`` ``return_on_mfa``) et n'est pas sérialisable.
+
+    Le ``token_dir`` est créé et le token persisté en cas de succès immédiat.
+    """
+    client = _new_client(email, password, return_on_mfa=True)
+    cache = Path(token_dir)
+    cache.mkdir(parents=True, exist_ok=True)
+    try:
+        status, _ = client.login(tokenstore=str(cache))
+    except Exception as exc:  # noqa: BLE001 — remap en erreur métier
+        raise GarminPushError(f"Échec d'authentification Garmin Connect : {exc}") from exc
+    if status == "needs_mfa":
+        return "mfa_required", client
+    # Succès direct : login() a déjà dumpé le tokenstore.
+    return "connected", client
+
+
+def finish_login(client: Any, mfa_code: str, token_dir: Path) -> Any:
+    """Finalise un login MFA démarré par ``start_login``.
+
+    ``client`` est l'instance retournée par ``start_login`` (état MFA en
+    mémoire). Persiste le tokenstore en cas de succès. Lève ``GarminPushError``
+    si le code est invalide ou le token rejeté.
+    """
+    code = (mfa_code or "").strip()
+    if not code:
+        raise GarminPushError("Code MFA manquant.")
+    try:
+        client.resume_login(client.client, code)
+    except Exception as exc:  # noqa: BLE001 — remap (code invalide, réseau…)
+        raise GarminPushError(f"Validation MFA échouée : {exc}") from exc
+    cache = Path(token_dir)
+    try:
+        cache.mkdir(parents=True, exist_ok=True)
+        client.client.dump(str(cache))
+    except Exception as exc:  # noqa: BLE001 — le login a réussi ; on signale sans perdre
+        raise GarminPushError(
+            f"MFA validé mais persistance du token échouée : {exc}"
+        ) from exc
+    return client
 
 
 # ---------------------------------------------------------------------------
@@ -308,9 +394,11 @@ __all__ = [
     "GarminPushError",
     "build_workout_payload",
     "credentials_present",
+    "finish_login",
     "get_client",
     "login_interactive",
     "push_plan",
     "push_workout",
+    "start_login",
     "token_cache_present",
 ]

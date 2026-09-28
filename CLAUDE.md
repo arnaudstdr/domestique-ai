@@ -137,8 +137,9 @@ Colonnes `avg_temp` / `min_temp` / `max_temp` (REAL nullable, °C) calculées à
 
 Les activités sont ingérées depuis l'**API non officielle Garmin Connect** (module `garminconnect`) via `ingestion/garmin.py`. Le compteur Edge / la montre synchronisent vers Garmin Connect, et `sync_activities_garmin()` rapatrie les activités dans la même table `activities` — toute la pipeline aval (TSS, CTL/ATL/TSB, zones HR, tendances, coach LLM) fonctionne sans changement.
 
-- **Connexion** : seed interactif une fois (`python -m domestique_ai.export.garmin_connect`, MFA inclus) — le cache token `data/.garmin_tokens` est **global** (compte du propriétaire bootstrap). Credentials `GARMIN_EMAIL`/`GARMIN_PASSWORD` dans le `.env`.
-- **Endpoints** : `POST /api/garmin/sync` (sync manuel en tâche de fond), `GET /api/garmin/sync-status`, `GET /api/garmin/status` (état de connexion).
+- **Connexion par athlète** (isolation multi-tenant) : chaque athlète connecte **son** compte Garmin depuis les Réglages (`POST /api/garmin/connect` → email/mot de passe, puis `POST /api/garmin/connect/mfa` si MFA). Les credentials sont stockés par athlète en DB plateforme (`users.garmin_email`/`garmin_password`, jamais exposés par `_user_dict`) et les tokens dans `data/athletes/<public_id>/.garmin_tokens` (`config.garmin_token_dir_for(ctx)`). **Cache MFA en mémoire process** (`_pending_mfa`, TTL 5 min) — l'état SSO du SDK n'est pas sérialisable ; suppose 1 worker uvicorn.
+- **Fallback bootstrap** : `GARMIN_EMAIL`/`GARMIN_PASSWORD`/`GARMIN_TOKEN_DIR` du `.env` ne concernent que le compte bootstrap (propriétaire) et son `data/.garmin_tokens` legacy ; le seed CLI `python -m domestique_ai.export.garmin_connect` reste dispo pour lui.
+- **Endpoints** : `POST /api/garmin/sync` (sync manuel en tâche de fond), `GET /api/garmin/sync-status`, `GET /api/garmin/status` (état de connexion, scopé athlète), `POST /api/garmin/connect`, `POST /api/garmin/connect/mfa`, `POST /api/garmin/disconnect`.
 - **Sync incrémentale** : la fenêtre par défaut démarre 1 j avant la dernière activité Garmin connue (ou 3 ans d'historique au 1er sync). Mapping `typeKey` Garmin → `sport_type` (nomenclature historique type Strava, `_SPORT_MAP`) pour conserver les buckets indoor/outdoor du comparateur.
 - **⚠️ Endpoints non officiels** : peuvent changer sans préavis.
 
@@ -164,7 +165,7 @@ Un `BackgroundScheduler` APScheduler tourne dans le process FastAPI et déclench
 - **Configuration** : `DOMESTIQUE_AI_GARMIN_AUTO_SYNC_MINUTES` : période en minutes (défaut 30). `0` désactive complètement l'auto-sync.
 - **Anti-chevauchement** : sync manuel (`POST /api/garmin/sync`) et auto-sync passent tous les deux par `_claim_sync()` dans `routers/garmin.py`. Tant qu'une sync est en cours (`status == "syncing"`), tout claim concurrent retourne `False` (skip silencieux loggé côté scheduler). `coalesce=True, max_instances=1` côté APScheduler en plus, ceinture + bretelles.
 - **Logs et erreurs** : le job enveloppe `trigger_sync_blocking` dans un `try/except` global — un job APScheduler qui lève marque le job comme erroné et peut arrêter le scheduler, ce qu'on ne veut surtout pas. Toute exception inattendue est loggée mais n'interrompt pas la cadence.
-- **Ciblage** : le cache token Garmin étant global, le job ne sync que le propriétaire (bootstrap) — les autres athlètes ne sont volontairement pas syncés.
+- **Ciblage** : le cache token étant désormais **par athlète** (`garmin_token_dir_for(ctx)`), le job boucle sur **tous les athlètes ayant connecté leur compte** (`token_cache_present`) — plus seulement le bootstrap. Un athlète en échec n'interrompt pas les autres.
 
 ### Notifications push (Pushover) — palier 4 du coach proactif
 
@@ -223,6 +224,15 @@ Deux scores sont recalculés localement :
 
 La saisie manuelle reste possible ; un `sleep_score` saisi à la main n'est pas
 écrasé par le score calculé (`sleep_score_computed=0`).
+
+**Isolation par athlète** : les tokens sont stockés **par athlète**
+(`data/athletes/<public_id>/.google_health_tokens.json`, cf.
+`config.google_health_tokens_path_for(ctx)` — `data/.google_health_tokens.json`
+pour le bootstrap). Le `state` OAuth est **signé HMAC** (`_sign_state` /
+`_verify_state` dans le router) et encode le `public_id` : le callback Google
+(redirection navigateur, hors Bearer) retrouve ainsi l'athlète destinataire sans
+stockage serveur. Les credentials OAuth de l'app
+(`GOOGLE_HEALTH_CLIENT_ID`/`_SECRET`) restent, eux, globaux.
 
 **Fichiers clés** :
 

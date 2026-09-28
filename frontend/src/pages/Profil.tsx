@@ -22,6 +22,7 @@ import type {
 import MemoryPanel from "../components/MemoryPanel";
 import { useToast } from "../hooks/useToast";
 import { useMe, useMeRefresh } from "../hooks/useMe";
+import { useViewing } from "../hooks/useViewing";
 import { resizeImageToSquare } from "../lib/image";
 
 const WEEKDAYS: { key: WeekdayName; label: string }[] = [
@@ -189,10 +190,26 @@ function AvatarSection() {
 function GarminSection() {
   const [status, setStatus] = useState<GarminStatus | null>(null);
   const [syncing, setSyncing] = useState(false);
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [mfaCode, setMfaCode] = useState("");
+  const [mfaPending, setMfaPending] = useState(false);
+  const [busy, setBusy] = useState(false);
   const { push } = useToast();
+  const viewing = useViewing();
+
+  function load() {
+    api.garmin
+      .status()
+      .then((s) => {
+        setStatus(s);
+        if (s.email) setEmail(s.email);
+      })
+      .catch(() => setStatus(null));
+  }
 
   useEffect(() => {
-    api.garmin.status().then(setStatus).catch(() => setStatus(null));
+    load();
   }, []);
 
   async function sync() {
@@ -210,10 +227,62 @@ function GarminSection() {
       push(`Garmin : ${msg}`, "error");
     } finally {
       setSyncing(false);
-      api.garmin
-        .status()
-        .then(setStatus)
-        .catch(() => undefined);
+      load();
+    }
+  }
+
+  async function connect(event: React.FormEvent) {
+    event.preventDefault();
+    setBusy(true);
+    try {
+      const res = await api.garmin.connect(email.trim(), password);
+      if (res.status === "mfa_required") {
+        setMfaPending(true);
+        push("Code MFA envoyé par Garmin — saisis-le ci-dessous.", "info");
+      } else {
+        setPassword("");
+        push("Garmin Connect connecté.", "success");
+      }
+      load();
+    } catch (err) {
+      const msg = err instanceof ApiError ? err.message : String(err);
+      push(`Connexion Garmin : ${msg}`, "error");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function submitMfa(event: React.FormEvent) {
+    event.preventDefault();
+    setBusy(true);
+    try {
+      await api.garmin.submitMfa(mfaCode.trim());
+      setMfaPending(false);
+      setMfaCode("");
+      setPassword("");
+      push("Code MFA validé — Garmin Connect connecté.", "success");
+      load();
+    } catch (err) {
+      const msg = err instanceof ApiError ? err.message : String(err);
+      push(`Validation MFA : ${msg}`, "error");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function disconnect() {
+    setBusy(true);
+    try {
+      await api.garmin.disconnect();
+      setEmail("");
+      setPassword("");
+      push("Garmin Connect déconnecté.", "success");
+      load();
+    } catch (err) {
+      const msg = err instanceof ApiError ? err.message : String(err);
+      push(`Déconnexion Garmin : ${msg}`, "error");
+    } finally {
+      setBusy(false);
     }
   }
 
@@ -226,26 +295,22 @@ function GarminSection() {
         Garmin Connect
       </h3>
       <p className="text-xs text-muted">
-        Importe tes activités depuis Garmin Connect (compteur Edge / montre) —
-        mêmes métriques, même pipeline.
+        Connecte ton compte Garmin Connect personnel (compteur Edge / montre) —
+        chaque athlète a sa propre connexion, isolée des autres.
       </p>
+
       {status === null ? (
         <p className="text-xs text-muted">Vérification…</p>
-      ) : !status.credentials ? (
+      ) : viewing ? (
         <p className="text-xs text-muted">
-          Configurer <code>GARMIN_EMAIL</code> et <code>GARMIN_PASSWORD</code> dans
-          le <code>.env</code> pour activer.
+          Consultation en lecture seule — la connexion Garmin appartient à
+          l'athlète consulté.
         </p>
-      ) : !status.tokens ? (
-        <p className="text-xs text-muted">
-          Connexion à initialiser une fois sur le serveur :{" "}
-          <code>python -m domestique_ai.export.garmin_connect</code> (login + code
-          MFA).
-        </p>
-      ) : (
+      ) : connected ? (
         <>
           <p className="text-sm text-accent">
-            Garmin Connect connecté — auto-sync toutes les 30 min.
+            Garmin Connect connecté{status.email ? ` (${status.email})` : ""} —
+            auto-sync activée.
           </p>
           <button
             type="button"
@@ -262,13 +327,71 @@ function GarminSection() {
               {status.sync.error}
             </p>
           )}
-          {!connected && (
-            <p className="text-xs text-muted">
-              Credentials présents mais tokens absents/invalides — re-seed
-              nécessaire.
-            </p>
-          )}
+          <button
+            type="button"
+            onClick={disconnect}
+            disabled={busy}
+            className="btn-ghost w-full"
+          >
+            Déconnecter Garmin
+          </button>
         </>
+      ) : mfaPending ? (
+        <form onSubmit={submitMfa} className="space-y-2">
+          <p className="text-xs text-muted">
+            Garmin a envoyé un code de vérification (email/SMS). Saisis-le pour
+            terminer la connexion.
+          </p>
+          <input
+            type="text"
+            inputMode="numeric"
+            autoComplete="one-time-code"
+            value={mfaCode}
+            onChange={(e) => setMfaCode(e.target.value)}
+            placeholder="Code MFA"
+            className="w-full rounded-md border border-white/10 bg-black/20 px-3 py-2 text-sm"
+            required
+          />
+          <div className="flex gap-2">
+            <button type="submit" disabled={busy} className="btn-primary flex-1">
+              {busy ? "Validation…" : "Valider le code"}
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setMfaPending(false);
+                setMfaCode("");
+              }}
+              className="btn-ghost"
+            >
+              Annuler
+            </button>
+          </div>
+        </form>
+      ) : (
+        <form onSubmit={connect} className="space-y-2">
+          <input
+            type="email"
+            autoComplete="username"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            placeholder="Email Garmin Connect"
+            className="w-full rounded-md border border-white/10 bg-black/20 px-3 py-2 text-sm"
+            required
+          />
+          <input
+            type="password"
+            autoComplete="current-password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            placeholder="Mot de passe"
+            className="w-full rounded-md border border-white/10 bg-black/20 px-3 py-2 text-sm"
+            required
+          />
+          <button type="submit" disabled={busy} className="btn-primary w-full">
+            {busy ? "Connexion…" : "Connecter Garmin"}
+          </button>
+        </form>
       )}
     </section>
   );

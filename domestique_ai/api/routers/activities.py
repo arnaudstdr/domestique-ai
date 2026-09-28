@@ -24,6 +24,7 @@ from domestique_ai.api.schemas import (
     TcxImportResponse,
 )
 from domestique_ai.athlete_context import AthleteContext
+from domestique_ai.config import garmin_token_dir_for
 from domestique_ai.ingestion.db import (
     activity_id_for_source_uid,
     delete_activity,
@@ -346,7 +347,11 @@ def get_activity_streams(
             return cached[1]
 
     try:
-        client = get_ingest_client()
+        client = get_ingest_client(
+            token_dir=garmin_token_dir_for(ctx),
+            email=ctx.garmin_email,
+            password=ctx.garmin_password,
+        )
         details = client.get_activity_details(str(garmin_id), maxpoly=1000)
     except GarminIngestError as exc:
         raise HTTPException(
@@ -399,7 +404,11 @@ def get_activity_weather_endpoint(
         )
 
     try:
-        client = get_ingest_client()
+        client = get_ingest_client(
+            token_dir=garmin_token_dir_for(ctx),
+            email=ctx.garmin_email,
+            password=ctx.garmin_password,
+        )
         raw = client.get_activity_weather(str(garmin_id))
     except GarminIngestError as exc:
         log.warning("Météo %s : Garmin injoignable (%s).", external_id, exc)

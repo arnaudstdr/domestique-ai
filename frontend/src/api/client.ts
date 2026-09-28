@@ -43,6 +43,7 @@ import type {
   SyncResult,
   SyncStatus,
   GarminStatus,
+  GarminConnectResponse,
   TcxImportResponse,
   TodayWorkoutResponse,
   TotpEnrollResponse,
@@ -352,6 +353,17 @@ export const api = {
   },
   garmin: {
     status: () => http<GarminStatus>(`/api/garmin/status`),
+    connect: (email: string, password: string) =>
+      http<GarminConnectResponse>(`/api/garmin/connect`, {
+        method: "POST",
+        body: JSON.stringify({ email, password }),
+      }),
+    submitMfa: (code: string) =>
+      http<GarminConnectResponse>(`/api/garmin/connect/mfa`, {
+        method: "POST",
+        body: JSON.stringify({ code }),
+      }),
+    disconnect: () => http<void>(`/api/garmin/disconnect`, { method: "POST" }),
     sync: () => http<SyncStatus>(`/api/garmin/sync`, { method: "POST" }),
     syncStatus: () => http<SyncStatus>(`/api/garmin/sync-status`),
   },

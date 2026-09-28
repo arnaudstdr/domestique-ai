@@ -372,15 +372,19 @@ Raspberry Pi procedure, including upgrading an existing deployment without data 
 
 ### Garmin Connect (activity ingestion)
 
-1. Set `GARMIN_EMAIL` / `GARMIN_PASSWORD` in `.env`.
-2. Seed the token cache once (interactive, handles MFA):
-   ```bash
-   python -m domestique_ai.export.garmin_connect
-   ```
-3. Activities sync every 30 minutes (auto-sync scheduler), enriched with fields,
-   GPS traces and weather. The plan is exported as a **`.ZIP` of `.FIT` files** or an
-   **`.ICS`** file — and a **webcal feed** keeps Apple / Google Calendar in sync as
-   the plan adapts (`/api/plan/feed.ics?key=<DOMESTIQUE_AI_CALENDAR_FEED_KEY>`).
+Each **athlete connects their own Garmin account from the UI** (Settings → Garmin
+Connect: email + password + MFA code). Credentials are stored per athlete in the
+platform DB and tokens in `data/athletes/<public_id>/.garmin_tokens` — fully
+isolated between accounts. Activities sync every 30 minutes (auto-sync scheduler,
+all connected athletes), enriched with fields, GPS traces and weather. The plan is
+exported as a **`.ZIP` of `.FIT` files** or an **`.ICS`** file — and a **webcal
+feed** keeps Apple / Google Calendar in sync as the plan adapts
+(`/api/plan/feed.ics?key=<DOMESTIQUE_AI_CALENDAR_FEED_KEY>`).
+
+> `GARMIN_EMAIL` / `GARMIN_PASSWORD` / `GARMIN_TOKEN_DIR` in `.env` are
+> **bootstrap-only** (legacy fallback). The CLI
+> `python -m domestique_ai.export.garmin_connect` remains available for the
+> bootstrap account.
 
 ### Google Health (recovery data — Fitbit / Pixel Watch)
 
@@ -389,6 +393,9 @@ Raspberry Pi procedure, including upgrading an existing deployment without data 
 2. Set `GOOGLE_HEALTH_CLIENT_ID` / `GOOGLE_HEALTH_CLIENT_SECRET` in `.env`, then run
    the OAuth flow from the **Santé** page (or `GET /api/google-health/auth`).
 3. HRV, resting HR, sleep + stages, SpO₂ and skin temperature sync every 6 hours.
+
+> Tokens are stored **per athlete** (`data/athletes/<public_id>/.google_health_tokens.json`);
+> the OAuth `state` is HMAC-signed to route the callback to the right account.
 
 ### Ollama (LLM coach)
 

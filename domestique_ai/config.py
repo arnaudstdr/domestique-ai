@@ -13,7 +13,7 @@ import logging
 import os
 import threading
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from dotenv import load_dotenv
 
@@ -484,11 +484,41 @@ def get_garmin_token_dir() -> Path:
 
     Override possible via ``GARMIN_TOKEN_DIR`` (utile pour les tests). Défaut :
     ``data/.garmin_tokens`` (gitignoré comme le reste de ``data/``).
+
+    ⚠️ Chemin **bootstrap** (compte propriétaire). Pour les autres athlètes, le
+    dossier est dérivé du ``public_id`` — cf. ``garmin_token_dir_for``.
     """
     custom = os.getenv("GARMIN_TOKEN_DIR")
     if custom:
         return Path(custom).expanduser().resolve()
     return REPO_ROOT / "data" / ".garmin_tokens"
+
+
+def garmin_token_dir_for(ctx: Any) -> Path:
+    """Dossier de cache des tokens Garmin **de l'athlète** ``ctx``.
+
+    - bootstrap (``public_id`` vide) → ``get_garmin_token_dir()`` (legacy).
+    - autre athlète → ``<athletes_root>/<public_id>/.garmin_tokens``.
+
+    Import tardif du type ``AthleteContext`` pour éviter le cycle
+    ``config <-> athlete_context``.
+    """
+    public_id = getattr(ctx, "public_id", "")
+    if not public_id:
+        return get_garmin_token_dir()
+    return get_athletes_root() / public_id / ".garmin_tokens"
+
+
+def google_health_tokens_path_for(ctx: Any) -> Path:
+    """Chemin du fichier de tokens Google Health **de l'athlète** ``ctx``.
+
+    - bootstrap (``public_id`` vide) → ``get_google_health_tokens_path()``.
+    - autre athlète → ``<athletes_root>/<public_id>/.google_health_tokens.json``.
+    """
+    public_id = getattr(ctx, "public_id", "")
+    if not public_id:
+        return get_google_health_tokens_path()
+    return get_athletes_root() / public_id / ".google_health_tokens.json"
 
 
 def get_ollama_model() -> str:

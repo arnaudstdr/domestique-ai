@@ -369,7 +369,22 @@ export interface GarminStatus {
   credentials: boolean;
   tokens: boolean;
   connected: boolean;
+  email: string | null;
   sync: SyncStatus;
+}
+
+export interface GarminConnectRequest {
+  email: string;
+  password: string;
+}
+
+export interface GarminMfaRequest {
+  code: string;
+}
+
+export interface GarminConnectResponse {
+  status: "connected" | "mfa_required";
+  detail: string | null;
 }
 
 export interface SyncResult {

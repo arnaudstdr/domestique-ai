@@ -70,6 +70,7 @@ def _google_health_first_run_delay_minutes() -> int:
 def _google_health_sync_targets() -> list[tuple[str, object]]:
     """Athlètes à synchroniser Google Health : ceux ayant des tokens."""
     from domestique_ai.athlete_context import context_for_athlete
+    from domestique_ai.config import google_health_tokens_path_for
     from domestique_ai.platform_db import get_or_create_bootstrap_coach, list_users
 
     users = list_users()
@@ -80,7 +81,7 @@ def _google_health_sync_targets() -> list[tuple[str, object]]:
     targets: list[tuple[str, object]] = []
     for user in users:
         ctx = context_for_athlete(user)
-        client = GoogleHealthClient.from_tokens_file()
+        client = GoogleHealthClient.from_tokens_file(google_health_tokens_path_for(ctx))
         if client is not None and client.is_authenticated():
             targets.append((user["public_id"], ctx))
     return targets
@@ -88,6 +89,8 @@ def _google_health_sync_targets() -> list[tuple[str, object]]:
 
 def _google_health_auto_sync_job() -> None:
     """Job appelé périodiquement pour sync Google Health."""
+    from domestique_ai.config import google_health_tokens_path_for
+
     try:
         targets = _google_health_sync_targets()
     except Exception:  # noqa: BLE001
@@ -98,7 +101,7 @@ def _google_health_auto_sync_job() -> None:
 
     for public_id, ctx in targets:
         try:
-            client = GoogleHealthClient.from_tokens_file()
+            client = GoogleHealthClient.from_tokens_file(google_health_tokens_path_for(ctx))
             if client is None:
                 continue
             result = sync_google_health_morning_metrics(
@@ -126,31 +129,33 @@ def _garmin_auto_sync_interval_minutes() -> int:
 
 
 def _garmin_auto_sync_job() -> None:
-    """Sync Garmin périodique — cible le propriétaire uniquement.
+    """Sync Garmin périodique — tous les athlètes ayant des tokens.
 
-    Le cache token Garmin Connect est global (``data/.garmin_tokens``) : il
-    correspond au compte du propriétaire (bootstrap). Les autres athlètes
-    ne sont volontairement pas syncés (ils n'ont pas ce compte Garmin).
+    Le cache token est désormais **par athlète** (``<athletes_root>/<pid>/
+    .garmin_tokens``) : on cible chacun de ceux qui ont connecté leur compte.
     """
     try:
+        from domestique_ai.athlete_context import context_for_athlete
+        from domestique_ai.config import garmin_token_dir_for
         from domestique_ai.export.garmin_connect import token_cache_present
         from domestique_ai.platform_db import get_or_create_bootstrap_coach, list_users
 
-        if not token_cache_present():
-            return
         users = list_users()
-        bootstrap = next((u for u in users if u.get("is_bootstrap")), None)
-        if bootstrap is None:
-            bootstrap = get_or_create_bootstrap_coach()
-        if bootstrap is None:
-            return
+        if not any(u.get("is_bootstrap") for u in users):
+            get_or_create_bootstrap_coach()
+            users = list_users()
 
-        from domestique_ai.athlete_context import context_for_athlete
-
-        ctx = context_for_athlete(bootstrap)
-        key = bootstrap["public_id"]
-        if not trigger_garmin_sync(ctx, key):
-            log.info("Auto-sync Garmin [%s] : skip (déjà en cours).", key[:8])
+        for user in users:
+            public_id = user["public_id"]
+            try:
+                ctx = context_for_athlete(user)
+                if not token_cache_present(garmin_token_dir_for(ctx)):
+                    continue
+                key = public_id or "bootstrap"
+                if not trigger_garmin_sync(ctx, key):
+                    log.info("Auto-sync Garmin [%s] : skip (déjà en cours).", key[:8])
+            except Exception:  # noqa: BLE001 — un athlète KO ne bloque pas les autres
+                log.exception("Auto-sync Garmin [%s] : exception non gérée.", public_id[:8])
     except Exception:  # noqa: BLE001 — un job APScheduler ne doit jamais lever
         log.exception("Auto-sync Garmin : exception non gérée.")
 
@@ -228,11 +233,13 @@ def _weekly_review_job() -> None:
         return
 
     # Pre-sync Google Health (7 j) — les tendances matin doivent être à jour.
+    from domestique_ai.config import google_health_tokens_path_for
+
     for public_id, ctx in _google_health_sync_targets():
         try:
             from domestique_ai.ingestion.google_health import sync_google_health_morning_metrics
 
-            client = GoogleHealthClient.from_tokens_file()
+            client = GoogleHealthClient.from_tokens_file(google_health_tokens_path_for(ctx))
             if client is None:
                 continue
             sync_google_health_morning_metrics(
@@ -286,11 +293,13 @@ def _daily_morning_check_job() -> None:
 
     # Pre-sync Google Health (hier → aujourd'hui), idempotent — seulement pour
     # les athlètes avec tokens.
+    from domestique_ai.config import google_health_tokens_path_for
+
     for public_id, ctx in targets:
         try:
             from domestique_ai.ingestion.google_health import sync_google_health_morning_metrics
 
-            client = GoogleHealthClient.from_tokens_file()
+            client = GoogleHealthClient.from_tokens_file(google_health_tokens_path_for(ctx))
             if client is None:
                 continue
             sync_google_health_morning_metrics(
@@ -301,18 +310,21 @@ def _daily_morning_check_job() -> None:
             )
         except Exception:  # noqa: BLE001
             log.warning("Check du matin [%s] : pre-sync Google Health échoué.", public_id[:8])
-    # Pre-sync Garmin (propriétaire) : la séance d'hier soir doit être ingérée.
+    # Pre-sync Garmin (tous les athlètes connectés) : la séance d'hier soir doit
+    # être ingérée avant d'évaluer la décision du matin.
     try:
-        from domestique_ai.athlete_context import context_for_athlete
+        from domestique_ai.config import garmin_token_dir_for
         from domestique_ai.export.garmin_connect import token_cache_present
-        from domestique_ai.platform_db import get_or_create_bootstrap_coach
 
-        if token_cache_present():
-            bootstrap = get_or_create_bootstrap_coach()
-            if bootstrap is not None:
-                ctx = context_for_athlete(bootstrap)
-                if not trigger_garmin_sync(ctx, bootstrap["public_id"]):
-                    log.info("Check du matin : sync Garmin déjà en cours, skip.")
+        for public_id, ctx in targets:
+            try:
+                if not token_cache_present(garmin_token_dir_for(ctx)):
+                    continue
+                key = public_id or "bootstrap"
+                if not trigger_garmin_sync(ctx, key):
+                    log.info("Check du matin [%s] : sync Garmin déjà en cours, skip.", key[:8])
+            except Exception:  # noqa: BLE001 — best-effort par athlète
+                log.warning("Check du matin [%s] : pre-sync Garmin échoué.", public_id[:8])
     except Exception:  # noqa: BLE001
         log.warning("Check du matin : pre-sync Garmin échoué (best-effort).")
 

@@ -31,6 +31,7 @@ from domestique_ai.config import (
     get_availability_path,
     get_db_path,
     get_ftp,
+    get_garmin_credentials,
     get_hr_max,
     get_hr_rest,
     get_level,
@@ -55,6 +56,13 @@ class AthleteContext:
     sex: str
     lthr_pct: float
     level: str = "intermediate"
+    # ``public_id`` vide = bootstrap (données legacy au chemin global). Sert à
+    # dériver les chemins de connexion par athlète (tokens Garmin/Google Health).
+    public_id: str = ""
+    # Credentials Garmin *du compte de l'athlète* (sinon fallback env bootstrap).
+    # Ne sortent jamais dans un payload API.
+    garmin_email: str | None = None
+    garmin_password: str | None = None
 
 
 def context_from_env() -> AthleteContext:
@@ -63,6 +71,7 @@ def context_from_env() -> AthleteContext:
     Délègue intégralement aux getters de ``config`` : ``context_from_env().ftp``
     vaut ``get_ftp()`` par construction. À appeler frais à chaque point d'entrée.
     """
+    garmin_email, garmin_password = get_garmin_credentials()
     return AthleteContext(
         db_path=get_db_path(),
         profile_path=get_profile_path(),
@@ -74,6 +83,9 @@ def context_from_env() -> AthleteContext:
         sex=get_sex(),
         lthr_pct=get_lthr_pct(),
         level=get_level(),
+        public_id="",
+        garmin_email=garmin_email,
+        garmin_password=garmin_password,
     )
 
 
@@ -95,10 +107,15 @@ def context_for_athlete(user: dict) -> AthleteContext:
     # importer ce module au top créerait un cycle (cf. config._profile_or_none).
     from domestique_ai.config import get_athletes_root
     from domestique_ai.llm.profile import load_profile
+    from domestique_ai.platform_db import get_user_garmin_credentials
 
     root = get_athletes_root() / user["public_id"]
     profile_path = root / "profile.yaml"
     profile = load_profile(profile_path)  # Profile | None, ne lit jamais l'env
+    user_id = user.get("id")
+    garmin_email, garmin_password = (
+        get_user_garmin_credentials(user_id) if user_id is not None else (None, None)
+    )
 
     return AthleteContext(
         db_path=root / "strava_activities.db",
@@ -111,4 +128,7 @@ def context_for_athlete(user: dict) -> AthleteContext:
         sex=(profile.sex if profile else None) or "M",
         lthr_pct=profile.lthr_pct if profile else 0.88,
         level=profile.level if profile else "intermediate",
+        public_id=user["public_id"],
+        garmin_email=garmin_email,
+        garmin_password=garmin_password,
     )

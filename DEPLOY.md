@@ -156,6 +156,26 @@ Points de contrôle après migration :
   `tar xzf ~/domestique-ai-backup-*.tgz` (remet `data/` en l'état), puis relancer
   l'ancienne image.
 
+### 3.3 — Connexions Garmin / Google Health (par athlète)
+
+Depuis l'isolation multi-tenant, chaque athlète connecte **ses propres** sources
+depuis sont interface ; il n'y a plus de compte global partagé :
+
+- **Garmin Connect** : Réglages → **Garmin Connect** → email + mot de passe, puis
+  code MFA si demandé. Les credentials vont en DB plateforme
+  (`users.garmin_email`/`garmin_password`) et les tokens dans
+  `data/athletes/<public_id>/.garmin_tokens`. L'auto-sync Garmin couvre tous les
+  athlètes connectés.
+- **Google Health** : page **Santé** → « Connecter Google Health » (OAuth navigateur).
+  Tokens dans `data/athletes/<public_id>/.google_health_tokens.json`.
+
+Les variables `GARMIN_EMAIL` / `GARMIN_PASSWORD` / `GARMIN_TOKEN_DIR` /
+`GOOGLE_HEALTH_TOKENS_PATH` du `.env` ne concernent plus que le **compte
+bootstrap** (propriétaire) — utile uniquement pour la migration d'un historique
+existant. Pour un athlète hérité non-bootstrap, ses tokens doivent se trouver
+dans son dossier `data/athletes/<public_id>/` (les déplacer depuis le chemin
+global une fois le conteneur arrêté).
+
 ## Étape 4 — Accès depuis le tailnet
 
 Depuis n'importe quel appareil connecté au même tailnet (laptop, téléphone, tablette) :

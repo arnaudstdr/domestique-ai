@@ -181,7 +181,9 @@ def test_garmin_auto_sync_job_triggers_bootstrap(monkeypatch):
     # Cache token Garmin présent (dossier temporaire vide suffit : on mocke).
     with tempfile.TemporaryDirectory() as td:
         monkeypatch.setattr(domestique_ai.config, "get_garmin_token_dir", lambda: Path(td))
-        monkeypatch.setattr("domestique_ai.export.garmin_connect.token_cache_present", lambda: True)
+        monkeypatch.setattr(
+            "domestique_ai.export.garmin_connect.token_cache_present", lambda token_dir=None: True
+        )
         seen: list[str] = []
 
         def fake_trigger(ctx_, key) -> bool:

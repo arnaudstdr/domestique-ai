@@ -496,6 +496,23 @@ class SyncResult(BaseModel):
     error: str | None = None
 
 
+# ---- Connexion Garmin (par athlète) ------------------------------------------
+
+
+class GarminConnectRequest(BaseModel):
+    email: str
+    password: str
+
+
+class GarminMfaRequest(BaseModel):
+    code: str
+
+
+class GarminConnectResponse(BaseModel):
+    status: Literal["connected", "mfa_required"]
+    detail: str | None = None
+
+
 # ---- Coach -------------------------------------------------------------------
 
 

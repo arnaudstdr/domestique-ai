@@ -732,7 +732,7 @@ def backfill_garmin_fields(
     path = Path(db_path) if db_path else (ctx.db_path if ctx else get_db_path())
     init_db(path, ctx=ctx)
     if client is None:
-        client = get_ingest_client()
+        client = _ingest_client_for(ctx)
 
     conn = sqlite3.connect(path)
     try:
@@ -870,11 +870,34 @@ def backfill_garmin_fields(
 # ---------------------------------------------------------------------------
 
 
-def get_ingest_client(token_dir: Path | None = None) -> Any:
+def _ingest_client_for(ctx: AthleteContext | None) -> Any:
+    """Client Garmin scopé sur l'athlète ``ctx`` (tokens + credentials dédiés)."""
+    if ctx is None:
+        return get_ingest_client()
+    from domestique_ai.config import garmin_token_dir_for
+
+    return get_ingest_client(
+        token_dir=garmin_token_dir_for(ctx),
+        email=ctx.garmin_email,
+        password=ctx.garmin_password,
+    )
+
+
+def get_ingest_client(
+    token_dir: Path | None = None,
+    *,
+    email: str | None = None,
+    password: str | None = None,
+) -> Any:
     """Client ``garminconnect`` authentifié, réutilisant le cache token du push.
 
+    ``token_dir``/``email``/``password`` explicites = compte de l'athlète (à
+    passer via ``garmin_token_dir_for(ctx)`` + ``ctx.garmin_email`` /
+    ``ctx.garmin_password``). Sans argument, repli sur le ``.env`` et le dossier
+    global (bootstrap legacy).
+
     Lève ``GarminIngestError`` avec un message actionnable si les credentials
-    ou le cache token manquent (seed interactif requis — MFA inclus).
+    ou le cache token manquent (connexion à initier depuis l'UI).
     """
     from domestique_ai.export.garmin_connect import (
         GarminPushError,
@@ -883,20 +906,20 @@ def get_ingest_client(token_dir: Path | None = None) -> Any:
         token_cache_present,
     )
 
-    if not credentials_present():
+    if not credentials_present(email, password):
         raise GarminIngestError(
-            "GARMIN_EMAIL / GARMIN_PASSWORD absents du .env — requis pour l'ingestion Garmin."
+            "Aucun identifiant Garmin Connect — connecte Garmin depuis les réglages."
         )
-    if not token_cache_present():
+    if not token_cache_present(token_dir):
         raise GarminIngestError(
-            "Pas de tokens Garmin Connect — lance `python -m domestique_ai.export.garmin_connect` "
-            "une fois (login interactif, MFA inclus) pour les initialiser."
+            "Pas de tokens Garmin Connect — connecte Garmin depuis les réglages "
+            "(login + code MFA)."
         )
     try:
-        return get_client(token_dir=token_dir)
+        return get_client(token_dir=token_dir, email=email, password=password)
     except GarminPushError as exc:
         raise GarminIngestError(
-            f"Authentification Garmin échouée — re-seed le token : {exc}"
+            f"Authentification Garmin échouée — reconnecte Garmin : {exc}"
         ) from exc
 
 
@@ -929,7 +952,7 @@ def sync_activities_garmin(
 
     init_db(db_path, ctx=ctx)
     if client is None:
-        client = get_ingest_client()
+        client = _ingest_client_for(ctx)
 
     hr_rest = ctx.hr_rest if ctx else get_hr_rest()
     hr_max = ctx.hr_max if ctx else get_hr_max()

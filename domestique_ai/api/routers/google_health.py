@@ -5,7 +5,7 @@ from __future__ import annotations
 import datetime as dt
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import RedirectResponse, Response
 
 from domestique_ai.api.deps import get_athlete_context
@@ -15,7 +15,12 @@ from domestique_ai.api.schemas import (
     GoogleHealthSyncResponse,
 )
 from domestique_ai.athlete_context import AthleteContext
-from domestique_ai.config import get_app_base_url, get_google_health_tokens_path
+from domestique_ai.config import (
+    get_app_base_url,
+    get_google_health_credentials,
+    get_session_secret,
+    google_health_tokens_path_for,
+)
 from domestique_ai.ingestion.google_health import (
     GoogleHealthClient,
     sync_google_health_morning_metrics,
@@ -27,9 +32,8 @@ router = APIRouter(prefix="/api/google-health", tags=["google-health"])
 
 
 def _tokens_path(ctx: AthleteContext) -> Any:
-    # Single-user bootstrap pour l'instant : tokens dans data/.google_health_tokens.json.
-    # À terme, un fichier par athlète : ctx.tokens_path.with_suffix(".google_health.json").
-    return get_google_health_tokens_path()
+    """Fichier de tokens Google Health de l'athlète (chemin per-athlète)."""
+    return google_health_tokens_path_for(ctx)
 
 
 def _client_or_404(ctx: AthleteContext) -> GoogleHealthClient:
@@ -67,15 +71,16 @@ def _has_credentials() -> bool:
 
 @router.get("/auth")
 def get_google_health_auth(
-    request: Request,
     ctx: AthleteContext = Depends(get_athlete_context),  # noqa: B008
 ) -> dict[str, str]:
-    """Retourne l'URL de consentement Google OAuth2 pour redirection front."""
+    """Retourne l'URL de consentement Google OAuth2 pour redirection front.
+
+    Le ``state`` est **auto-porteur** (public_id signé HMAC) : le callback étant
+    appelé par Google sans Bearer, il doit pouvoir retrouver l'athlète cible sans
+    session serveur ni fichier partagé.
+    """
     client = _build_client(ctx)
-    # Stocke un state minimal dans le token file (pas de session côté serveur).
-    state = _generate_state(request, ctx)
-    client.tokens["oauth_state"] = state
-    client.save_tokens()
+    state = _sign_state(ctx.public_id)
     return {"auth_url": client.get_auth_url(state=state)}
 
 
@@ -87,13 +92,12 @@ def get_google_health_callback(
 ) -> RedirectResponse:
     """Callback OAuth2 Google Health : échange le code et redirige vers le front.
 
-    Ce endpoint est appelé par Google (redirection navigateur) et est donc
-    exempté du Bearer auth. On reconstruit le client à partir du compte
-    bootstrap (single-user pour l'instant) et on valide le state stocké
-    localement.
+    Appelé par Google (redirection navigateur), donc exempté du Bearer auth. Le
+    ``state`` signé identifie l'athlète destinataire des tokens — chacun garde son
+    propre fichier (``<athletes_root>/<public_id>/.google_health_tokens.json``).
     """
     from domestique_ai.athlete_context import context_for_athlete
-    from domestique_ai.platform_db import get_or_create_bootstrap_coach
+    from domestique_ai.platform_db import get_or_create_bootstrap_coach, get_user_by_public_id
 
     if error:
         log.warning("OAuth Google Health refusé : %s", error)
@@ -102,13 +106,20 @@ def get_google_health_callback(
         log.warning("Callback Google Health : paramètre 'code' manquant.")
         return _redirect_front("google-health=error")
 
-    bootstrap = get_or_create_bootstrap_coach()
-    ctx = context_for_athlete(bootstrap)
-    client = _build_client(ctx)
-    stored_state = client.tokens.get("oauth_state")
-    if stored_state and state != stored_state:
+    public_id = _verify_state(state)
+    if public_id is None:
         log.warning("Callback Google Health : state OAuth invalide.")
         return _redirect_front("google-health=error")
+
+    user = (
+        get_user_by_public_id(public_id) if public_id else get_or_create_bootstrap_coach()
+    )
+    if user is None:
+        log.warning("Callback Google Health : athlète %s introuvable.", public_id[:8])
+        return _redirect_front("google-health=error")
+
+    ctx = context_for_athlete(user)
+    client = _build_client(ctx)
 
     try:
         client.exchange_code(code)
@@ -116,7 +127,6 @@ def get_google_health_callback(
         log.exception("Échec échange token Google Health.")
         return _redirect_front("google-health=error")
 
-    client.tokens.pop("oauth_state", None)
     client.save_tokens()
     return _redirect_front("google-health=connected")
 
@@ -179,8 +189,6 @@ def post_google_health_disconnect(
 
 
 def _build_client(ctx: AthleteContext) -> GoogleHealthClient:
-    from domestique_ai.config import get_google_health_credentials
-
     client_id, client_secret, redirect_uri = get_google_health_credentials()
     if not client_id or not client_secret:
         raise HTTPException(
@@ -205,10 +213,57 @@ def _build_client(ctx: AthleteContext) -> GoogleHealthClient:
     )
 
 
-def _generate_state(request: Request, ctx: AthleteContext) -> str:
-    import secrets
+def _sign_state(public_id: str) -> str:
+    """Encode ``public_id`` + une signature HMAC dans un ``state`` OAuth signé.
 
-    return secrets.token_urlsafe(16)
+    Format ``<b64url(public_id)>.<b64url(hmac)>``. Le callback peut ainsi
+    retrouver l'athlète destinataire sans stockage serveur (pas de session, pas
+    de fichier partagé).
+    """
+    import base64
+    import hashlib
+    import hmac
+
+    raw = public_id.encode("utf-8")
+    sig = hmac.new(get_session_secret(), b"google-health-state:" + raw, hashlib.sha256).digest()
+    return (
+        base64.urlsafe_b64encode(raw).rstrip(b"=").decode("ascii")
+        + "."
+        + base64.urlsafe_b64encode(sig).rstrip(b"=").decode("ascii")
+    )
+
+
+def _verify_state(state: str | None) -> str | None:
+    """Vérifie un ``state`` signé et retourne le ``public_id`` (``""`` bootstrap).
+
+    ``None`` si absent, mal formé ou signature invalide.
+    """
+    import base64
+    import hashlib
+    import hmac
+
+    if not state or "." not in state:
+        return None
+    encoded, _, signature = state.partition(".")
+    try:
+        padding = "=" * (-len(encoded) % 4)
+        raw = base64.urlsafe_b64decode(encoded + padding)
+    except (ValueError, TypeError):
+        return None
+    expected = hmac.new(
+        get_session_secret(), b"google-health-state:" + raw, hashlib.sha256
+    ).digest()
+    try:
+        padding_sig = "=" * (-len(signature) % 4)
+        provided = base64.urlsafe_b64decode(signature + padding_sig)
+    except (ValueError, TypeError):
+        return None
+    if not hmac.compare_digest(expected, provided):
+        return None
+    try:
+        return raw.decode("utf-8")
+    except UnicodeDecodeError:
+        return None
 
 
 def _record_sync(client: GoogleHealthClient) -> None:
