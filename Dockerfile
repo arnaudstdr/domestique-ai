@@ -16,8 +16,12 @@ FROM python:3.12-slim AS runtime
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    PIP_NO_CACHE_DIR=1 \
-    PIP_DISABLE_PIP_VERSION_CHECK=1
+    UV_PROJECT_ENVIRONMENT=/usr/local \
+    UV_LINK_MODE=copy \
+    UV_COMPILE_BYTECODE=1
+
+# uv installé depuis l'image officielle (binaire statique, pas de pip).
+COPY --from=ghcr.io/astral-sh/uv:0.10.9 /uv /uvx /bin/
 
 RUN apt-get update \
  && apt-get install -y --no-install-recommends curl \
@@ -26,11 +30,13 @@ RUN apt-get update \
 RUN useradd --create-home --shell /bin/bash app
 WORKDIR /app
 
-COPY pyproject.toml README.md LICENSE ./
-COPY domestique_ai ./domestique_ai
+# Dépendances d'abord (cache Docker) : résolution figée par uv.lock — plus de
+# backtracking pip, build reproductible et rapide (notamment sur aarch64).
+COPY pyproject.toml uv.lock README.md LICENSE ./
+RUN uv sync --frozen --no-dev --no-install-project
 
-RUN pip install --upgrade pip \
- && pip install -e .
+COPY domestique_ai ./domestique_ai
+RUN uv sync --frozen --no-dev
 
 # Build React copié depuis le stage frontend
 COPY --from=frontend-build /app/frontend/dist /app/frontend/dist
