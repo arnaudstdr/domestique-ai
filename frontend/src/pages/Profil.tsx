@@ -73,12 +73,12 @@ export default function Profil() {
         </p>
       </header>
       <AvatarSection />
-      <GarminSection />
       <ProfileSection />
       <AvailabilitySection />
+      <GarminSection />
       <MemoryPanel />
-      <AccountSection />
       <SecuritySection />
+      <AccountSection />
     </div>
   );
 }
