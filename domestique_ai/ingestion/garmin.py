@@ -730,6 +730,7 @@ def backfill_garmin_fields(
     Retourne ``{"updated": n, "polylines": n, "details": n}``.
     """
     path = Path(db_path) if db_path else (ctx.db_path if ctx else get_db_path())
+    _assert_ctx_can_sync(ctx)
     init_db(path, ctx=ctx)
     if client is None:
         client = _ingest_client_for(ctx)
@@ -870,12 +871,69 @@ def backfill_garmin_fields(
 # ---------------------------------------------------------------------------
 
 
+def _token_cache_present(token_dir: Path | None = None) -> bool:
+    """``token_cache_present`` importé tardivement (évite un import circulaire)."""
+    from domestique_ai.export.garmin_connect import token_cache_present
+
+    return token_cache_present(token_dir)
+
+
+def _assert_ctx_can_sync(ctx: AthleteContext | None) -> None:
+    """Refuse la sync d'un athlète sans connexion Garmin **propre** (garde dure).
+
+    Empêche structurellement qu'une sync écrive les données d'un compte dans la
+    base d'un athlète qui n'a ni credentials Garmin ni tokens à lui — cause
+    historique du bug d'écriture croisée. Ne contraint **pas** le mode legacy /
+    bootstrap (``ctx is None`` ou ``public_id`` vide), dont les données vivent au
+    chemin global et dont la connexion est résolue via le ``.env``.
+    """
+    if ctx is None or not ctx.public_id:
+        return
+    from domestique_ai.config import garmin_token_dir_for
+
+    has_creds = bool(ctx.garmin_email and ctx.garmin_password)
+    has_tokens = _token_cache_present(garmin_token_dir_for(ctx))
+    if not has_creds and not has_tokens:
+        raise GarminIngestError(
+            "Athlète sans connexion Garmin — sync refusée. "
+            "Connecte Garmin depuis les réglages (email + mot de passe + MFA)."
+        )
+
+
+def orphan_garmin_tokens(ctx: AthleteContext | None) -> bool:
+    """True si des tokens Garmin globaux legacy subsistent pour un athlète non-bootstrap.
+
+    Signal de résidu de l'ancien modèle mono-compte : l'athlète n'a pas ses
+    propres tokens mais le dossier global (``data/.garmin_tokens``) en contient —
+    risque de partage de compte si une sync utilisait le client global.
+    """
+    if ctx is None or not ctx.public_id:
+        return False
+    from domestique_ai.config import garmin_token_dir_for, get_garmin_token_dir
+
+    if _token_cache_present(garmin_token_dir_for(ctx)):
+        return False  # l'athlète a ses propres tokens → OK
+    return _token_cache_present(get_garmin_token_dir())
+
+
+def _check_token_coherence(ctx: AthleteContext | None) -> None:
+    """Warning (jamais bloquant) si un token global legacy traîne pour un athlète."""
+    if not orphan_garmin_tokens(ctx):
+        return
+    log.warning(
+        "Garmin [%s] : tokens globaux résiduels détectés, l'athlète n'a pas de "
+        "token propre — risque de partage de compte.",
+        ctx.public_id[:8],  # type: ignore[union-attr]
+    )
+
+
 def _ingest_client_for(ctx: AthleteContext | None) -> Any:
     """Client Garmin scopé sur l'athlète ``ctx`` (tokens + credentials dédiés)."""
     if ctx is None:
         return get_ingest_client()
     from domestique_ai.config import garmin_token_dir_for
 
+    _check_token_coherence(ctx)
     return get_ingest_client(
         token_dir=garmin_token_dir_for(ctx),
         email=ctx.garmin_email,
@@ -950,6 +1008,7 @@ def sync_activities_garmin(
     if start_date > end_date:
         return 0
 
+    _assert_ctx_can_sync(ctx)
     init_db(db_path, ctx=ctx)
     if client is None:
         client = _ingest_client_for(ctx)

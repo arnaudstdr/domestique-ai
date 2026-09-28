@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import datetime as dt
 import shutil
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
 
@@ -242,6 +243,8 @@ def delete_roster_athlete(
             detail="Le compte propriétaire ne peut pas être supprimé.",
         )
 
+    stats = _count_athlete_data(public_id)
+
     try:
         deleted = delete_user(target["id"])
     except ValueError as exc:
@@ -254,11 +257,66 @@ def delete_roster_athlete(
 
     _remove_athlete_dir(public_id)
     log.info(
-        "Coach %s supprime l'athlète %s du roster",
+        "Coach %s supprime l'athlète %s — %s activités, %s métriques matin, "
+        "%s plans, dossier %s (%d fichier(s))",
         coach["public_id"][:8],
         public_id[:8],
+        stats["activities"],
+        stats["morning_metrics"],
+        stats["plans"],
+        stats["dir"],
+        stats["files"],
     )
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+def _count_athlete_data(public_id: str) -> dict[str, Any]:
+    """Comptage best-effort de ce qui va être supprimé (audit log).
+
+    Ne lève jamais : une base absente/illisible donne des compteurs ``None``/``0``
+    et la suppression se poursuit.
+    """
+    import sqlite3
+
+    from domestique_ai.config import get_athletes_root
+
+    stats: dict[str, Any] = {
+        "activities": None,
+        "morning_metrics": None,
+        "plans": None,
+        "dir": str(get_athletes_root() / public_id),
+        "files": 0,
+    }
+    if not public_id:
+        return stats
+
+    athlete_dir = get_athletes_root() / public_id
+    try:
+        if athlete_dir.exists():
+            stats["files"] = sum(1 for _ in athlete_dir.rglob("*") if _.is_file())
+    except OSError:  # noqa: BLE001 — best-effort
+        pass
+
+    db_path = athlete_dir / "strava_activities.db"
+    if not db_path.exists():
+        return stats
+    try:
+        conn = sqlite3.connect(db_path)
+        try:
+            for key, table in (
+                ("activities", "activities"),
+                ("morning_metrics", "morning_metrics"),
+                ("plans", "training_plans"),
+            ):
+                try:
+                    stats[key] = conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
+                except sqlite3.Error:
+                    stats[key] = None
+        finally:
+            conn.close()
+    except sqlite3.Error:  # noqa: BLE001 — base illisible : on garde None
+        pass
+    return stats
 
 
 def _remove_athlete_dir(public_id: str) -> None:

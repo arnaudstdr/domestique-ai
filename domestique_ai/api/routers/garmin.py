@@ -155,16 +155,36 @@ def _run_sync(ctx: AthleteContext, key: str) -> None:
 def get_status(ctx: AthleteContext = Depends(get_athlete_context)) -> dict[str, Any]:  # noqa: B008
     """Statut de la connexion Garmin pour l'athlète courant."""
     from domestique_ai.export.garmin_connect import credentials_present, token_cache_present
+    from domestique_ai.ingestion.garmin import orphan_garmin_tokens
 
     credentials = credentials_present(ctx.garmin_email, ctx.garmin_password)
     tokens = token_cache_present(garmin_token_dir_for(ctx))
+    state = _state_for(_public_key(ctx))
     return {
         "credentials": credentials,
         "tokens": tokens,
         "connected": credentials and tokens,
         "email": ctx.garmin_email,
-        "sync": _state_for(_public_key(ctx)),
+        "needs_reauth": _needs_reauth(state),
+        "orphan_tokens": orphan_garmin_tokens(ctx),
+        "sync": state,
     }
+
+
+# Indices d'une erreur d'authentification dans le message de sync Garmin.
+_AUTH_ERROR_HINTS = ("auth", "401", "unauthorized", "token", "login")
+
+
+def _needs_reauth(state: dict[str, Any]) -> bool:
+    """True si le dernier sync a échoué sur un problème d'authentification.
+
+    La connexion Garmin est « expirée » (token rejeté, compte verrouillé…) et
+    l'athlète doit se reconnecter, contrairement à un échec réseau transitoire.
+    """
+    if state.get("status") != "error":
+        return False
+    error = (state.get("error") or "").lower()
+    return any(hint in error for hint in _AUTH_ERROR_HINTS)
 
 
 def _public_key(ctx: AthleteContext) -> str:

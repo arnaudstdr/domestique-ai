@@ -194,6 +194,7 @@ function GarminSection() {
   const [password, setPassword] = useState("");
   const [mfaCode, setMfaCode] = useState("");
   const [mfaPending, setMfaPending] = useState(false);
+  const [reauth, setReauth] = useState(false);
   const [busy, setBusy] = useState(false);
   const { push } = useToast();
   const viewing = useViewing();
@@ -241,6 +242,7 @@ function GarminSection() {
         push("Code MFA envoyé par Garmin — saisis-le ci-dessous.", "info");
       } else {
         setPassword("");
+        setReauth(false);
         push("Garmin Connect connecté.", "success");
       }
       load();
@@ -260,6 +262,7 @@ function GarminSection() {
       setMfaPending(false);
       setMfaCode("");
       setPassword("");
+      setReauth(false);
       push("Code MFA validé — Garmin Connect connecté.", "success");
       load();
     } catch (err) {
@@ -306,8 +309,32 @@ function GarminSection() {
           Consultation en lecture seule — la connexion Garmin appartient à
           l'athlète consulté.
         </p>
-      ) : connected ? (
+      ) : status.needs_reauth && status.connected && !reauth ? (
+        <div className="space-y-2 rounded-lg border border-red-500/30 bg-red-500/10 p-3">
+          <p className="text-xs text-red-300">
+            Connexion Garmin expirée ou rejetée — reconnecte-toi pour reprendre la
+            synchronisation.
+          </p>
+          <button
+            type="button"
+            onClick={() => {
+              setMfaPending(false);
+              setPassword("");
+              setReauth(true);
+            }}
+            className="btn-primary w-full"
+          >
+            Reconnecter Garmin
+          </button>
+        </div>
+      ) : connected && !reauth ? (
         <>
+          {status.orphan_tokens && (
+            <p className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-2 text-xs text-amber-300">
+              Anciens tokens Garmin globaux détectés — une reconnexion est
+              recommandée pour garantir l'isolation du compte.
+            </p>
+          )}
           <p className="text-sm text-accent">
             Garmin Connect connecté{status.email ? ` (${status.email})` : ""} —
             auto-sync activée.

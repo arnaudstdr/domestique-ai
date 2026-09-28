@@ -103,3 +103,30 @@ def test_delete_roster_athlete_outside_roster_403(client: TestClient):
 def test_delete_roster_athlete_unknown_403(client: TestClient):
     r = client.delete("/api/roster/athletes/doesnotexist", headers=_headers())
     assert r.status_code == 403
+
+
+def test_delete_roster_athlete_logs_summary(client: TestClient, caplog):
+    import sqlite3
+
+    from domestique_ai.config import get_athletes_root
+    from domestique_ai.ingestion.db import init_db
+    from domestique_ai.platform_db import get_or_create_bootstrap_coach
+
+    boot = get_or_create_bootstrap_coach()
+    athlete = create_user("athlete", "Audit")
+    link_coach_athlete(boot["id"], athlete["id"])
+
+    athlete_dir = get_athletes_root() / athlete["public_id"]
+    athlete_dir.mkdir(parents=True, exist_ok=True)
+    db = athlete_dir / "strava_activities.db"
+    init_db(db)
+    conn = sqlite3.connect(db)
+    conn.execute("INSERT INTO activities (date, duration) VALUES ('2026-01-01', 3600)")
+    conn.commit()
+    conn.close()
+
+    with caplog.at_level("INFO"):
+        r = client.delete(f"/api/roster/athletes/{athlete['public_id']}", headers=_headers())
+    assert r.status_code == 204
+    assert any("supprime l'athlète" in rec.message and "1 activités" in rec.message
+               for rec in caplog.records)

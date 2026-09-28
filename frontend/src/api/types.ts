@@ -370,6 +370,8 @@ export interface GarminStatus {
   tokens: boolean;
   connected: boolean;
   email: string | null;
+  needs_reauth: boolean;
+  orphan_tokens: boolean;
   sync: SyncStatus;
 }
 

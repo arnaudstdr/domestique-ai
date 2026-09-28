@@ -994,6 +994,104 @@ def test_get_ingest_client_raises_without_credentials(monkeypatch, tmp_path):
         get_ingest_client(token_dir=tmp_path)
 
 
+def _athlete_ctx(db_path, public_id="abc123", *, email=None, password=None) -> AthleteContext:
+    return AthleteContext(
+        db_path=db_path,
+        profile_path=db_path.parent / "profile.yaml",
+        objective_path=db_path.parent / "objective.yaml",
+        availability_path=db_path.parent / "availability.yaml",
+        ftp=250.0,
+        hr_rest=None,
+        hr_max=None,
+        sex="M",
+        lthr_pct=0.88,
+        public_id=public_id,
+        garmin_email=email,
+        garmin_password=password,
+    )
+
+
+def test_sync_refuses_athlete_without_connection(tmp_path, monkeypatch):
+    """Garde dure : un athlète non-bootstrap sans creds/tokens ne peut pas sync."""
+    monkeypatch.setenv("DOMESTIQUE_AI_ATHLETES_ROOT", str(tmp_path / "athletes"))
+    db = tmp_path / "g.db"
+    init_db(db)
+    client = _mock_client([])
+    with pytest.raises(GarminIngestError):
+        sync_activities_garmin(client, ctx=_athlete_ctx(db, "no-conn"))
+    # Aucun appel réseau déclenché.
+    client.get_activities_by_date.assert_not_called()
+
+
+def test_sync_allows_athlete_with_tokens(tmp_path, monkeypatch):
+    """Un athlète avec son propre cache token est autorisé."""
+    root = tmp_path / "athletes" / "withtok"
+    monkeypatch.setenv("DOMESTIQUE_AI_ATHLETES_ROOT", str(tmp_path / "athletes"))
+    (root / ".garmin_tokens").mkdir(parents=True)
+    (root / ".garmin_tokens" / "token.json").write_text("{}", encoding="utf-8")
+    db = root / "g.db"
+    db.parent.mkdir(parents=True, exist_ok=True)
+    init_db(db)
+    set_sync_meta(BACKFILL_FLAG, "2026-01-01", db)
+    client = _mock_client([])
+    sync_activities_garmin(client, ctx=_athlete_ctx(db, "withtok"))
+    client.get_activities_by_date.assert_called_once()
+
+
+def test_sync_guard_skips_bootstrap_ctx(tmp_path, monkeypatch):
+    """Le mode bootstrap (public_id vide) n'est pas contraint par la garde."""
+    monkeypatch.setenv("DOMESTIQUE_AI_ATHLETES_ROOT", str(tmp_path / "athletes"))
+    db = tmp_path / "g.db"
+    init_db(db)
+    set_sync_meta(BACKFILL_FLAG, "2026-01-01", db)
+    client = _mock_client([])
+    sync_activities_garmin(client, ctx=_athlete_ctx(db, public_id=""))
+    client.get_activities_by_date.assert_called_once()
+
+
+def test_orphan_tokens_detects_global_legacy(tmp_path, monkeypatch):
+    monkeypatch.setenv("DOMESTIQUE_AI_ATHLETES_ROOT", str(tmp_path / "athletes"))
+    global_dir = tmp_path / "global_tokens"
+    monkeypatch.setenv("GARMIN_TOKEN_DIR", str(global_dir))
+    global_dir.mkdir(parents=True, exist_ok=True)
+    (global_dir / "t.json").write_text("{}", encoding="utf-8")
+
+    from domestique_ai.ingestion.garmin import orphan_garmin_tokens
+
+    ctx = _athlete_ctx(tmp_path / "g.db", "orphan1")
+    assert orphan_garmin_tokens(ctx) is True
+
+
+def test_orphan_tokens_false_when_athlete_has_own(tmp_path, monkeypatch):
+    monkeypatch.setenv("DOMESTIQUE_AI_ATHLETES_ROOT", str(tmp_path / "athletes"))
+    global_dir = tmp_path / "global_tokens"
+    monkeypatch.setenv("GARMIN_TOKEN_DIR", str(global_dir))
+    global_dir.mkdir(parents=True, exist_ok=True)
+    (global_dir / "t.json").write_text("{}", encoding="utf-8")
+
+    ath_dir = tmp_path / "athletes" / "own" / ".garmin_tokens"
+    ath_dir.mkdir(parents=True, exist_ok=True)
+    (ath_dir / "t.json").write_text("{}", encoding="utf-8")
+
+    from domestique_ai.ingestion.garmin import orphan_garmin_tokens
+
+    assert orphan_garmin_tokens(_athlete_ctx(tmp_path / "g.db", "own")) is False
+
+
+def test_token_coherence_logs_warning(tmp_path, monkeypatch, caplog):
+    monkeypatch.setenv("DOMESTIQUE_AI_ATHLETES_ROOT", str(tmp_path / "athletes"))
+    global_dir = tmp_path / "global_tokens"
+    monkeypatch.setenv("GARMIN_TOKEN_DIR", str(global_dir))
+    global_dir.mkdir(parents=True, exist_ok=True)
+    (global_dir / "t.json").write_text("{}", encoding="utf-8")
+
+    from domestique_ai.ingestion.garmin import _check_token_coherence
+
+    with caplog.at_level("WARNING"):
+        _check_token_coherence(_athlete_ctx(tmp_path / "g.db", "warnme"))
+    assert any("tokens globaux résiduels" in r.message for r in caplog.records)
+
+
 def test_sync_activities_garmin_incremental_window(tmp_path, monkeypatch):
     monkeypatch.delenv("STRAVA_HR_REST", raising=False)
     monkeypatch.delenv("STRAVA_HR_MAX", raising=False)

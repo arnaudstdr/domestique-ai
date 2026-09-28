@@ -168,3 +168,55 @@ def test_google_health_tokens_isolated_per_athlete(client: TestClient):
     r = client.get("/api/google-health/status", headers=_headers())
     assert r.status_code == 200
     assert r.json()["authenticated"] is False
+
+
+def test_garmin_status_needs_reauth_on_auth_error(client: TestClient, monkeypatch):
+    from domestique_ai.api.routers import garmin as garmin_module
+    from domestique_ai.athlete_context import context_for_athlete
+    from domestique_ai.export import garmin_connect as gc
+    from domestique_ai.platform_db import get_or_create_bootstrap_coach
+
+    monkeypatch.setenv("GARMIN_EMAIL", "bob@example.com")
+    monkeypatch.setenv("GARMIN_PASSWORD", "pw")
+    monkeypatch.setattr(gc, "token_cache_present", lambda token_dir=None: True)
+
+    coach = get_or_create_bootstrap_coach()
+    key = str(context_for_athlete(coach).db_path)
+    garmin_module._set_state(key, status="error", error="Authentication failed (401)")
+
+    r = client.get("/api/garmin/status", headers=_headers())
+    assert r.status_code == 200
+    assert r.json()["needs_reauth"] is True
+
+
+def test_garmin_status_needs_reauth_false_on_network_error(client: TestClient, monkeypatch):
+    from domestique_ai.api.routers import garmin as garmin_module
+    from domestique_ai.athlete_context import context_for_athlete
+    from domestique_ai.platform_db import get_or_create_bootstrap_coach
+
+    coach = get_or_create_bootstrap_coach()
+    key = str(context_for_athlete(coach).db_path)
+    garmin_module._set_state(key, status="error", error="Connection timed out")
+
+    r = client.get("/api/garmin/status", headers=_headers())
+    assert r.json()["needs_reauth"] is False
+
+
+def test_garmin_status_orphan_tokens_flag(client: TestClient, monkeypatch, tmp_path):
+    from domestique_ai.platform_db import get_or_create_bootstrap_coach
+
+    global_dir = tmp_path / "global_tokens"
+    monkeypatch.setenv("GARMIN_TOKEN_DIR", str(global_dir))
+    global_dir.mkdir(parents=True, exist_ok=True)
+    (global_dir / "t.json").write_text("{}", encoding="utf-8")
+
+    coach = get_or_create_bootstrap_coach()
+    # Le contexte bootstrap a public_id="" → orphan_tokens toujours False.
+    r = client.get("/api/garmin/status", headers=_headers())
+    assert r.json()["orphan_tokens"] is False
+
+    # Un athlète ciblé sans token propre → True.
+    r2 = client.get(
+        f"/api/garmin/status?athlete={coach['public_id']}", headers=_headers()
+    )
+    assert r2.status_code == 200
