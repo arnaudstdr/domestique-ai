@@ -320,3 +320,123 @@ def test_clear_feed_token_disables_feed():
     token = pdb.get_or_create_feed_token(user["id"])
     pdb.clear_feed_token(user["id"])
     assert pdb.get_user_by_feed_token(token) is None
+
+
+# ---- Inscription (email/password/verification) ------------------------------
+
+
+def test_create_user_with_credentials_is_unverified_when_asked():
+    user = pdb.create_user(
+        role="athlete",
+        email="  New@B.C ",
+        password_hash="hash",
+        email_verified=False,
+    )
+    assert user["email"] == "new@b.c"  # normalisé
+    assert user["email_verified"] is False
+    assert user["has_password"] is True
+
+
+def test_create_user_defaults_to_verified_for_legacy():
+    user = pdb.create_user(role="athlete")
+    assert user["email_verified"] is True
+
+
+def test_set_email_verified():
+    user = pdb.create_user(role="athlete", email="a@b.c", password_hash="h", email_verified=False)
+    pdb.set_email_verified(user["id"], True)
+    assert pdb.get_user_by_id(user["id"])["email_verified"] is True
+
+
+# ---- Code d'invitation réutilisable du coach --------------------------------
+
+
+def test_coach_invite_code_lifecycle():
+    coach = pdb.create_user(role="coach")
+    code = pdb.get_or_create_coach_invite_code(coach["id"])
+    # Idempotent.
+    assert pdb.get_or_create_coach_invite_code(coach["id"]) == code
+    # Résolution inverse → le coach ; le code n'est pas exposé par _user_dict.
+    resolved = pdb.get_user_by_coach_invite_code(code)
+    assert resolved is not None and resolved["public_id"] == coach["public_id"]
+    assert "coach_invite_code" not in resolved
+    # Rotation : l'ancien code meurt.
+    new = pdb.rotate_coach_invite_code(coach["id"])
+    assert new != code
+    assert pdb.get_user_by_coach_invite_code(code) is None
+    assert pdb.get_user_by_coach_invite_code(new)["public_id"] == coach["public_id"]
+
+
+def test_coach_invite_code_rejects_non_coach():
+    athlete = pdb.create_user(role="athlete")
+    with pytest.raises(ValueError):
+        pdb.get_or_create_coach_invite_code(athlete["id"])
+
+
+# ---- Tokens éphémères (email_verify / password_reset) -----------------------
+
+
+def test_auth_token_create_consume_single_use():
+    user = pdb.create_user(role="athlete", email="a@b.c", password_hash="h")
+    _row, token = pdb.create_auth_token(user["id"], "email_verify", _future())
+    resolved = pdb.consume_auth_token(token, "email_verify")
+    assert resolved is not None and resolved["public_id"] == user["public_id"]
+    # Usage unique.
+    assert pdb.consume_auth_token(token, "email_verify") is None
+
+
+def test_auth_token_purpose_is_scoped():
+    user = pdb.create_user(role="athlete", email="a@b.c", password_hash="h")
+    _row, token = pdb.create_auth_token(user["id"], "email_verify", _future())
+    # Mauvais purpose → refusé.
+    assert pdb.consume_auth_token(token, "password_reset") is None
+
+
+def test_auth_token_expired_is_rejected():
+    user = pdb.create_user(role="athlete", email="a@b.c", password_hash="h")
+    _row, token = pdb.create_auth_token(user["id"], "password_reset", _past())
+    assert pdb.consume_auth_token(token, "password_reset") is None
+
+
+def test_create_auth_token_invalidates_previous_of_same_purpose():
+    user = pdb.create_user(role="athlete", email="a@b.c", password_hash="h")
+    _r1, first = pdb.create_auth_token(user["id"], "email_verify", _future())
+    _r2, second = pdb.create_auth_token(user["id"], "email_verify", _future())
+    assert pdb.consume_auth_token(first, "email_verify") is None
+    assert pdb.consume_auth_token(second, "email_verify") is not None
+
+
+# ---- Rattachement d'un athlète existant -------------------------------------
+
+
+def test_consume_invitation_for_link_existing_athlete():
+    coach = pdb.create_user(role="coach")
+    athlete = pdb.create_user(role="athlete", email="a@b.c", password_hash="h")
+    _inv, token = pdb.create_invitation(created_by=coach["id"], role="athlete")
+
+    inv = pdb.consume_invitation_for_link(token, athlete["id"])
+    assert inv["status"] == "accepted"
+    assert inv["accepted_user_id"] == athlete["id"]
+    # Le lien coach↔athlète est créé, sans nouvel utilisateur.
+    roster = pdb.list_athletes_for_coach(coach["id"])
+    assert [a["public_id"] for a in roster] == [athlete["public_id"]]
+    # Invitation non réutilisable.
+    with pytest.raises(pdb.InvitationError):
+        pdb.consume_invitation_for_link(token, athlete["id"])
+
+
+def test_consume_invitation_for_link_rejects_non_athlete_invitation():
+    coach = pdb.create_user(role="coach")
+    athlete = pdb.create_user(role="athlete")
+    _inv, token = pdb.create_invitation(created_by=coach["id"], role="coach")
+    with pytest.raises(pdb.InvitationError):
+        pdb.consume_invitation_for_link(token, athlete["id"])
+
+
+def test_revoke_all_sessions():
+    user = pdb.create_user(role="athlete")
+    _s1, t1 = pdb.create_session(user["id"])
+    _s2, t2 = pdb.create_session(user["id"])
+    assert pdb.revoke_all_sessions(user["id"]) == 2
+    assert pdb.resolve_session_token(t1) is None
+    assert pdb.resolve_session_token(t2) is None

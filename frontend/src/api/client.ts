@@ -15,6 +15,7 @@ import type {
   CoachMemoryFact,
   CoachMessage,
   CoachSession,
+  CoachInviteLink,
   DailyBriefResponse,
   FtpProjectionResponse,
   GoogleHealthAuthResponse,
@@ -39,6 +40,7 @@ import type {
   ReconnectLink,
   RideVolumeResponse,
   SimilarActivitiesResponse,
+  SignupResponse,
   StatusResponse,
   SubscriptionFeed,
   SyncResult,
@@ -484,6 +486,7 @@ export const api = {
   },
   auth: {
     me: () => http<MeResponse>(`/api/auth/me`),
+    config: () => http<{ signup_enabled: boolean }>(`/api/auth/config`),
     uploadAvatar: (file: File) => {
       const form = new FormData();
       form.append("file", file);
@@ -504,21 +507,66 @@ export const api = {
         method: "POST",
         body: JSON.stringify({ challenge, code }),
       }),
-    acceptInvite: (
-      inviteToken: string,
+    signup: (
+      email: string,
+      password: string,
+      role: "coach" | "athlete",
       displayName?: string | null,
-      email?: string | null,
-      password?: string | null,
     ) =>
+      http<SignupResponse>(`/api/auth/signup`, {
+        method: "POST",
+        body: JSON.stringify({
+          email,
+          password,
+          role,
+          display_name: displayName || null,
+        }),
+      }),
+    verifyEmail: (token: string) =>
+      http<StatusResponse>(`/api/auth/verify-email`, {
+        method: "POST",
+        body: JSON.stringify({ token }),
+      }),
+    resendVerification: () =>
+      http<StatusResponse>(`/api/auth/resend-verification`, { method: "POST" }),
+    forgotPassword: (email: string) =>
+      http<StatusResponse>(`/api/auth/forgot-password`, {
+        method: "POST",
+        body: JSON.stringify({ email }),
+      }),
+    resetPassword: (token: string, newPassword: string) =>
+      http<StatusResponse>(`/api/auth/reset-password`, {
+        method: "POST",
+        body: JSON.stringify({ token, new_password: newPassword }),
+      }),
+    acceptInvite: (opts: {
+      inviteToken?: string | null;
+      coachCode?: string | null;
+      displayName?: string | null;
+      email?: string | null;
+      password?: string | null;
+    }) =>
       http<AcceptInviteResponse>(`/api/auth/accept-invite`, {
         method: "POST",
         body: JSON.stringify({
-          invite_token: inviteToken,
-          display_name: displayName || null,
-          email: email || null,
-          password: password || null,
+          invite_token: opts.inviteToken || null,
+          coach_code: opts.coachCode || null,
+          display_name: opts.displayName || null,
+          email: opts.email || null,
+          password: opts.password || null,
         }),
       }),
+    acceptInviteLink: (opts: { inviteToken?: string | null; coachCode?: string | null }) =>
+      http<StatusResponse>(`/api/auth/accept-invite/link`, {
+        method: "POST",
+        body: JSON.stringify({
+          invite_token: opts.inviteToken || null,
+          coach_code: opts.coachCode || null,
+        }),
+      }),
+    coachInviteLink: () => http<CoachInviteLink>(`/api/auth/coach-invite-link`),
+    rotateCoachInviteLink: () =>
+      http<CoachInviteLink>(`/api/auth/coach-invite-link/rotate`, { method: "POST" }),
     logout: () => http<{ status: string }>(`/api/auth/logout`, { method: "POST" }),
     reconnect: (token: string) =>
       http<AcceptInviteResponse>(`/api/auth/reconnect`, {

@@ -80,6 +80,15 @@ client. Les deltas de raisonnement sont affichés dans l'expander
   (`Profil.tsx`, `AvatarSection`) ; l'en-tête (`App.tsx`) remplace l'icône
   `UserRound` par la miniature ; `Roster.tsx` affiche l'avatar (ou les initiales)
   de chaque athlète.
+- **Inscription / mot de passe** — pages publiques `Signup.tsx` (`/signup`,
+  masquée dans Login tant que `api.auth.config().signup_enabled` est faux),
+  `VerifyEmail.tsx` (`/verify-email?token=`), `ForgotPassword.tsx`
+  (`/forgot-password`), `ResetPassword.tsx` (`/reset-password?token=`).
+  `AcceptInvite.tsx` gère `?token=` **et** `?coach=` avec deux parcours : « créer
+  un compte » ou « j'ai déjà un compte » (login + TOTP puis
+  `acceptInviteLink`, sans doublon). Bandeau `EmailVerificationBanner.tsx` monté
+  dans `AuthedShell` tant que `me.email_verified` est faux. `Roster.tsx` affiche
+  aussi `ReusableInviteSection` (lien coach réutilisable, copie + régénération).
 
 ## Avatar — redimensionnement client
 

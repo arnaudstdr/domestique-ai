@@ -296,3 +296,234 @@ def test_auth_off_me_is_bootstrap_coach(client_auth_off: TestClient) -> None:
 
 def test_auth_off_data_passes(client_auth_off: TestClient) -> None:
     assert client_auth_off.get("/api/data").status_code == 200
+
+
+# ---- Inscription publique self-service --------------------------------------
+
+_STRONG_PASSWORD = "motdepasse1"
+
+
+def _signup(client: TestClient, *, role: str, email: str, password: str = _STRONG_PASSWORD):
+    return client.post(
+        "/api/auth/signup", json={"email": email, "password": password, "role": role}
+    )
+
+
+def _enable_totp(public_id: str) -> None:
+    """Active la 2FA du compte (le portail TOTP exige un compte conforme)."""
+    from domestique_ai.platform_db import enable_totp, get_user_by_public_id, set_totp_secret
+
+    user = get_user_by_public_id(public_id)
+    assert user is not None
+    set_totp_secret(user["id"], "JBSWY3DPEHPK3PXP")
+    assert enable_totp(user["id"])
+
+
+def test_signup_disabled_by_default(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("DOMESTIQUE_AI_SIGNUP_ENABLED", raising=False)
+    r = _signup(client, role="athlete", email="a@b.c")
+    assert r.status_code == 403
+
+
+def test_signup_athlete_creates_session(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("DOMESTIQUE_AI_SIGNUP_ENABLED", "1")
+    r = _signup(client, role="athlete", email="Ath@B.c")
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["role"] == "athlete"
+    assert body["invite_url"] is None
+    me = client.get("/api/auth/me", headers=_bearer(body["session_token"]))
+    assert me.status_code == 200
+    assert me.json()["email_verified"] is False
+    assert me.json()["email"] == "ath@b.c"
+
+
+def test_signup_coach_gets_reusable_invite_link(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("DOMESTIQUE_AI_SIGNUP_ENABLED", "1")
+    r = _signup(client, role="coach", email="coach@b.c")
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["invite_url"].startswith("/accept-invite?coach=")
+    code = body["invite_url"].split("coach=", 1)[1]
+
+    # Le coach peut relire son code (self-only).
+    _enable_totp(body["public_id"])
+    link = client.get("/api/auth/coach-invite-link", headers=_bearer(body["session_token"]))
+    assert link.status_code == 200
+    assert link.json()["coach_code"] == code
+
+    # Rotation : l'ancien code meurt.
+    rot = client.post("/api/auth/coach-invite-link/rotate", headers=_bearer(body["session_token"]))
+    assert rot.status_code == 200
+    assert rot.json()["coach_code"] != code
+
+
+def test_signup_rejects_weak_password(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("DOMESTIQUE_AI_SIGNUP_ENABLED", "1")
+    r = _signup(client, role="athlete", email="a@b.c", password="court")
+    assert r.status_code == 422
+
+
+def test_signup_duplicate_email(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("DOMESTIQUE_AI_SIGNUP_ENABLED", "1")
+    assert _signup(client, role="athlete", email="dup@b.c").status_code == 200
+    assert _signup(client, role="athlete", email="dup@b.c").status_code == 409
+
+
+def test_invited_accounts_are_email_verified(client: TestClient) -> None:
+    session_token = _invite_and_accept(client, role="athlete")
+    me = client.get("/api/auth/me", headers=_bearer(session_token))
+    assert me.json()["email_verified"] is True
+
+
+# ---- Vérification d'email ---------------------------------------------------
+
+
+def test_verify_email_flow(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("DOMESTIQUE_AI_SIGNUP_ENABLED", "1")
+    captured: dict[str, str] = {}
+    monkeypatch.setattr(
+        auth_router.mailer,
+        "send_verification_email",
+        lambda to, token: captured.update(to=to, token=token) or True,
+    )
+    body = _signup(client, role="athlete", email="a@b.c").json()
+    assert captured["token"]
+
+    v = client.post("/api/auth/verify-email", json={"token": captured["token"]})
+    assert v.status_code == 200
+    me = client.get("/api/auth/me", headers=_bearer(body["session_token"]))
+    assert me.json()["email_verified"] is True
+    # Usage unique.
+    assert (
+        client.post("/api/auth/verify-email", json={"token": captured["token"]}).status_code == 400
+    )
+
+
+def test_resend_verification(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("DOMESTIQUE_AI_SIGNUP_ENABLED", "1")
+    called: list[str] = []
+    monkeypatch.setattr(
+        auth_router.mailer,
+        "send_verification_email",
+        lambda to, token: (called.append(token), True)[1],
+    )
+    body = _signup(client, role="athlete", email="a@b.c").json()
+    assert len(called) == 1  # envoi à l'inscription
+    r = client.post("/api/auth/resend-verification", headers=_bearer(body["session_token"]))
+    assert r.status_code == 200
+    assert r.json()["status"] == "sent"
+    assert len(called) == 2
+
+
+# ---- Mot de passe oublié ----------------------------------------------------
+
+
+def test_forgot_password_is_anti_enumeration(client: TestClient) -> None:
+    r = client.post("/api/auth/forgot-password", json={"email": "inconnu@b.c"})
+    assert r.status_code == 200
+    assert r.json()["status"] == "ok"
+
+
+def test_reset_password_flow_revokes_sessions(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("DOMESTIQUE_AI_SIGNUP_ENABLED", "1")
+    captured: dict[str, str] = {}
+    monkeypatch.setattr(
+        auth_router.mailer,
+        "send_password_reset_email",
+        lambda to, token: captured.update(token=token) or True,
+    )
+    body = _signup(client, role="athlete", email="a@b.c").json()
+    old_session = body["session_token"]
+
+    assert client.post("/api/auth/forgot-password", json={"email": "a@b.c"}).status_code == 200
+    assert captured["token"]
+
+    reset = client.post(
+        "/api/auth/reset-password",
+        json={"token": captured["token"], "new_password": "nouveaumdp1"},
+    )
+    assert reset.status_code == 200, reset.text
+    # Toutes les sessions existantes sont révoquées.
+    assert client.get("/api/auth/me", headers=_bearer(old_session)).status_code == 401
+    # Le nouveau mot de passe fonctionne.
+    login = client.post("/api/auth/login", json={"email": "a@b.c", "password": "nouveaumdp1"})
+    assert login.status_code == 200
+    assert login.json()["status"] == "ok"
+    # Le token de reset est à usage unique.
+    assert (
+        client.post(
+            "/api/auth/reset-password",
+            json={"token": captured["token"], "new_password": "autremdp123"},
+        ).status_code
+        == 400
+    )
+
+
+# ---- Lien coach : création par code + rattachement d'un athlète existant ----
+
+
+def _signup_coach(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch, email: str
+) -> tuple[str, str, str]:
+    """Crée un coach, active sa 2FA, retourne (session, public_id, coach_code)."""
+    monkeypatch.setenv("DOMESTIQUE_AI_SIGNUP_ENABLED", "1")
+    body = _signup(client, role="coach", email=email).json()
+    _enable_totp(body["public_id"])
+    code = body["invite_url"].split("coach=", 1)[1]
+    return body["session_token"], body["public_id"], code
+
+
+def test_accept_invite_by_coach_code_creates_athlete(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    coach_session, _coach_pid, code = _signup_coach(client, monkeypatch, "coach@b.c")
+    r = client.post(
+        "/api/auth/accept-invite",
+        json={"coach_code": code, "email": "ath@b.c", "password": _STRONG_PASSWORD},
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["role"] == "athlete"
+    roster = client.get("/api/auth/athletes", headers=_bearer(coach_session))
+    assert roster.status_code == 200
+    assert any(a["public_id"] == r.json()["public_id"] for a in roster.json())
+
+
+def test_link_existing_athlete_does_not_create_duplicate(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from domestique_ai.platform_db import list_users
+
+    monkeypatch.setenv("DOMESTIQUE_AI_SIGNUP_ENABLED", "1")
+    athlete = _signup(client, role="athlete", email="ath@b.c").json()
+    _enable_totp(athlete["public_id"])
+    coach_session, _coach_pid, code = _signup_coach(client, monkeypatch, "coach@b.c")
+
+    before = len(list_users())
+    link = client.post(
+        "/api/auth/accept-invite/link",
+        json={"coach_code": code},
+        headers=_bearer(athlete["session_token"]),
+    )
+    assert link.status_code == 200, link.text
+    assert link.json()["status"] == "linked"
+    # Aucun compte créé.
+    assert len(list_users()) == before
+    roster = client.get("/api/auth/athletes", headers=_bearer(coach_session)).json()
+    assert any(a["public_id"] == athlete["public_id"] for a in roster)
+
+
+def test_link_rejected_for_coach_role(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    coach_session, _coach_pid, code = _signup_coach(client, monkeypatch, "coach@b.c")
+    r = client.post(
+        "/api/auth/accept-invite/link",
+        json={"coach_code": code},
+        headers=_bearer(coach_session),
+    )
+    assert r.status_code == 403

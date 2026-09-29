@@ -622,12 +622,26 @@ export interface MeResponse {
   email: string | null;
   totp_enabled: boolean;
   avatar_url: string | null;
+  email_verified: boolean;
 }
 
 export interface AcceptInviteResponse {
   session_token: string;
   public_id: string;
   role: string;
+}
+
+export interface SignupResponse {
+  session_token: string;
+  public_id: string;
+  role: string;
+  invite_url: string | null;
+  email_verified: boolean;
+}
+
+export interface CoachInviteLink {
+  invite_url: string;
+  coach_code: string;
 }
 
 export interface LoginResponse {

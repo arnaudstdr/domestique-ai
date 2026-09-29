@@ -15,31 +15,46 @@ from typing import Literal
 from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile, status
 from pydantic import BaseModel, Field
 
-from domestique_ai import security
+from domestique_ai import mailer, ratelimit, security
 from domestique_ai.api.deps import get_current_user, require_coach
 from domestique_ai.api.logging import get_logger
 from domestique_ai.athlete_context import context_for_athlete
+from domestique_ai.config import (
+    get_email_verification_ttl_hours,
+    get_password_reset_ttl_minutes,
+    get_signup_enabled,
+)
 from domestique_ai.ingestion.db import init_db
 from domestique_ai.platform_db import (
     InvitationError,
     accept_invitation,
     clear_failed_login,
+    consume_auth_token,
+    consume_invitation_for_link,
     consume_reconnect_token,
+    create_auth_token,
     create_invitation,
     create_session,
+    create_user,
     disable_totp,
     enable_totp,
+    get_or_create_coach_invite_code,
+    get_user_by_coach_invite_code,
     get_user_by_email,
     get_user_by_id,
     get_user_credentials,
+    link_coach_athlete,
     list_athletes_for_coach,
     list_invitations,
     list_recovery_codes,
     mark_recovery_code_used,
     record_failed_login,
     replace_recovery_codes,
+    revoke_all_sessions,
     revoke_invitation,
     revoke_session,
+    rotate_coach_invite_code,
+    set_email_verified,
     set_password,
     set_totp_secret,
     set_user_avatar,
@@ -73,6 +88,23 @@ def _provision_athlete_space(user: dict) -> None:
         )
 
 
+def _coach_invite_path(code: str) -> str:
+    """Chemin de l'invitation réutilisable d'un coach (relatif, même origine)."""
+    return f"/accept-invite?coach={code}"
+
+
+def _send_verification_email(user: dict) -> None:
+    """Génère un token de vérification et envoie le lien (best-effort)."""
+    email = user.get("email")
+    if not email:
+        return
+    expires = (
+        dt.datetime.now(dt.UTC) + dt.timedelta(hours=get_email_verification_ttl_hours())
+    ).isoformat()
+    _row, token = create_auth_token(user["id"], "email_verify", expires)
+    mailer.send_verification_email(email, token)
+
+
 class MeResponse(BaseModel):
     public_id: str
     role: str
@@ -80,6 +112,49 @@ class MeResponse(BaseModel):
     email: str | None = None
     totp_enabled: bool = False
     avatar_url: str | None = None
+    email_verified: bool = False
+
+
+class SignupRequest(BaseModel):
+    email: str
+    password: str
+    role: Literal["coach", "athlete"] = "athlete"
+    display_name: str | None = None
+
+
+class SignupResponse(BaseModel):
+    session_token: str
+    public_id: str
+    role: str
+    invite_url: str | None = None
+    email_verified: bool = False
+
+
+class VerifyEmailRequest(BaseModel):
+    token: str
+
+
+class ForgotPasswordRequest(BaseModel):
+    email: str
+
+
+class ResetPasswordRequest(BaseModel):
+    token: str
+    new_password: str
+
+
+class CoachInviteLinkResponse(BaseModel):
+    invite_url: str
+    coach_code: str
+
+
+class AuthConfigResponse(BaseModel):
+    signup_enabled: bool
+
+
+class LinkInviteRequest(BaseModel):
+    invite_token: str | None = None
+    coach_code: str | None = None
 
 
 class InvitationCreate(BaseModel):
@@ -103,7 +178,8 @@ class InvitationOut(BaseModel):
 
 
 class AcceptInvite(BaseModel):
-    invite_token: str
+    invite_token: str | None = None
+    coach_code: str | None = None
     display_name: str | None = None
     email: str | None = None
     password: str | None = None
@@ -249,6 +325,7 @@ def me(user: dict = Depends(get_current_user)) -> MeResponse:  # noqa: B008
         email=user.get("email"),
         totp_enabled=bool(user.get("totp_enabled")),
         avatar_url=user.get("avatar"),
+        email_verified=bool(user.get("email_verified")),
     )
 
 
@@ -388,6 +465,190 @@ def login_totp(body: TotpLoginRequest) -> LoginResponse:
     return _issue_session(user)
 
 
+# ---------------------------------------------------------------------------
+# Inscription publique self-service + vérification d'email
+# ---------------------------------------------------------------------------
+
+
+def _rate_limited() -> HTTPException:
+    return HTTPException(
+        status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+        detail="Trop de tentatives. Réessaie dans un moment.",
+    )
+
+
+def _require_password_policy(password: str) -> None:
+    try:
+        security.assert_password_strength(password)
+    except security.PasswordPolicyError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)
+        ) from exc
+
+
+@router.get("/config", response_model=AuthConfigResponse)
+def auth_config() -> AuthConfigResponse:
+    """Expose les capacités d'auth publiques (ex. inscription ouverte ou non)."""
+    return AuthConfigResponse(signup_enabled=get_signup_enabled())
+
+
+@router.post("/signup", response_model=SignupResponse)
+def signup(body: SignupRequest, request: Request) -> SignupResponse:
+    """Inscription self-service (email + mot de passe + rôle).
+
+    Désactivée par défaut (``DOMESTIQUE_AI_SIGNUP_ENABLED``). Un coach reçoit son
+    lien d'invitation réutilisable. Le compte est créé non vérifié (email de
+    confirmation envoyé, non bloquant).
+    """
+    if not get_signup_enabled():
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="L'inscription publique est désactivée.",
+        )
+    if not ratelimit.check(
+        "signup_ip", ratelimit.client_ip(request), max_events=5, window_seconds=3600
+    ):
+        raise _rate_limited()
+    _require_password_policy(body.password)
+    email = (body.email or "").strip().lower()
+    if not email:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Email requis."
+        )
+    if get_user_by_email(email) is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Cet email est déjà utilisé par un autre compte.",
+        )
+    try:
+        user = create_user(
+            role=body.role,
+            display_name=(body.display_name or "").strip() or None,
+            email=email,
+            password_hash=security.hash_password(body.password),
+            email_verified=False,
+        )
+    except sqlite3.IntegrityError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Cet email est déjà utilisé par un autre compte.",
+        ) from exc
+    _provision_athlete_space(user)
+    invite_url: str | None = None
+    if body.role == "coach":
+        invite_url = _coach_invite_path(get_or_create_coach_invite_code(user["id"]))
+    _send_verification_email(user)
+    _session, token = create_session(user["id"])
+    log.info("Inscription %s (%s)", user["public_id"][:8], body.role)
+    return SignupResponse(
+        session_token=token,
+        public_id=user["public_id"],
+        role=user["role"],
+        invite_url=invite_url,
+        email_verified=False,
+    )
+
+
+@router.post("/verify-email", response_model=StatusResponse)
+def verify_email(body: VerifyEmailRequest) -> StatusResponse:
+    """Consomme un token de vérification d'email (usage unique)."""
+    user = consume_auth_token(body.token, "email_verify")
+    if user is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Lien de vérification invalide ou expiré.",
+        )
+    set_email_verified(user["id"], True)
+    log.info("Email vérifié pour %s", user["public_id"][:8])
+    return StatusResponse(status="verified")
+
+
+@router.post("/resend-verification", response_model=StatusResponse)
+def resend_verification(
+    user: dict = Depends(get_current_user),  # noqa: B008
+) -> StatusResponse:
+    """Renvoye l'email de vérification du compte courant (rate-limité)."""
+    if user.get("email_verified"):
+        return StatusResponse(status="already_verified")
+    if not ratelimit.check("resend_user", str(user["id"]), max_events=3, window_seconds=3600):
+        raise _rate_limited()
+    _send_verification_email(user)
+    return StatusResponse(status="sent")
+
+
+# ---------------------------------------------------------------------------
+# Mot de passe oublié (public, token à usage unique)
+# ---------------------------------------------------------------------------
+
+
+@router.post("/forgot-password", response_model=StatusResponse)
+def forgot_password(body: ForgotPasswordRequest, request: Request) -> StatusResponse:
+    """Demande un lien de réinitialisation. Répond 200 même si l'email est inconnu.
+
+    Anti-énumération : on ne distingue jamais un compte existant d'un email
+    inconnu. Rate-limité par IP (large) et par email (strict).
+    """
+    ip = ratelimit.client_ip(request)
+    if not ratelimit.check("forgot_ip", ip, max_events=10, window_seconds=3600):
+        raise _rate_limited()
+    email = (body.email or "").strip().lower()
+    if email and ratelimit.check("forgot_email", email, max_events=3, window_seconds=3600):
+        user = get_user_by_email(email)
+        if user is not None and user.get("email"):
+            expires = (
+                dt.datetime.now(dt.UTC) + dt.timedelta(minutes=get_password_reset_ttl_minutes())
+            ).isoformat()
+            _row, token = create_auth_token(user["id"], "password_reset", expires)
+            mailer.send_password_reset_email(user["email"], token)
+    return StatusResponse(status="ok")
+
+
+@router.post("/reset-password", response_model=StatusResponse)
+def reset_password(body: ResetPasswordRequest) -> StatusResponse:
+    """Consomme un token de reset : nouveau mot de passe + déconnexion globale.
+
+    Marque aussi l'email vérifié (le clic prouve la possession de l'adresse).
+    Ne touche pas au TOTP : si la 2FA est perdue, les codes de secours ou la CLI
+    restent les voies de récupération.
+    """
+    _require_password_policy(body.new_password)
+    user = consume_auth_token(body.token, "password_reset")
+    if user is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Lien de réinitialisation invalide ou expiré.",
+        )
+    set_password(user["id"], security.hash_password(body.new_password))
+    set_email_verified(user["id"], True)
+    revoked = revoke_all_sessions(user["id"])
+    log.info(
+        "Mot de passe réinitialisé pour %s (%d session(s) révoquée(s))",
+        user["public_id"][:8],
+        revoked,
+    )
+    return StatusResponse(status="reset")
+
+
+# ---------------------------------------------------------------------------
+# Lien d'invitation réutilisable du coach
+# ---------------------------------------------------------------------------
+
+
+@router.get("/coach-invite-link", response_model=CoachInviteLinkResponse)
+def coach_invite_link(coach: dict = Depends(require_coach)) -> CoachInviteLinkResponse:  # noqa: B008
+    """Retourne (et crée au besoin) le lien d'invitation réutilisable du coach."""
+    code = get_or_create_coach_invite_code(coach["id"])
+    return CoachInviteLinkResponse(invite_url=_coach_invite_path(code), coach_code=code)
+
+
+@router.post("/coach-invite-link/rotate", response_model=CoachInviteLinkResponse)
+def rotate_coach_link(coach: dict = Depends(require_coach)) -> CoachInviteLinkResponse:  # noqa: B008
+    """Régénère le lien réutilisable (révoque l'ancien : les anciens liens meurent)."""
+    code = rotate_coach_invite_code(coach["id"])
+    log.info("Lien d'invitation régénéré pour coach %s", coach["public_id"][:8])
+    return CoachInviteLinkResponse(invite_url=_coach_invite_path(code), coach_code=code)
+
+
 @router.post("/invitations", response_model=InvitationCreated)
 def create_invite(
     body: InvitationCreate,
@@ -452,6 +713,11 @@ def list_athletes(coach: dict = Depends(require_coach)) -> list[AthleteSummary]:
 
 @router.post("/accept-invite", response_model=SessionTokenOut)
 def accept(body: AcceptInvite) -> SessionTokenOut:
+    """Crée un compte via une invitation (token à usage unique ou code coach).
+
+    Si l'email est déjà pris, le client doit basculer sur ``/accept-invite/link``
+    après connexion (on ne crée jamais de doublon d'athlète).
+    """
     password_hash: str | None = None
     if body.password is not None:
         try:
@@ -461,6 +727,44 @@ def accept(body: AcceptInvite) -> SessionTokenOut:
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)
             ) from exc
         password_hash = security.hash_password(body.password)
+
+    # Code d'invitation réutilisable d'un coach : crée l'athlète + le lien.
+    if body.coach_code:
+        coach = get_user_by_coach_invite_code(body.coach_code)
+        if coach is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Lien d'invitation invalide.",
+            )
+        email = (body.email or "").strip().lower()
+        if email and get_user_by_email(email) is not None:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Cet email est déjà utilisé. Connecte-toi pour rejoindre ce coach.",
+            )
+        try:
+            user = create_user(
+                role="athlete",
+                display_name=(body.display_name or "").strip() or None,
+                email=email or None,
+                password_hash=password_hash,
+                email_verified=True,
+            )
+        except sqlite3.IntegrityError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Cet email est déjà utilisé. Connecte-toi pour rejoindre ce coach.",
+            ) from exc
+        link_coach_athlete(coach["id"], user["id"])
+        _provision_athlete_space(user)
+        _session, token = create_session(user["id"])
+        return SessionTokenOut(session_token=token, public_id=user["public_id"], role=user["role"])
+
+    if not body.invite_token:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="invite_token ou coach_code requis.",
+        )
     try:
         user, token = accept_invitation(
             body.invite_token,
@@ -477,6 +781,46 @@ def accept(body: AcceptInvite) -> SessionTokenOut:
         ) from exc
     _provision_athlete_space(user)
     return SessionTokenOut(session_token=token, public_id=user["public_id"], role=user["role"])
+
+
+@router.post("/accept-invite/link", response_model=StatusResponse)
+def accept_invite_link(
+    body: LinkInviteRequest,
+    user: dict = Depends(get_current_user),  # noqa: B008
+) -> StatusResponse:
+    """Relie le compte athlète courant au coach émetteur (sans créer de compte).
+
+    Requiert une session authentifiée (login + 2FA déjà passés) : la preuve
+    d'identité de l'athlète est ainsi établie. Refuse tout rôle ≠ athlète.
+    """
+    if user.get("role") != "athlete":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Seul un compte athlète peut être relié à un coach.",
+        )
+    if body.coach_code:
+        coach = get_user_by_coach_invite_code(body.coach_code)
+        if coach is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Lien d'invitation invalide.",
+            )
+        link_coach_athlete(coach["id"], user["id"])
+        log.info(
+            "Athlète %s relié au coach %s (code)", user["public_id"][:8], coach["public_id"][:8]
+        )
+        return StatusResponse(status="linked")
+    if body.invite_token:
+        try:
+            consume_invitation_for_link(body.invite_token, user["id"])
+        except InvitationError as exc:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+        log.info("Athlète %s relié via invitation", user["public_id"][:8])
+        return StatusResponse(status="linked")
+    raise HTTPException(
+        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+        detail="invite_token ou coach_code requis.",
+    )
 
 
 # ---------------------------------------------------------------------------
