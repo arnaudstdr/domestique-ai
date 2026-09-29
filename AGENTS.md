@@ -3,6 +3,34 @@
 Guidance for agents working in this repository. OpenCode V2 reads `AGENTS.md`
 (not `CLAUDE.md`).
 
+## Délégation à des sous-agents
+
+Règle transverse (voir aussi `~/.config/opencode/AGENTS.md`) : **toute
+exploration de contexte ou de codebase part en sous-agent**, jamais en
+exploration directe dans l'agent principal.
+
+- `explore` : défaut pour la quasi-totalité des recherches — localiser un
+  fichier, trouver un symbole, comprendre un flux, répondre à une question sur
+  le code.
+- `general` : recherche multi-étapes plus large (croiser plusieurs zones,
+  comparer deux implémentations, croiser doc externe et code).
+
+Concrètement dans ce repo :
+
+- L'agent principal ne `read`/`grep`/`glob` que ce qu'il modifie ou vérifie juste
+  après (fichier ciblé, diff, sortie de test).
+- Le sous-agent commence par `graphify query "<question>"` (puis `graphify path`
+  / `graphify explain`) avant tout `grep` ou lecture brute, conformément à la
+  section [graphify](#graphify).
+- Il respecte les commandes de ce guide : tests et lint via
+  `.venv/bin/python -m pytest` / `.venv/bin/python -m ruff`, et **jamais** de
+  préfixe `rtk` sur `pytest`/`ruff`/`vitest`.
+- Quand l'exploration entre dans un sous-paquet (`domestique_ai/ingestion/`,
+  `processing/`, `llm/`, `api/`, `frontend/`), le sous-agent **restitue les
+  contraintes pertinentes de l'`AGENTS.md` du sous-paquet** dans sa synthèse —
+  sinon l'agent principal ne voit pas ces conventions (voir
+  [Carte du repo](#carte-du-repo)).
+
 ## Carte du repo
 
 Le détail d'implémentation est éclaté dans des `AGENTS.md` de sous-paquet,
