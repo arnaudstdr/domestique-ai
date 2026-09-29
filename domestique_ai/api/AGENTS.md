@@ -13,6 +13,31 @@ Couches voisines : `ingestion/AGENTS.md`, `processing/AGENTS.md`, `llm/AGENTS.md
 - **DB** : colonnes `notes TEXT` / `rpe INTEGER` nullables (migration `_ensure_column` + `_ACTIVITY_COLUMNS`), écrites par `update_activity_fields()` (whitelist `_EDITABLE_ACTIVITY_COLUMNS`). `fetch_activities_from_db()` les expose ; `ActivitySummary`/`ActivityCreate` portent `notes`/`rpe`.
 - **UI** — bouton crayon sur la page détail (`ActivityDetail.tsx`) : l'en-tête bascule en formulaire inline (nom, type via `components/sports.ts`, RPE 1-10, commentaire) + carte « Notes / ressenti » en lecture + pastille RPE. Masqué en vue coach (`viewing`, non-GET refusé par `get_athlete_context`).
 
+## Fil de conversation du coach (fil unique)
+
+L'UI coach affiche **un seul fil** continu, toutes sessions internes fusionnées.
+
+- **`GET /api/coach/messages`** — page du fil ordonnée par `id` croissant, toutes
+  sessions confondues : `limit` (défaut 30, cap 200), `before=<id>` (remonte le
+  fil), `after=<id>` (redescend), `anchor=<id>` (fenêtre centrée, saut depuis la
+  recherche). Réponse `CoachThreadPage { messages, has_more_before,
+  has_more_after }` ; chaque message porte `id` (`conversations.id`), `role`,
+  `content`, `thinking`, `tool_calls`.
+- **`GET /api/coach/search?q=&limit=`** — recherche sémantique
+  (`get_relevant_memory`, types message/summary/fact). Les hits `message` portent
+  `message_id` (= `conversations.id`) pour se repositionner via `?anchor=`.
+- **`POST /api/coach/chat`** : sans `session_id` (cas normal), le serveur résout
+  la session interne courante via `current_or_new_session()` et **rotate** (ouvre
+  un nouveau chunk) après `SESSION_IDLE_FINALIZE_MINUTES` d'inactivité — la
+  session précédente est finalisée en tâche de fond (best-effort). Un
+  `session_id` explicite reste honoré tel quel.
+- Endpoints historiques conservés (tests/clients) : `GET /api/coach/sessions`,
+  `GET /api/coach/sessions/{id}/messages`, `DELETE /api/coach/sessions/{id}`,
+  `POST /api/coach/sessions/{id}/finalize`. La **génération de titre** n'est plus
+  déclenchée (plus de sélecteur côté UI).
+- Implémentation DB : `domestique_ai/llm/conversations.py` (`load_thread_page`,
+  `current_or_new_session`). Tests : `tests/test_coach_thread.py`.
+
 ## Auto-sync Garmin (scheduler APScheduler)
 
 Un `BackgroundScheduler` APScheduler tourne dans le process FastAPI et déclenche le sync Garmin à intervalle régulier — par défaut **toutes les 30 minutes**. Démarré au `lifespan` startup, arrêté proprement au shutdown.

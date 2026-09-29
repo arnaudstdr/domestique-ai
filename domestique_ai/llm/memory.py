@@ -636,6 +636,7 @@ def get_relevant_memory(
     return [
         {
             "source_type": row["source_type"],
+            "ref_id": row["ref_id"],
             "session_id": row["session_id"],
             "text": row["text"],
             "score": round(score, 4),

@@ -20,25 +20,28 @@ from domestique_ai.api.schemas import (
     CoachMemoryFactCreate,
     CoachMemoryFactUpdate,
     CoachMessage,
+    CoachSearchHit,
     CoachSession,
+    CoachThreadPage,
     DailyBriefResponse,
     TodayWorkoutResponse,
     WorkoutSchema,
 )
 from domestique_ai.athlete_context import AthleteContext
+from domestique_ai.config import get_session_idle_finalize_minutes
 from domestique_ai.llm.coach import run_turn_stream
 from domestique_ai.llm.conversations import (
     append_message,
+    current_or_new_session,
     delete_session,
-    generate_session_title,
-    get_session_title,
     list_sessions,
     load_session,
-    new_session_id,
+    load_thread_page,
 )
 from domestique_ai.llm.daily_brief import build_daily_brief
 from domestique_ai.llm.memory import (
     extract_facts_from_session,
+    get_relevant_memory,
     list_facts,
     purge_session,
     remember_fact,
@@ -100,6 +103,58 @@ def get_session_messages(
             )
         )
     return out
+
+
+@router.get("/messages", response_model=CoachThreadPage)
+def get_thread_messages(
+    limit: int = 30,
+    before: int | None = None,
+    after: int | None = None,
+    anchor: int | None = None,
+    ctx: AthleteContext = Depends(get_athlete_context),  # noqa: B008
+) -> CoachThreadPage:
+    """Fil unique : page de messages toutes sessions confondues.
+
+    Sans curseur, renvoie les ``limit`` derniers messages. ``before`` remonte le
+    fil, ``after`` le redescend, ``anchor`` retourne une fenêtre centrée sur un
+    message (saut depuis la recherche).
+    """
+    page = load_thread_page(
+        limit=limit,
+        before=before,
+        after=after,
+        anchor=anchor,
+        db_path=ctx.db_path,
+    )
+    return CoachThreadPage(
+        messages=[CoachMessage(**m) for m in page["messages"]],
+        has_more_before=page["has_more_before"],
+        has_more_after=page["has_more_after"],
+    )
+
+
+@router.get("/search", response_model=list[CoachSearchHit])
+def search_thread(
+    q: str,
+    limit: int = 20,
+    ctx: AthleteContext = Depends(get_athlete_context),  # noqa: B008
+) -> list[CoachSearchHit]:
+    """Recherche sémantique dans les échanges et la mémoire persistante.
+
+    Les hits ``message`` portent un ``message_id`` (id ``conversations``) sur
+    lequel l'UI peut se repositionner via ``GET /messages?anchor=``.
+    """
+    hits = get_relevant_memory(q, k=limit, types=("message", "summary", "fact"), ctx=ctx)
+    return [
+        CoachSearchHit(
+            message_id=(hit.get("ref_id") if hit.get("source_type") == "message" else None),
+            session_id=hit.get("session_id"),
+            source_type=hit.get("source_type") or "",
+            text=hit.get("text") or "",
+            score=float(hit.get("score") or 0.0),
+        )
+        for hit in hits
+    ]
 
 
 @router.delete("/sessions/{session_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -243,12 +298,6 @@ async def _coach_event_stream(
                 },
                 db_path=ctx.db_path,
             )
-            # Génère un titre court en arrière-plan après le 1ᵉʳ échange.
-            # `asyncio.create_task` ne bloque pas le yield "done" : l'utilisateur
-            # voit sa réponse tout de suite, le titre arrive ~5 s plus tard via
-            # le poll régulier de /api/coach/sessions côté front.
-            if get_session_title(persist_to_session, db_path=ctx.db_path) is None:
-                asyncio.create_task(_generate_title_safely(persist_to_session, ctx))
             # Mémoire persistante : vectorise les messages échangés et rafraîchit
             # le résumé roulant si le seuil est atteint. Best-effort, hors chemin
             # critique (to_thread pour ne pas bloquer l'event loop).
@@ -294,14 +343,26 @@ async def _update_memory_safely(
         log.exception("Échec mise à jour mémoire session %s", session_id[:8])
 
 
-async def _generate_title_safely(session_id: str, ctx: AthleteContext) -> None:
-    """Wrapper qui isole les erreurs de génération de titre (pas de remontée)."""
+def _finalize_session_memory(session_id: str, ctx: AthleteContext) -> dict[str, Any]:
+    """Résumé final + extraction des faits durables d'une session (synchrone)."""
+    summary = summarize_session(session_id, final=True, ctx=ctx)
+    facts: list[dict[str, Any]] = []
+    if summary and summary.get("updated"):
+        facts = extract_facts_from_session(session_id, ctx=ctx)
+    return {
+        "session_id": session_id,
+        "summarized": bool(summary and summary.get("updated")),
+        "facts": facts,
+    }
+
+
+async def _finalize_session_safely(session_id: str, ctx: AthleteContext) -> None:
+    """Finalise une session en tâche de fond, sans jamais lever."""
     try:
-        title = await generate_session_title(session_id, db_path=ctx.db_path)
-        if title:
-            log.info("Titre session %s généré : %r", session_id[:8], title)
-    except Exception:  # noqa: BLE001 — best-effort, on n'interrompt jamais le chat
-        log.exception("Échec génération titre pour session %s", session_id[:8])
+        await asyncio.to_thread(_finalize_session_memory, session_id, ctx)
+        log.info("Session %s finalisée (rotation du fil)", session_id[:8])
+    except Exception:  # noqa: BLE001 — best-effort, jamais bloquant
+        log.exception("Échec finalisation session %s", session_id[:8])
 
 
 @router.post("/chat")
@@ -311,9 +372,14 @@ async def post_chat(
 ) -> EventSourceResponse:
     """Tour de conversation avec le coach, streamé en Server-Sent Events.
 
-    Changement sémantique vs. l'ancienne version : les events `thinking` et
-    `token` sont désormais des DELTAS — le client doit les concaténer au lieu
-    de remplacer. La valeur complète n'est jamais envoyée d'un coup.
+    Le fil est unique côté UI : quand le client n'envoie pas de ``session_id``
+    (cas normal), le serveur rattache le message à la session interne courante
+    et en ouvre une nouvelle si le fil est inactif depuis
+    ``SESSION_IDLE_FINALIZE_MINUTES`` — la session précédente est finalisée en
+    tâche de fond. Un ``session_id`` explicite reste honoré tel quel.
+
+    Les events `thinking` et `token` sont des DELTAS — le client doit les
+    concaténer au lieu de remplacer.
     """
     if not (payload.message and payload.message.strip()):
         raise HTTPException(
@@ -321,8 +387,18 @@ async def post_chat(
             detail="message vide.",
         )
 
-    session_id = payload.session_id or new_session_id()
-    is_new_session = payload.session_id is None
+    if payload.session_id is not None:
+        session_id = payload.session_id
+        is_new_session = False
+    else:
+        resolution = current_or_new_session(
+            get_session_idle_finalize_minutes(), db_path=ctx.db_path
+        )
+        session_id = resolution["session_id"]
+        is_new_session = resolution["rotated"]
+        if resolution["previous_session_id"] is not None:
+            asyncio.create_task(_finalize_session_safely(resolution["previous_session_id"], ctx))
+
     user_message = payload.message
     history = [
         m
@@ -357,24 +433,12 @@ async def finalize_session(
 ) -> dict[str, Any]:
     """Finalise une session : résumé final + extraction des faits durables.
 
-    Appelé de façon best-effort par le front au démarrage d'une nouvelle
-    session ou au changement de session. Idempotent : sans nouveaux messages,
-    ne régénère rien.
+    Idempotent : sans nouveaux messages, ne régénère rien. Conservé pour les
+    clients/tests ; le front (fil unique) ne l'appelle plus — la finalisation
+    est déclenchée automatiquement à la rotation d'un chunk.
     """
-
-    def _work() -> dict[str, Any]:
-        summary = summarize_session(session_id, final=True, ctx=ctx)
-        facts: list[dict[str, Any]] = []
-        if summary and summary.get("updated"):
-            facts = extract_facts_from_session(session_id, ctx=ctx)
-        return {
-            "session_id": session_id,
-            "summarized": bool(summary and summary.get("updated")),
-            "facts": facts,
-        }
-
     try:
-        return await asyncio.to_thread(_work)
+        return await asyncio.to_thread(_finalize_session_memory, session_id, ctx)
     except Exception:  # noqa: BLE001 — best-effort
         log.exception("Échec finalisation session %s", session_id[:8])
         return {"session_id": session_id, "summarized": False, "facts": []}

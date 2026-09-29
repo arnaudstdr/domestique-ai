@@ -48,6 +48,16 @@ consommés par `sse-starlette` côté serveur et par `consumeSseStream()` côté
 client. Les deltas de raisonnement sont affichés dans l'expander
 « 🧠 Raisonnement » de la page Coach (debug).
 
+**Fil unique** : la page `pages/Coach.tsx` n'a plus de sélecteur de sessions —
+elle affiche un fil continu, toutes sessions fusionnées. Au montage elle charge
+les **30 derniers messages** (`GET /api/coach/messages`, `PAGE_SIZE = 30`), puis
+remonte par **scroll infini** (`IntersectionObserver` en haut → `?before=<id>`,
+position de scroll préservée ; sentinelle basse `?after=<id>` pour le cas
+« saut recherche »). L'envoi poste `session_id: null` : le serveur rattache le
+message à la session interne courante (rotation invisible après inactivité). La
+recherche (`GET /api/coach/search?q=`) affiche des hits ; cliquer un hit
+`message` recharge une fenêtre centrée (`?anchor=<id>`) et surligne la bulle.
+
 ## Écrans & composants notables
 
 - **Dashboard** — `DailyBriefCard` en hero. Refonte visuelle : **anneau TSB**
