@@ -1,6 +1,44 @@
-# CLAUDE.md
+# AGENTS.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+Guidance for agents working in this repository. OpenCode V2 reads `AGENTS.md`
+(not `CLAUDE.md`).
+
+## Carte du repo
+
+Le détail d'implémentation est éclaté dans des `AGENTS.md` de sous-paquet,
+chargés **à la demande** quand l'agent explore le répertoire correspondant
+(OpenCode découvre les `AGENTS.md` imbriqués en lisant un fichier ou en listant
+un dossier).
+
+| Zone | Guide |
+| --- | --- |
+| Ingestion — Garmin, TCX, Google Health, persistance DB | `domestique_ai/ingestion/AGENTS.md` |
+| Traitement — charge, zones HR, tendances, plan déterministe, compliance, comparateur | `domestique_ai/processing/AGENTS.md` |
+| Coach LLM — coach, mémoire, génération de plan, décisions | `domestique_ai/llm/AGENTS.md` |
+| API & plateforme — routers, scheduler, notifs, export, auth/avatar | `domestique_ai/api/AGENTS.md` |
+| Frontend PWA | `frontend/AGENTS.md` |
+
+### Tenir ces guides à jour
+
+Ces `AGENTS.md` sont la documentation de référence du repo : ils **doivent** être
+mis à jour **dans le même commit** que le changement de code qu'ils décrivent.
+
+- Une modification de comportement, d'architecture, d'endpoint, de schéma DB ou de
+  convention se répercute dans le `AGENTS.md` du sous-paquet concerné (voir la
+  carte ci-dessus).
+- Un détail propre à un sous-paquet va dans **son** fichier, pas dans la racine.
+- Une info transverse (invariant valable partout) va dans **la racine**, qui est
+  toujours chargée — c'est le seul fichier visible quel que soit le dossier ouvert.
+
+⚠️ Deux pièges : un `AGENTS.md` imbriqué n'est **pas** rechargé automatiquement
+après édition (ouvrir une nouvelle session si le texte doit s'appliquer tout de
+suite) ; et quand tu ne sais pas où placer une info, mieux vaut la mettre à la
+racine que nulle part.
+
+Un plugin OpenCode (`.opencode/plugins/agents-guide.js`) injecte ce rappel
+automatiquement après chaque `write` / `edit` sur un fichier dont le dossier
+porte un `AGENTS.md` (une fois par guide et par session). Il ne fait
+qu'avertir : il n'édite ni ne bloque rien.
 
 ## Commandes courantes
 
@@ -60,7 +98,7 @@ config.py  ──►  ingestion/  ──►  processing/  ──►  app/  (UI)
    │                │                │              │
    └─ .env / chemins └─ Garmin + DB  └─ TSS, CTL/ATL/TSB
                               │
-                              └────►  llm/  (isolé, pas branché à l'UI — voir TODO)
+                              └────►  llm/  (coach, mémoire, plan LLM)
 ```
 
 Points structurants à connaître avant de toucher au code :
@@ -70,507 +108,6 @@ Points structurants à connaître avant de toucher au code :
 - **Migrations douces** : `init_db()` + `_ensure_column()` dans `ingestion/db.py`. Pour ajouter une colonne, étendre le `CREATE TABLE` ET ajouter un appel `_ensure_column()` (sinon les bases existantes ne migreront pas).
 - **Pas de cycle d'imports** : `ingestion/db.py` (schéma + helpers de persistance) ne dépend ni du processing ni d'une source d'ingestion — les modules aval (`analyzer`, LLM, routers) peuvent l'importer au top-level. Ne pas remettre du code dépendant d'une source dedans.
 - **Toute la config passe par `domestique_ai.config`** : ne jamais lire `os.getenv` ailleurs. Les getters renvoient `None` quand l'env est absent — les modules en aval gèrent le fallback. Les variables `STRAVA_FTP`/`STRAVA_HR_*`/`STRAVA_LTHR_PCT`/`STRAVA_SEX` sont des **paramètres du profil athlète** (nommage historique) — elles ne concernent pas l'API Strava et restent utilisées.
-
-### Calcul de la charge — le cœur métier
-
-`processing/analyzer.compute_training_load()` choisit la métrique selon les données disponibles :
-
-1. **hr-TSS prioritaire** si `avg_hr` + `STRAVA_HR_REST` + `STRAVA_HR_MAX` sont présents.
-   TRIMP exponentiel de Banister, normalisé pour qu'1h à `STRAVA_LTHR_PCT` (0.88 par défaut) de la HRR vaille **exactement 100 points**.
-   C'est cet ancrage qui rend le score interchangeable avec un TSS basé puissance — ne pas le casser.
-2. **TSS power** sinon, si `avg_power` + `STRAVA_FTP` sont présents.
-3. **0.0** sinon (activité sans donnée exploitable).
-
-Conséquences pratiques :
-
-- Modifier le profil HR (`STRAVA_HR_REST`/`STRAVA_HR_MAX`) **ne recalcule pas** automatiquement les scores. C'est `recalculate_training_loads()` (endpoint `POST /api/metrics/recalculate`, bouton « Recalculer » du dashboard) qui rejoue tout.
-- CTL/ATL/TSB sont des EMA (constantes 42j / 7j) calculées sur la grille de **toutes les dates** entre la première et la dernière activité (les jours sans activité comptent comme TSS=0). Voir `calculate_ctl_atl_tsb()`.
-
-### Tendances longues + projection FTP (`processing/trends.py`)
-
-Agrégats saisonniers exposés via `GET /api/metrics/trends?period={3m|6m|1y|all}` et `GET /api/metrics/ftp-projection`. Page front dédiée : `/tendances`.
-
-- **Résolution adaptative** de la courbe CTL/ATL/TSB selon la période : jour pour `3m`, semaine pour `6m` et `1y`, mois pour `all`. On garde la **dernière valeur du bucket** (cohérent avec un EMA cumulatif).
-- **Agrégats mensuels** : distance, dénivelé, durée, séances, TSS. Couvre tous les mois entre la 1re activité de la période et aujourd'hui (mois sans activité = 0). Le comparatif N-1 (`distance_km_n1`, `tss_n1`) est tiré du même calcul sur l'année précédente — `0.0` si le mois N-1 est couvert par l'historique mais sans activité (la courbe N-1 reste continue), `null` seulement s'il tombe hors de l'historique de l'athlète.
-- **Distribution Z1-Z5 par mois** : pourcentage du temps total HR ventilé. Une activité dont toutes les colonnes `hr_zX_time` sont `NULL` n'est pas comptée (sinon on diluerait la part). Les mois sans aucune ventilation renvoient `null` sur les `zN_pct`.
-- **Projection FTP** : `+1 % de FTP par +5 points de CTL net sur 28 jours, plafonné à ±5 %`. La FTP courante vient de `config.get_ftp()` (profile YAML > `STRAVA_FTP` > 250 W par défaut). Si `delta_ctl_28d` n'est pas calculable (historique vide), `projected_ftp` est `None` et `delta_pct` reste à 0.
-- **Confiance qualitative** (`low/medium/high`) :
-  - `high` quand ≥ 60 j d'historique CTL ET part Z4-Z5 ∈ [4 %, 25 %] sur les 28 derniers jours (stimulus seuil/VO2max plausible).
-  - `medium` quand ≥ 28 j d'historique.
-  - `low` sinon.
-
-### Zones HR (temps par zone)
-
-Chaque activité est ventilée en 5 zones %HRR (Karvonen) — colonnes `hr_z1_time` … `hr_z5_time` (secondes) :
-
-- Z1 : <60% HRR (récup) · Z2 : 60-70% (endurance) · Z3 : 70-80% (tempo) · Z4 : 80-90% (seuil) · Z5 : ≥90% (VO2max).
-- Bornes en dur dans `processing/analyzer._HR_ZONE_BOUNDS`. La fonction `calculate_hr_zones(hr_stream, time_stream, hr_rest, hr_max)` consomme les séries `heartrate` + `time` extraites des streams d'ingestion.
-- Les pauses d'enregistrement (saut > 5 s entre deux samples) ne sont pas comptabilisées (constante `_HR_ZONE_PAUSE_GAP_SEC`).
-- Convention DB : `NULL` = non calculé ; `0.0` = calculé mais aucune seconde dans cette zone.
-
-À l'ingestion (`sync_activities_garmin`), la source des zones dépend du sport :
-
-- **Vélo** (`Ride`, `VirtualRide`, `GravelRide`, `MountainBikeRide`, `EBikeRide` — set `_CYCLING_SPORT_TYPES`) : les valeurs **Garmin** sont prioritaires via `client.get_activity_hr_in_timezones(id)` (`/activity/{id}/hrTimeInZones`, parsing défensif `parse_hr_time_in_zones()`). L'athlète a aligné ses zones Garmin sur notre référentiel. **Repli** sur le calcul local `calculate_hr_zones()` si Garmin ne renvoie rien exploitable.
-- **Autres sports** : calcul local `calculate_hr_zones()` (leurs zones Garmin ne sont pas alignées).
-
-Le calcul local consomme les séries HR/temps de `get_activity_details` extraites par `parse_details_streams()` (parsing défensif, trois orientations : moderne `metricDescriptors` + `activityDetailMetrics` — shape réelle observée 09/2026 —, et legacy `metricsEntries` par métrique ou par échantillon). Cet appel détails reste nécessaire de toute façon pour la **température**. Quand Garmin et le local sont tous deux disponibles (vélo + `STRAVA_HR_REST`/`HR_MAX`), un warning est logué si les totaux divergent de plus de `_ZONE_DELTA_WARN_PCT` (validation de correspondance).
-
-⚠️ Les zones Garmin ne sont **pas rétroactives** : seules les **nouvelles** activités utilisent la source Garmin ; l'historique déjà ingéré (calcul local) n'est pas backfillé. Les lignes restées à `NULL` (parsing cassé avant la correction 09/2026) restent rattrapables par le backfill one-off (voir « Ingestion Garmin Connect »).
-
-### Champs enrichis + streams + météo Garmin (09/2026)
-
-- **Champs enrichis** : au sync, le payload liste Garmin fournit aussi `activityName`, `calories`, `maxPower`, cadence moy/max (unités hétérogènes bike rpm / run pas-min stockées telles quelles), vitesse moy/max (m/s), `elevationLoss`, point de départ (`start_lat`/`start_lng` — pave une future résolution Haversine du comparateur). Colonnes dédiées (`name`, `calories`, `max_power`, `cadence_avg`, `cadence_max`, `speed_avg`, `speed_max`, `elevation_loss`, `start_lat`, `start_lng`), migrées par `_ensure_column`.
-- **Streams** : `GET /api/activities/{external_id}/streams` sert les courbes + la carte de la page détail, depuis **deux sources** : (1) activités Garmin → fetch live `get_activity_details(id, maxpoly=1000)`, parsing `parse_details_series()` (HR, temps, temp, **power, altitude, speed, distance, latlng**), cache mémoire 1 h (les streams Garmin ne sont PAS persistés) ; (2) activités importées TCX → lecture de la table `activity_streams` (streams persistés à l'import). Activités Strava legacy ou manuelles → 404 explicite.
-- **Tracé GPS des cartes de liste** : persisté dans `map_polyline` **au sync normal** pour les activités avec HR (l'appel `get_activity_details` est déjà en main pour zones/temp — `geoPolylineDTO.polyline` → downsample ≤ 300 pts → `encode_polyline()`, si `hasPolyline` et distance ≥ 1 km). Les activités sans HR n'ont pas de tracé sur la carte (détails non appelés). Sans ce remplissage, toute sortie synchronisée après le backfill one-off resterait à `NULL` et afficherait « — » sur `RoutePreview`.
-- **Météo** : `GET /api/activities/{external_id}/weather` → `get_activity_weather` Garmin (temp/apparent/dew point **en °F, convertis °C** par `parse_activity_weather()`, humidité, vent, descriptif, station METAR). Best-effort : erreur Garmin → `available: false`, jamais de 5xx.
-- **Backfill one-off** : `backfill_garmin_fields()` re-fetch la liste sur la fenêtre des lignes Garmin en base et `UPDATE` les champs enrichis ; pour les activités avec GPS, un appel détails récupère en plus le tracé (`geoPolylineDTO.polyline` → downsample ≤ 300 pts → **polyline encodée Google** via `encode_polyline()`, consommée par `RoutePreview` sur les cartes de liste) et rattrape zones HR + temp des lignes encore à `NULL`. Déclenché automatiquement au premier sync après déploiement — flag `garmin_fields_backfill_done` dans la table `sync_meta` (posé seulement en cas de succès, retry au sync suivant sinon). Jamais bloquant pour la sync.
-
-### Température météo (avg/min/max par activité)
-
-Colonnes `avg_temp` / `min_temp` / `max_temp` (REAL nullable, °C) calculées à partir du stream de température renvoyé par `get_activity_details` Garmin. La réduction est faite par `summarize_temp_stream()` (dans `ingestion/db.py` ; filtre les valeurs aberrantes hors `-50 °C < t < 60 °C`, garde les zéros légitimes).
-
-- **À l'ingestion** : récupérée en même temps que les zones HR (même appel de détails) — pas de surcoût réseau par rapport à l'ingestion HR seule. Si HR n'est pas configuré, les détails ne sont pas téléchargés à la sync.
-- **Convention DB** : `NULL` = détails pas encore lus OU activité sans capteur température (home trainer typiquement) ; pour distinguer les deux, `avg_heart_rate IS NOT NULL` est un proxy raisonnable pour « activité avec capteurs ».
-- **Exposition** : `ActivitySummary` et le tool LLM `get_activity_details` retournent `avg_temp_c` / `min_temp_c` / `max_temp_c` quand disponibles, ce qui permet au coach d'expliquer une dérive HR par la chaleur.
-
-### Ingestion Garmin Connect (source d'activités)
-
-Les activités sont ingérées depuis l'**API non officielle Garmin Connect** (module `garminconnect`) via `ingestion/garmin.py`. Le compteur Edge / la montre synchronisent vers Garmin Connect, et `sync_activities_garmin()` rapatrie les activités dans la même table `activities` — toute la pipeline aval (TSS, CTL/ATL/TSB, zones HR, tendances, coach LLM) fonctionne sans changement.
-
-- **Connexion par athlète** (isolation multi-tenant) : chaque athlète connecte **son** compte Garmin depuis les Réglages (`POST /api/garmin/connect` → email/mot de passe, puis `POST /api/garmin/connect/mfa` si MFA). Les credentials sont stockés par athlète en DB plateforme (`users.garmin_email`/`garmin_password`, jamais exposés par `_user_dict`) et les tokens dans `data/athletes/<public_id>/.garmin_tokens` (`config.garmin_token_dir_for(ctx)`). **Cache MFA en mémoire process** (`_pending_mfa`, TTL 5 min) — l'état SSO du SDK n'est pas sérialisable ; suppose 1 worker uvicorn.
-- **Fallback bootstrap** : `GARMIN_EMAIL`/`GARMIN_PASSWORD`/`GARMIN_TOKEN_DIR` du `.env` ne concernent que le compte bootstrap (propriétaire) et son `data/.garmin_tokens` legacy ; le seed CLI `python -m domestique_ai.export.garmin_connect` reste dispo pour lui.
-- **Endpoints** : `POST /api/garmin/sync` (sync manuel en tâche de fond), `GET /api/garmin/sync-status`, `GET /api/garmin/status` (état de connexion, scopé athlète), `POST /api/garmin/connect`, `POST /api/garmin/connect/mfa`, `POST /api/garmin/disconnect`.
-- **Sync incrémentale** : la fenêtre par défaut démarre 1 j avant la dernière activité Garmin connue (ou 3 ans d'historique au 1er sync). Mapping `typeKey` Garmin → `sport_type` (nomenclature historique type Strava, `_SPORT_MAP`) pour conserver les buckets indoor/outdoor du comparateur.
-- **⚠️ Endpoints non officiels** : peuvent changer sans préavis.
-
-### Ajout manuel + import TCX (sources `manual` / `tcx`)
-
-Deux voies d'ajout hors Garmin, exposées dans l'en-tête de la page **Activités** (cartes inline `ActivityCreateForm.tsx` / `TcxImportForm.tsx`, pattern de la saisie matinale) :
-
-- **Saisie manuelle** — `POST /api/activities` (modèle `ActivityCreate`) : date, sport, durée, distance, D+, FC moy, puissance moy, nom. Le TSS est calculé côté serveur par `compute_training_load()` (hr-TSS prioritaire, sinon TSS puissance). `source='manual'`, aucun stream → la page détail n'affiche que les métriques.
-- **Import TCX** — `POST /api/activities/import/tcx` (multipart `list[UploadFile]`, `python-multipart` déjà en dépendance) : un ou plusieurs fichiers, un fichier pouvant contenir plusieurs `<Activity>`. Parser maison `ingestion/tcx.py` (`parse_tcx()`, stdlib `xml.etree` + matching par local-name car les namespaces varient) → agrégats (durée, distance, D+/D−, FC, watts, cadence, calories, tracé polyline) + streams. Zones HR recalculées par `calculate_hr_zones()` (séries HR/temps alignées) si `STRAVA_HR_REST`/`MAX` configurés. `source='tcx'`, streams persistés dans `activity_streams`. Dédup par sha1 du contenu (`source_uid = "<sha1>:<index>"`) : réimporter le même fichier → `skipped`. Un fichier en erreur n'interrompt pas les autres (résultat détaillé par fichier).
-- **Suppression** — `DELETE /api/activities/{external_id}` : réservée aux `source IN ('manual','tcx')` (403 sinon — une ligne Garmin/Strava serait recréée au prochain sync). Bouton corbeille sur la page détail.
-
-### Édition d'activité (toutes sources)
-
-- **Endpoint** — `PATCH /api/activities/{external_id}` (modèle `ActivityUpdate`) : édition partielle des 4 champs athlète — `name` (nom affiché), `sport_type` (type), `notes` (commentaire libre, colonne `notes`) et `rpe` (effort ressenti 1-10, colonne `rpe`). `exclude_unset` : seuls les champs fournis changent ; `null` efface ; chaîne vide/blanche normalisée en `NULL` (`_clean_text`). Renvoie l'`ActivitySummary` à jour.
-- **Ouvert à toutes les sources** (contrairement à la suppression) : l'édition ne touche que des champs jamais régénérés par l'ingestion — `save_garmin_activity()` ne réécrit jamais une ligne Garmin existante (skip si `garmin_id` déjà présent). Seul le backfill one-off `_BACKFILL_COLUMNS` re-fetch `name` (flag déjà posé en pratique).
-- **DB** : colonnes `notes TEXT` / `rpe INTEGER` nullables (migration `_ensure_column` + `_ACTIVITY_COLUMNS`), écrites par `update_activity_fields()` (whitelist `_EDITABLE_ACTIVITY_COLUMNS`). `fetch_activities_from_db()` les expose ; `ActivitySummary`/`ActivityCreate` portent `notes`/`rpe`.
-- **UI** — bouton crayon sur la page détail (`ActivityDetail.tsx`) : l'en-tête bascule en formulaire inline (nom, type via `components/sports.ts`, RPE 1-10, commentaire) + carte « Notes / ressenti » en lecture + pastille RPE. Masqué en vue coach (`viewing`, non-GET refusé par `get_athlete_context`).
-
-### Auto-sync Garmin (scheduler APScheduler)
-
-Un `BackgroundScheduler` APScheduler tourne dans le process FastAPI et déclenche le sync Garmin à intervalle régulier — par défaut **toutes les 30 minutes**. Démarré au `lifespan` startup, arrêté proprement au shutdown.
-
-- **Configuration** : `DOMESTIQUE_AI_GARMIN_AUTO_SYNC_MINUTES` : période en minutes (défaut 30). `0` désactive complètement l'auto-sync.
-- **Anti-chevauchement** : sync manuel (`POST /api/garmin/sync`) et auto-sync passent tous les deux par `_claim_sync()` dans `routers/garmin.py`. Tant qu'une sync est en cours (`status == "syncing"`), tout claim concurrent retourne `False` (skip silencieux loggé côté scheduler). `coalesce=True, max_instances=1` côté APScheduler en plus, ceinture + bretelles.
-- **Logs et erreurs** : le job enveloppe `trigger_sync_blocking` dans un `try/except` global — un job APScheduler qui lève marque le job comme erroné et peut arrêter le scheduler, ce qu'on ne veut surtout pas. Toute exception inattendue est loggée mais n'interrompt pas la cadence.
-- **Ciblage** : le cache token étant désormais **par athlète** (`garmin_token_dir_for(ctx)`), le job boucle sur **tous les athlètes ayant connecté leur compte** (`token_cache_present`) — plus seulement le bootstrap. Un athlète en échec n'interrompt pas les autres.
-
-### Notifications push (Pushover) — palier 4 du coach proactif
-
-`domestique_ai/notifications.py` expose deux fonctions best-effort :
-
-- `send_pushover(title, message, priority=None)` : POST sur `api.pushover.net`. No-op silencieux si `PUSHOVER_USER_KEY` ou `PUSHOVER_APP_TOKEN` manque. Toute exception (réseau, 4xx) est loggée en warning et retournée comme `False`.
-- `notify_sync_completed(inserted)` : appelée à la fin de `_run_sync` dans le router garmin si `inserted > 0`. No-op sur sync à vide (anti-spam). Pluriel/singulier géré.
-
-Le hook dans `_run_sync` (router garmin) enveloppe l'appel dans un `try/except` : une notif qui échoue ne doit jamais altérer l'état du sync ni masquer le log de succès.
-
-**Configuration** :
-- `PUSHOVER_USER_KEY` + `PUSHOVER_APP_TOKEN` : obligatoires pour activer.
-- `PUSHOVER_DEVICE` : optionnel, cible un device précis.
-- `PUSHOVER_PRIORITY_DEFAULT` : optionnel, priorité par défaut (clampée -2..2).
-
-**Extension future** : pour ajouter de nouveaux types de notifs (alerte overtraining qui change d'état, séance suggérée du matin), créer une fonction `notify_<event>()` dans le même module qui appelle `send_pushover` avec son propre formattage. Garder le principe : best-effort, jamais bloquant, et anti-spam via comparaison à un état précédent persisté si pertinent.
-
-### Heartbeat Healthchecks.io (dead man's switch)
-
-`domestique_ai/healthcheck.py` expose `ping_healthcheck()` — un GET best-effort sur l'URL Healthchecks.io. Le scheduler (`api/scheduler.py`) ajoute un 2e job APScheduler `healthcheck_ping` qui appelle cette fonction toutes les 5 min (configurable). Le 1er ping est lancé immédiatement au démarrage (`next_run_time=now`) pour que Healthchecks détecte tout de suite que l'app est UP.
-
-**Pourquoi externe** : un watchdog interne au process FastAPI ne peut pas détecter sa propre mort. Healthchecks.io fonctionne en mode "dead man's switch" — c'est leur infra qui te notifie si nos pings s'arrêtent (app crash, Pi éteint, réseau coupé, peu importe la cause). Le canal de notif (Pushover, email, Slack…) se configure dans **leur** UI, pas chez nous.
-
-**Workflow de setup** :
-1. Créer un compte sur healthchecks.io.
-2. Créer un nouveau check, période 5 min, grace 5 min.
-3. Dans le menu Integrations du check, lier Pushover (token user + token app).
-4. Copier l'URL de ping (format `https://hc-ping.com/<uuid>`) dans `HEALTHCHECKS_PING_URL` du `.env`.
-5. Redémarrer le conteneur. Le check passe en "up" sous 30 s.
-
-**Configuration** :
-- `HEALTHCHECKS_PING_URL` : obligatoire pour activer. Sinon job désactivé silencieusement.
-- `HEALTHCHECKS_PING_INTERVAL_MIN` : optionnel (défaut 5). Doit correspondre à la "Period" configurée côté Healthchecks.io.
-
-Le job ping est indépendant du job sync — on peut activer l'un sans l'autre (ex. `DOMESTIQUE_AI_GARMIN_AUTO_SYNC_MINUTES=0` + URL Healthchecks définie → seul le heartbeat tourne).
-
-### Google Health API — données bracelet (Fitbit / Pixel Watch)
-
-L'intégration lit les métriques de récupération depuis la **Google Health API**
-(successeur cloud de la Fitbit Web API). Elle alimente automatiquement la page
-« Santé » (anciennement « Matin », route `/sante`) : HRV, FC repos, sommeil +
-stades, SpO2, fréquence respiratoire, température cutanée, pas et calories
-actives.
-
-> **Nommage UI vs domaine** : dans l'interface, la page s'appelle « Santé »
-> (route `/sante`, composant `frontend/src/pages/Morning.tsx`, onglet `HeartPulse`
-> dans `BottomNav`). Le **backend et le domaine restent nommés `morning`** —
-> `/api/morning`, `api/routers/morning.py`, schémas `Morning*`, client TS
-> `api.morning` — volontairement non renommés (gros refactor sans valeur
-> utilisateur). Ne pas « aligner » le backend sur le nom UI sans accord.
-
-Deux scores sont recalculés localement :
-
-- **Sleep score** (0-100) : durée, efficacité, qualité (deep/REM), continuité.
-- **Readiness score** (0-100) : HRV et FC repos vs baseline 14 j + sommeil.
-
-La saisie manuelle reste possible ; un `sleep_score` saisi à la main n'est pas
-écrasé par le score calculé (`sleep_score_computed=0`).
-
-**Isolation par athlète** : les tokens sont stockés **par athlète**
-(`data/athletes/<public_id>/.google_health_tokens.json`, cf.
-`config.google_health_tokens_path_for(ctx)` — `data/.google_health_tokens.json`
-pour le bootstrap). Le `state` OAuth est **signé HMAC** (`_sign_state` /
-`_verify_state` dans le router) et encode le `public_id` : le callback Google
-(redirection navigateur, hors Bearer) retrouve ainsi l'athlète destinataire sans
-stockage serveur. Les credentials OAuth de l'app
-(`GOOGLE_HEALTH_CLIENT_ID`/`_SECRET`) restent, eux, globaux.
-
-**Fichiers clés** :
-
-- `domestique_ai/ingestion/google_health.py` — client OAuth2 + API + mapping.
-- `domestique_ai/api/routers/google_health.py` — endpoints auth/callback/sync.
-- `domestique_ai/processing/morning_metrics.py` — scores calculés.
-
-**Configuration** (`.env`) :
-
-```bash
-GOOGLE_HEALTH_CLIENT_ID=...
-GOOGLE_HEALTH_CLIENT_SECRET=...
-GOOGLE_HEALTH_REDIRECT_URI=http://localhost:8501/api/google-health/callback
-DOMESTIQUE_AI_GOOGLE_HEALTH_AUTO_SYNC_MINUTES=360
-```
-
-**Setup Google Cloud** :
-
-1. Créer un projet et activer l'API **Google Health API**.
-2. Configurer l'écran de consentement OAuth (type **External**).
-3. Ajouter les scopes restreints :
-   - `googlehealth.profile.readonly`
-   - `googlehealth.settings.readonly`
-   - `googlehealth.activity_and_fitness.readonly`
-   - `googlehealth.health_metrics_and_measurements.readonly`
-   - `googlehealth.sleep.readonly`
-4. Créer des credentials OAuth 2.0 de type **Web application** avec les
-   redirect URIs autorisés (localhost + production).
-5. Lancer le flow depuis la page `/sante` ou via
-   `GET /api/google-health/auth`.
-6. Soumettre à la **review de vérification Google** pour les scopes restreints.
-   En attendant, ajouter ton compte comme test user pour développer.
-
-**Auto-sync** : un job APScheduler supplémentaire récupère les 7 derniers jours
-toutes les 6 heures par défaut. Il est indépendant du sync Garmin.
-
-### Suivi du poids + rapport poids/puissance (W/kg)
-
-Le poids est une **métrique de la table `morning_metrics`** (`weight_kg REAL`,
-nullable) — source de vérité unique, par athlète (base isolée). La table
-historique orpheline `weight_history` n'est plus utilisée.
-
-- **Saisie** : champ « Poids » du formulaire Santé (manuel) **et** ingestion
-  auto Google Health (`DATA_TYPE_WEIGHT = "weight"`, `weightGrams / 1000`,
-  même scope OAuth que le reste). Au sync, un poids saisi à la main est
-  préservé si la balance ne fournit rien ce jour-là (`weight_kg` ajouté à la
-  préservation des champs manuels à côté de `stress_score`/`notes`).
-- **Pas d'alerte** de dérive sur le poids (`_ALERT_DIRECTION["weight_kg"] = 0`) :
-  variabilité quotidienne normale.
-- **Upsert ciblé** : `set_weight(date, kg)` (et `PUT /api/morning/weight`)
-  n'écrit QUE `weight_kg` — contrairement à `save_morning_entry` qui écrase
-  toutes les colonnes. Indispensable pour ne pas effacer HRV/sommeil d'un jour
-  lors d'une saisie du poids depuis les réglages.
-- **W/kg dérivé** (jamais stocké) : `latest_weight()` donne le dernier poids
-  connu, `power_to_weight(puissance, poids)` le rapport. Exposé dans
-  `GET /api/morning/weight` (`{weight_kg, date, ftp_w, wkg}`), la projection FTP
-  (`current_wkg`/`projected_wkg`, poids courant — approximation v1, pas de poids
-  historique par activité), le bloc d'état du coach et le tool
-  `get_morning_trends` (`weight_kg` + `wkg`). UI : Réglages (« Infos perso »,
-  champ + W/kg), Santé (formulaire + graphes), détail d'activité
-  (« Poids/puissance », puissance moy. / poids actuel).
-
-### Photo de profil (avatar)
-
-Métadonnée d'identité du compte (pas du profil athlète YAML) : colonne
-`avatar TEXT` sur `users` de `platform.db` (migration `_ensure_column`),
-stockant une **data URL** `data:image/<type>;base64,…`, `NULL` par défaut.
-Écrite par `set_user_avatar()` et exposée par `_user_dict` (donc
-`get_current_user`).
-
-- **Upload** : `PUT /api/auth/me/avatar` (multipart) — l'image est
-  redimensionnée **côté navigateur** (`frontend/src/lib/image.ts`,
-  `resizeImageToSquare` : recadrage carré centré 256 px → JPEG q0.85) avant
-  envoi. Pas de Pillow côté serveur : le router valide la taille (≤ 500 Ko) et
-  les **magic bytes** (JPEG/PNG/GIF/WebP), jamais le Content-Type client.
-  `DELETE /api/auth/me/avatar` efface.
-- **Exposition** : `MeResponse.avatar_url` (en-tête, `MeProvider`) et
-  `AthleteSummary.avatar_url` (liste du roster coach, `GET /api/auth/athletes`).
-  Affichage direct en `<img src>` (pas d'endpoint image ni montage statique —
-  une balise `<img>` ne peut pas porter le Bearer).
-- **UI** : section « Photo de profil » en tête de `/profil` (`Profil.tsx`,
-  `AvatarSection`) ; l'en-tête (`App.tsx`) remplace l'icône `UserRound` par la
-  miniature quand une photo existe ; `Roster.tsx` affiche l'avatar (ou les
-  initiales) de chaque athlète.
-- **Édition = compte courant** : les routes `/api/auth/*` ignorent le
-  paramètre `?athlete=` (`withAthlete` les exclut) — un coach en consultation
-  n'édite jamais la photo de l'athlète.
-
-### Coach LLM — `domestique_ai/llm/`
-
-Coach conversationnel via Ollama (modèle par défaut `gemma4:31b-cloud`, override `OLLAMA_MODEL`). Branché sur le dashboard dans l'onglet « Coach ».
-
-Architecture :
-
-```text
-ollama_client.py    # wrapper SDK ollama : chat(messages, tools, think=True) → dict
-tools.py            # TOOL_SCHEMAS (JSON) + TOOLS (fonctions Python) + dispatch()
-coach.py            # SYSTEM_PROMPT + run_turn() : boucle tool-calling (max 5 itérations)
-objectives.py       # load_objective() / save_objective() — YAML data/objective.yaml
-conversations.py    # persistance SQLite (table conversations) + new_session_id()
-memory.py           # mémoire persistante : faits, résumés, RAG (cf. ci-dessous)
-```
-
-Règle d'or : **le LLM n'invente jamais de chiffre**. Le `SYSTEM_PROMPT` impose d'appeler un tool avant toute affirmation chiffrée (CTL, TSB, zones, distance, etc.). Les tools exposent les données calculées par notre code Python.
-
-Positionnement : coach **cycliste et assistant santé**. Au-delà de l'entraînement vélo, il conseille sur la nutrition, le sommeil, la récupération et le renforcement, à partir de ses connaissances générales — ancrées sur les données réelles de l'athlète (`get_nutrition_context`, `get_activity_mix`) mais sans jamais présenter un repère général comme une mesure de l'athlète. Pas de disclaimer médical systématique (ton neutre). Activités hors vélo : `propose_workout(sport=...)` gère renfo/gainage, cross-training et mobilité (conseil ponctuel — **non planifié** dans le plan).
-
-Pour ajouter un tool :
-
-1. Écrire la fonction Python dans `tools.py` (signature explicite, retourne un dict JSON-sérialisable).
-2. Ajouter son schéma JSON dans `TOOL_SCHEMAS` (description claire, paramètres typés).
-3. L'enregistrer dans le dict `TOOLS`. `dispatch()` route automatiquement.
-4. Tester sur DB tmp dans `tests/test_tools.py` (pas de réseau, pas de LLM).
-
-Mode `thinking` activé sur le 1ᵉʳ tour de tool-calling (fiabilise la décision d'appeler les tools sur gemma3/4), désactivé sur les tours suivants pour gagner du temps. Les deltas de raisonnement sont streamés au client et affichés dans l'expander « 🧠 Raisonnement » de la page Coach (debug).
-
-Persistance : chaque message (user / assistant / tool) est stocké en JSON brut dans la table `conversations` (clé `session_id`, ordre par `id`). Reprise d'une session via le sélecteur de la page Coach.
-
-### Mémoire persistante du coach (`llm/memory.py`)
-
-Le coach garde une mémoire **entre les sessions**, à 3 étages, dans le SQLite de l'athlète (`ctx.db_path`) :
-
-- **Faits durables** (`coach_memory`) : préférences, contraintes/blessures, objectifs, accords, perso. Toujours injectés dans le prompt système. Population par l'outil `remember_fact` (explicite) **et** extraction auto en fin de session. Dédup par similarité (cosine > 0.9 → mise à jour).
-- **Résumés épisodiques** (`session_summaries`) : un résumé par session. **Résumé roulant** tous les `SESSION_SUMMARY_EVERY_MESSAGES` messages (défaut 8) ; **finalisation** (résumé final + extraction de faits) quand une session est inactive > `SESSION_IDLE_FINALIZE_MINUTES` (défaut 45, job APScheduler `finalize_sessions`), ou sur appel explicite `POST /api/coach/sessions/{id}/finalize` (front au `startNew`/changement de session). Le garde-fou `last_summarized_message_id` évite les régénérations.
-- **RAG** (`memory_vectors`) : index de retrieval unifié (messages, résumés, faits). Embeddings via Ollama (`OLLAMA_EMBED_MODEL`, défaut `nomic-embed-text` — `ollama pull nomic-embed-text`), cosine brute-force numpy (numpy déjà tiré par pandas). `build_memory_block(query)` assemble faits + 5 derniers résumés + top-4 passages pertinents, avec budget de contexte.
-
-Intégration : `build_initial_messages()` injecte le bloc mémoire en message `system` **à chaque tour** ; `run_turn_stream()` le calcule une fois par tour. L'historique verbatim de session est plafonné à `MAX_HISTORY_MESSAGES` (24) — le résumé roulant prend le relais. Outils exposés : `remember_fact` (écriture), `search_conversations` (lecture RAG).
-
-CRUD + UI : `GET/POST /api/coach/memory`, `PUT/DELETE /api/coach/memory/{id}`, composant `frontend/src/components/MemoryPanel.tsx` (section « Mémoire du coach » dans `/profil`, lien depuis la page Coach). `DELETE /api/coach/sessions/{id}` purge résumés + vecteurs ; les **faits durables survivent** (`source_session_id` nullifié). Backfill one-off de l'historique via flag `memory_backfill_done` (`sync_meta`), déclenché par le job scheduler. Tests : `tests/test_memory.py`, `tests/test_memory_api.py`, extensions `test_coach.py` / `test_scheduler.py`.
-
-Objectif : `data/objective.yaml` (gitignoré, template `data/objective.yaml.example`). Lu par le tool `get_objective`. Champs : `type` (cyclosportive/course/cyclo/maintenance), `date`, `distance_km`, `elevation_m`, `target_ftp`, `notes`. Override du chemin via `DOMESTIQUE_AI_OBJECTIVE_PATH` (utile pour les tests).
-
-### Coach proactif — paliers 1 et 2 (`llm/daily_brief.py`)
-
-Coach qui s'exprime sans être interpellé, en deux étages d'intrusion croissante.
-
-**Palier 1 — Briefing quotidien.** `GET /api/coach/daily-brief` agrège :
-
-- TSB courant + zone (Frais / Optimal / Fatigué / Surentraîné) + CTL/ATL (repris des signaux de `propose_workout_today`, recalculés sur jour off).
-- Séance suggérée du jour (via `propose_workout_today`).
-- Alerte la plus saillante (priorité TSB chronique / strain > monotony / saut volume > dérive matinale).
-- **Enrichissements hero** : `sleep_history` (7 j, `StepPoint` `{date, hours}`), `week_tss_planned`/`week_tss_done` (compliance de la semaine courante via `compute_week_compliance`), et `coach_tip` (2ᵉ phrase actionnable).
-- Phrase de synthèse **+ conseil** générés par LLM (~25 mots / ~15 mots, JSON strict `{summary, tip}`, mode `chat_structured_sync`) avec **fallbacks déterministes** (`_build_fallback_summary` / `_build_fallback_tip`) si Ollama injoignable — un `coach_tip` n'est jamais vide.
-
-Cache en mémoire avec clé `(db_path, date_iso, round(tsb/5), sha1(alerts_sorted))` — un seul appel LLM par jour et par état même si le Dashboard est rouvert. Le cache des jours antérieurs est purgé au passage d'une nouvelle journée.
-
-Composant frontal : `DailyBriefCard` en tête du Dashboard (hero). Refonte visuelle : **anneau TSB** (`TsbGauge`, SVG animé, couleur par zone), **halo d'ambiance** teinté par l'état, **avatar coach** (`CoachAvatar`, halo pulsant), barre séance (durée + TSS estimé), **mini-barres sommeil** (`SleepBars`, repère baseline), ligne `coach_tip`, et **surface d'alerte unique** (primaire visible + secondaires dépliables — la carte « Signaux d'alerte » séparée a été supprimée). Animations gated `prefers-reduced-motion`. Le nom affiché dans la salutation vient du contexte `MeProvider` (`hooks/useMe.tsx`) — un seul appel `/me` partagé, plus de fetch par page.
-
-**Palier 2 — Injection contextuelle dans le chat.** `build_initial_messages()` dans `llm/coach.py` ajoute désormais un **message system additionnel** quand `history` est vide (nouvelle session) avec : date, TSB, séance du jour, alerte saillante. Le coach démarre informé sans avoir à appeler ses tools sur la 1re question banale (« comment ça va ? »). Sur les tours suivants, ce contexte n'est **pas** réinjecté — il vit déjà dans la conversation, inutile de gonfler le prompt. Si le builder de contexte échoue (DB vide, Ollama KO), on continue sans contexte plutôt que de bloquer le chat.
-
-**Tests** : `tests/test_daily_brief.py` (sélection alerte, fallback summary + tip, cache + invalidation par jour, champs hero ctl/atl/week_tss/sleep_history, build_coach_context avec/sans alerte/repos) + 4 tests d'injection dans `test_coach.py` (présence/absence selon history, robustesse au crash du builder).
-
-### Génération de plan par LLM (`llm/plan_generator.py` + `processing/plan_validator.py`)
-
-Alternative au builder déterministe (`processing/plan_builder.py`). Exposé via `POST /api/plan/llm` (streamé SSE, semaine par semaine).
-
-Architecture en deux étages :
-
-1. **Génération LLM contrainte** : pour chaque semaine, le LLM ne produit que les choix de haut niveau (`kind`, `duration_min`, `notes`) au format JSON strict validé par Pydantic. Le code reconstruit `structure`/`target_zone`/`estimated_tss` via les helpers du builder déterministe (`_structure_for`, `_TARGET_ZONE`, `_TSS_PER_MIN`). Le LLM ne peut donc pas inventer une structure aberrante (genre 20 min de Z5 d'affilée).
-2. **Validation déterministe** : `validate_and_correct()` applique 4 garde-fous par semaine, dans l'ordre :
-   - **Disponibilité** : suppression des séances hors jours dispo, plafonnement des durées au `max_duration_min` du jour.
-   - **Repos hebdomadaire** : au plus 6 séances/sem (priorité de coupe : recovery > tempo > intervals > endurance).
-   - **Polarisation 80/20** : si la part Z4-Z5 dépasse 25 % du temps actif hebdo, conversion des `intervals` les plus courts en `tempo` jusqu'à respect.
-   - **Plafond TSS hebdo** : `_ctl_progression_cap(CTL, week_idx)` = `max(20, CTL) + 5 × week_idx) × 7`. Au-dessus, raccourcissement de l'endurance la plus longue (plancher 45 min — comportement best-effort si l'input est extrême).
-
-Chaque correction émet une chaîne descriptive dans `adjustments`, ce qui permet à l'UI d'afficher un badge « ajusté » sur la semaine impactée.
-
-Il y a en réalité **6 garde-fous** : aux 4 ci-dessus s'ajoutent la **cadence d'intensité par type** (`_enforce_intensity_cadence`) — sur les semaines de charge (≥ 3 séances, hors récup/taper), le plan doit contenir l'intensité attendue par le type (intervalles chaque semaine pour course/cyclosportive/maintenance ; intervalles 1 sem sur 2 et tempo sinon pour cyclo/forme). Conversion de l'endurance la plus longue — hors jour long — uniquement si le plafond TSS le permet — et la **sortie longue sur le jour dédié** (`_enforce_long_ride`) : la plus longue endurance des semaines de charge est placée sur `long_endurance_day` et portée à ≥ 90 min si le plafond le permet. Le plafond TSS respecte aussi le plancher configurable `DOMESTIQUE_AI_PLAN_MIN_CTL` (défaut 20 — relever à 30-40 pour des semaines plus consistantes à la reprise).
-
-**Reprise graduée (`processing/athlete_state.py`)** — la source de faits du coach. L'intensité n'est plus jamais imposée quand l'athlète est déconditionné :
-- `is_deconditioned(ctl, ctl_trend, chronic_tsb, threshold)` : règle composite — `CTL < threshold` (réutilise `DOMESTIQUE_AI_PLAN_MIN_CTL`), **ou** CTL en baisse (7j vs 14j, sortie de coupure), **ou** TSB chronique 7j ≤ −20 (aligné sur `overtraining`).
-- `intensity_ceiling(week_idx, ...)` : plafond d'intensité par semaine de reprise — semaine 0 = `base` (Z1-Z2 seulement), semaines de rampe suivantes = `tempo`, puis `full` (cadence normale) une fois la rampe franchie. Longueur de rampe selon le **niveau** de l'athlète (`beginner` 3, `intermediate`/`ex_competitor` 2, `advanced` 1).
-- Le **builder** rabote les slots selon le plafond (`plan_builder`), le **validator** ne force plus d'intensité quand `ceiling != full` (`_enforce_intensity_cadence`), et le **prompt LLM** reçoit le bloc `format_state_block` (CTL/ATL/TSB + trajectoire + niveau + compliance + récup) + la consigne de phase pour raisonner sur des faits.
-- Le niveau vient du profil athlète (`Profile.level` : `beginner|intermediate|advanced|ex_competitor`, getter `config.get_level`, champ `AthleteContext.level`) — un `ex_competitor` qui reprend garde une rampe mais revient plus vite à l'intensité qu'un débutant, sans jamais sauter les garde-fous.
-- `build_coach_state(ctx, today, ...)` agrège l'état réel (best-effort, ne lève jamais) pour alimenter le prompt, la revue hebdo et, à terme, le check du matin sur les mêmes faits.
-
-**Périodisation pilotée par le type d'objectif** — `processing/plan_builder._OBJECTIVE_FLAVORS` : `target_event_type` actionne 3 leviers (fenêtre de taper, fréquence des intervalles, surpondération de l'endurance longue) :
-- `course` / `cyclosportive` : taper 2 sem, intervalles chaque semaine, endurance neutre.
-- `cyclo` : taper 1 sem, intervalles 1 sem sur 2, endurance ×1.2 (volume avant tout).
-- `forme` (retour en forme / base, sans échéance de course) : **pas de taper**, volume Z2 prioritaire, intensité réintroduite progressivement selon l'état réel (tempo puis intervalles), pas de décharge finale.
-- `maintenance` : pas de taper, intervalles chaque semaine, endurance ×0.95 (routine allégée).
-
-Le générateur LLM (`plan_generator`) reçoit le même profil (fenêtre de taper + consigne d'intention dans le prompt via `_training_emphasis`).
-
-**Fallback** : si la sortie LLM est invalide après 2 tentatives (Ollama injoignable, JSON mal formé, schéma rejeté, workouts vides), la semaine bascule sur le builder déterministe — les autres semaines peuvent rester côté LLM. Le frontend reçoit le `source: "llm" | "fallback"` par semaine.
-
-**Tests** : 22 tests dans `tests/test_plan_generator.py` (mock `chat_structured`, scénarios LLM/fallback/retry) + 21 tests dans `tests/test_plan_validator.py` (chaque garde-fou isolément + cas combinés).
-
-### Plan adaptatif — check du matin + revue hebdomadaire
-
-Le plan n'est plus un artefact fixe de 4 semaines : il **roule** et s'adapte aux
-données réelles via deux boucles, toutes deux avec fallback déterministe
-(le LLM ne décide jamais hors bornes, il ne fait que rédiger les raisons).
-
-**Check du matin (quotidien)** — `llm/daily_decision.py` + job
-`scheduler._daily_morning_check_job` (CronTrigger, défaut **08:00 local** via
-`DOMESTIQUE_AI_DAILY_CHECK_HOUR`/`MINUTE` et `DOMESTIQUE_AI_SCHEDULER_TZ`,
-`-1` = off). Le job fait d'abord un **pre-sync Google Health** (hier→aujourd'hui,
-idempotent) + **pre-sync Garmin** pour garantir des données fraîches, puis
-`evaluate_daily_decision()` :
-
-- Signaux : entrée `morning_metrics` du jour (HRV, sommeil, readiness), baseline
-  14 j, alertes morning + overtraining, TSB, séance prévue du plan.
-- Décision par règles : **rest** si alerte critical / readiness < 30 / sommeil < 5 h ;
-  **adjust** si readiness < 50 / sommeil < 6,5 h / qualité de sommeil basse
-  (`sleep_score < 60` sous 7 h) / TSB < −10 / dérive morning ;
-  **go** sinon. Le sommeil est un signal renforcé (seuil d'allègement remonté
-  à 6h30, qualité via `sleep_score`), et la dérive sommeil vs baseline 14 j est
-  déjà couverte par les alertes morning (≥ 10 % → allègement, ≥ 20 % → repos).
-  `adjust` = downgrade kind (intervals→tempo→endurance) + durée −25 %.
-- **Répercussion dans le plan** : décision ≠ go persistée dans `plan_decisions`
-  (`llm/plan_storage.save_day_decision`), cache `today_suggestions` invalidé.
-  Le Plan affiche « REPOS (coach) » ou « allégée » ; la compliance la traite
-  comme repos coach (pas une séance manquée). Override manuel via
-  `POST /api/plan/decision`. Aucune notification Pushover pour ce check.
-
-**Revue hebdomadaire** — `llm/weekly_review.py` + job `scheduler._weekly_review_job`
-(CronTrigger, défaut **dimanche 18h** local via `DOMESTIQUE_AI_WEEKLY_REVIEW_DAY`/
-`HOUR`, `0` = off) + bouton « Adapter le plan » / `POST /api/plan/weekly-review` :
-
-1. Pre-sync Google Health 7 j + rapport `collect_week_report()` : compliance de la
-   semaine écoulée (`processing/compliance.py` : fait/partiel/manqué/repos coach,
-   TSS planifié vs réalisé), tendances matin 14 j, alertes overtraining, TSB.
-2. Décision `_fallback_decision()` : **reduce** si ≥ 2 manquées / adhérence < 50 % /
-   readiness < 50 / sommeil < 6 h / TSB < −15 / alerte chronique ; **progress** si
-   semaine conforme (facteur 1.05) ; **maintain** sinon.
-3. **Fenêtre glissante** : le coach **re-compose la semaine à venir uniquement**
-   (à partir du prochain lundi, ancrée sur l'état réel du jour) via le LLM du
-   `plan_generator` (`compose_upcoming_week` → `_compose_one_week`), borné par
-   `validate_and_correct()` (les faits — CTL/ATL/TSB, compliance, niveau — sont
-   injectés dans le prompt, l'intensité est plafonnée en reprise). Le facteur
-   volume déterministe borne la semaine (reduce), `progress`/`maintain` laissent
-   le LLM libre dans les bornes. Le **reste du plan actif est conservé** et sera
-   réévalué aux revues suivantes (le plan « roule » semaine après semaine). Puis
-   `save_plan` en **nouvelle version** (`parent_plan_id` + `adapt_reason`,
-   l'ancien passe en `superseded`). Fallback déterministe si Ollama injoignable
-   (`use_llm=False` ou échec LLM).
-4. Idempotence : flag `weekly_review_last_week` dans `sync_meta` (une revue par
-   semaine ISO). Pushover « Plan adapté » si re-plan effectué.
-
-**Versionnage** : `training_plans` a désormais `status` (`active`/`superseded`),
-`parent_plan_id`, `start_date`, `adapt_reason`. Le « plan actif » est résolu par
-statut (`llm/plan_storage.load_active_plan`), fallback « plus récent couvrant la
-date » pour la compat. `GET /api/plan/active`, `GET /api/plan/{id}/versions`,
-`GET /api/plan/{id}/decisions`. `Workout` porte un `uid` stable (uuid court,
-rétro-compatible via `from_dict`).
-
-**Génération LLM enrichie** : `GenerationContext` (plan_generator) porte
-désormais TSB, readiness médiane, dérive HRV et compliance de la semaine écoulée
-+ **ATL, trajectoire CTL (7j vs 14j), TSB chronique, niveau (`level`) et
-`coach_state`** (l'agrégat `athlete_state.build_coach_state`) — injectés dans
-`_build_user_prompt` (bloc « État réel ») pour que le LLM **raisonne sur des
-faits**. `ceiling_for(week_idx)` décide du plafond d'intensité de chaque semaine
-(reprise → base/tempo → normal). Le tool LLM `review_week` expose le rapport de
-semaine en lecture (le coach explique un ajustement sans inventer de chiffres).
-`compose_upcoming_week` expose la composition d'une seule semaine (réutilisée
-par la revue hebdo).
-
-**Tests** : `test_compliance.py` (8), `test_daily_decision.py` (8),
-`test_weekly_review.py` (9), `test_athlete_state.py` (règle composite + plafond
-gradué + bloc d'état) + extensions `test_plan_builder.py`/`test_plan_validator.py`
-(reprise = pas de Z4 semaine 1, cadence non forcée à CTL bas) et
-`test_plan_generator.py` (prompt état réel, ceiling reprise) et
-`test_profile.py` (champ `level`).
-
-### Comparateur d'activités (`processing/similar.py`)
-
-`GET /api/activities/{external_id}/similar` retourne les activités passées au profil similaire. Heuristique simple, sans appel API distante ni GPS de départ.
-
-**Signature** : `(sport_bucket, distance, elevation_gain)`.
-
-- `sport_bucket` : `outdoor` (Ride, GravelRide, MountainBikeRide, EBikeRide), `indoor` (VirtualRide), ou `other`. On ne compare jamais une sortie route à un home trainer.
-- Distance à ±5 % près en relatif.
-- Dénivelé à ±10 % près en relatif.
-- Plancher distance 5 km / dénivelé 50 m pour éviter les divisions absurdes sur les très courtes activités.
-
-Pré-filtre SQL sur l'index `idx_activities_distance_elev` (créé à la 1re requête) pour borner le scan, puis filtrage fin Python. Sur la DB courante (~quelques milliers de lignes), latence < 200 ms.
-
-Retour : `{available, reference, matches: [{external_id, date, duration_sec, training_load, tss_delta_pct, power_delta_pct, ...}], criteria}`. Les `*_delta_pct` sont calculés relativement à la référence (positif = candidate plus grand).
-
-**Exposition coach LLM** : tool `find_similar_activities(external_id, limit=10)`, déclaré dans `tools.py`. Permet au coach de répondre à « ce col, je l'ai monté combien de fois ? » sans inventer de chiffres.
-
-**Tests** : 16 tests dans `tests/test_similar_activities.py` couvrent tolérances, exclusion indoor/outdoor, delta_pct, tri, limit, plancher distance.
-
-Si l'usage révèle des faux positifs (deux profils différents au même bucket), on ajoutera `start_lat` / `start_lng` à `activities` (migration douce + backfill depuis les détails Garmin) pour affiner via Haversine.
-
-### Export iCalendar (`export/ics.py`)
-
-`GET /api/plan/{plan_id}/export.ics` retourne le plan au format RFC 5545 importable dans Google Calendar, Apple Calendar et Outlook. Implémentation manuelle sans dépendance externe (~150 lignes : escaping, folding 75 octets, formats `DTSTART`/`DURATION`).
-
-Points à retenir :
-- **Floating local time** : les `DTSTART` n'ont ni `TZID` ni suffixe `Z` — le calendrier les interprète dans la timezone de l'utilisateur (« 18 h chez moi »).
-- **Créneau par défaut 18 h** : configurable via le paramètre `default_hour` de `plan_to_ics()`. À terme on pourra le déduire des préférences `availability.yaml`.
-- **UID stable** (`plan-<id>-<date>@domestique-ai`) : réimporter le fichier met à jour les événements existants au lieu de créer des doublons.
-- **CRLF obligatoire** : Outlook refuse l'import si les lignes sont en LF seul (RFC 5545 § 3.1) — `plan_to_ics` produit toujours du CRLF.
-
-23 tests dans `tests/test_ics_export.py` couvrent folding, escaping (`;`, `,`, `\n`), UID stable, CRLF, durations multi-formats.
-
-### Flux d'abonnement iCalendar (webcal) — `GET /api/plan/feed.ics`
-
-Le canal privilégié pour mettre les séances dans le calendrier de l'utilisateur
-(Calendrier Apple/Google) : un **flux ICS à URL stable** que le client poll
-directement (abonnement « webcal »). L'appareil interroge notre serveur — aucun
-passage par le canal iCloud→APNs qui peut casser l'affichage côté Apple (bug
-iOS 26.4, sync périmée, etc.). Le push CalDAV a été **retiré** au profit de ce
-flux.
-
-- **Contenu** : les séances des **2 semaines à venir** (fenêtre
-  `rolling_weeks_window(today, weeks=2)` = semaine en cours + semaine suivante)
-  du plan actif, décisions du check du matin appliquées via
-  `select_upcoming_workouts`. Sérialisées par `plan_to_subscription_ics` (UID
-  stable `domestique-ai-<date>@domestique-ai`, `DTEND` explicite, heures UTC via
-  `get_scheduler_timezone`). La `DESCRIPTION` porte la structure par zones +
-  TSS + notes.
-- **Auth (token par athlète)** : le chemin est exempté du middleware Bearer
-  (`auth.py _EXEMPT_API_PATHS`) car les clients calendrier ne peuvent pas envoyer
-  de header Authorization. L'URL porte un **token propre à l'athlète** (colonne
-  `users.feed_token` de `platform.db`, généré à la demande via
-  `get_or_create_feed_token`, exposé par `GET /api/plan/subscription`). Le token
-  identifie directement l'athlète : pas de clé globale exposée, pas de
-  `?athlete=`. `POST /api/plan/subscription/rotate` régénère/révoque le token du
-  **compte courant**.
-- **Compat clé globale** : `GET /api/plan/feed.ics?key=<DOMESTIQUE_AI_CALENDAR_FEED_KEY>
-  [&athlete=<public_id>]` reste supporté pour les abonnements existants. Le flux
-  n'exige plus la clé globale : le mode token par athlète fonctionne sans elle.
-- **UI** : la carte `frontend/src/components/CalendarSubscribe.tsx` (page Plan,
-  sous les boutons ZIP/.ics, et page Réglages) affiche l'URL copiable, les
-  boutons Apple (`webcal://`) / Google Calendar et un QR code. Le flux est
-  régénérable depuis l'UI ; masqué en consultation coach (rotation self-only).
-- **URL d'abonnement** : `https://<hôte>/api/plan/feed.ics?key=<token>` — à
-  ajouter comme « Calendrier d'abonnement » dans Calendrier Apple/Google. Le
-  client poll la même URL : la fenêtre évolue après chaque revue hebdo sans
-  doublons (UID stables).
-
-Tests : `tests/test_ics_export.py` (multi-VEVENT, UID stables, DESCRIPTION,
-exigence de clé, token par athlète, endpoint `subscription` + rotation, fenêtre
-2 semaines, flux désactivé sans clé) et `tests/test_platform_db.py` (helpers
-`get_or_create_feed_token` / `get_user_by_feed_token` / `rotate` / `clear`).
 
 ## Conventions
 
@@ -591,7 +128,7 @@ exigence de clé, token par athlète, endpoint `subscription` + rotation, fenêt
   les blocs réécrits à la main ne respectent pas le format Black-like du projet).
 - **Imports** : `from __future__ import annotations` en tête de chaque module Python.
 - **Fixtures de test** : utiliser `tmp_path` + `init_db(tmp_path/"x.db")` pour isoler la base. Neutraliser les vars HR via `monkeypatch.delenv("STRAVA_HR_REST", ...)` quand un test cible explicitement la branche TSS power (sinon la config locale du dev peut faire basculer le calcul).
-- **⚠️ Toujours une todo** : pour toute tâche non triviale (3+ étapes), maintenir une todo list (outil `todowrite`) — une seule tâche `in_progress` à la fois, mise à jour en temps réel (ne cocher `completed` qu'après vérification réelle, jamais sur intention).
+- **⚠️ Toujours une todo** : pour toute tâche non triviale (3+ étapes), maintenir une todo list — une seule tâche `in_progress` à la fois, mise à jour en temps réel (ne cocher `completed` qu'après vérification réelle, jamais sur intention).
 
 ## graphify
 
