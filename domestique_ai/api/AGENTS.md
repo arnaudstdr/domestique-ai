@@ -125,6 +125,14 @@ est dans `platform_db.py`, les endpoints dans `api/routers/auth.py`.
   in-process) sur `signup` (IP), `forgot-password` (IP + email),
   `resend-verification` (user). 429 au dépassement. État par process (single
   worker uvicorn) ; `X-Forwarded-For` non géré (à faire derrière proxy).
+- **Suppression de son compte** — `DELETE /api/auth/me` (authentifié,
+  `DeleteAccountRequest`) : confirmation forte — mot de passe si le compte en a
+  un + code TOTP/code de secours si la 2FA est active. Refuse le bootstrap
+  (403). Efface la ligne plateforme (`delete_user` : sessions/invitations/tokens
+  en cascade) **puis** le dossier de données via
+  `athlete_context.remove_athlete_space(public_id)` (helper partagé avec la
+  suppression par un coach, `roster.py`). `MeResponse.has_password` permet à l'UI
+  de n'exiger le mot de passe que quand il existe.
 - **Middleware** (`api/auth.py`) : `/api/auth/{config,signup,verify-email,
   forgot-password,reset-password}` sont dans `_EXEMPT_API_PATHS` ;
   `/api/auth/resend-verification` dans `_TOTP_SETUP_ALLOWED_PATHS` (compte frais

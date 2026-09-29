@@ -18,7 +18,7 @@ from pydantic import BaseModel, Field
 from domestique_ai import mailer, ratelimit, security
 from domestique_ai.api.deps import get_current_user, require_coach
 from domestique_ai.api.logging import get_logger
-from domestique_ai.athlete_context import context_for_athlete
+from domestique_ai.athlete_context import context_for_athlete, remove_athlete_space
 from domestique_ai.config import (
     get_email_verification_ttl_hours,
     get_password_reset_ttl_minutes,
@@ -36,6 +36,7 @@ from domestique_ai.platform_db import (
     create_invitation,
     create_session,
     create_user,
+    delete_user,
     disable_totp,
     enable_totp,
     get_or_create_coach_invite_code,
@@ -113,6 +114,7 @@ class MeResponse(BaseModel):
     totp_enabled: bool = False
     avatar_url: str | None = None
     email_verified: bool = False
+    has_password: bool = False
 
 
 class SignupRequest(BaseModel):
@@ -155,6 +157,11 @@ class AuthConfigResponse(BaseModel):
 class LinkInviteRequest(BaseModel):
     invite_token: str | None = None
     coach_code: str | None = None
+
+
+class DeleteAccountRequest(BaseModel):
+    password: str | None = None
+    code: str | None = None
 
 
 class InvitationCreate(BaseModel):
@@ -326,6 +333,7 @@ def me(user: dict = Depends(get_current_user)) -> MeResponse:  # noqa: B008
         totp_enabled=bool(user.get("totp_enabled")),
         avatar_url=user.get("avatar"),
         email_verified=bool(user.get("email_verified")),
+        has_password=bool(user.get("has_password")),
     )
 
 
@@ -350,6 +358,55 @@ def delete_avatar(user: dict = Depends(get_current_user)) -> None:  # noqa: B008
     """Supprime la photo de profil du compte courant."""
     set_user_avatar(user["id"], None)
     log.info("Photo de profil supprimée pour %s", user["public_id"][:8])
+
+
+@router.delete("/me", status_code=status.HTTP_204_NO_CONTENT)
+def delete_me(
+    body: DeleteAccountRequest,
+    user: dict = Depends(get_current_user),  # noqa: B008
+) -> None:
+    """Supprime définitivement le compte courant et son espace de données.
+
+    Confirmation forte : mot de passe (si le compte en a un) + code TOTP ou code
+    de secours (si la 2FA est active). Le compte propriétaire (bootstrap) est
+    protégé. Efface la ligne plateforme (sessions/invitations en cascade) puis le
+    dossier de données ``data/athletes/<public_id>/``. Irréversible.
+    """
+    if user.get("is_bootstrap"):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Le compte propriétaire ne peut pas être supprimé.",
+        )
+    creds = get_user_credentials(user["id"])
+    if creds is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Compte introuvable.")
+    if creds["password_hash"] and (
+        not body.password or not security.verify_password(creds["password_hash"], body.password)
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Mot de passe incorrect.",
+        )
+    if creds["totp_enabled"]:
+        code = (body.code or "").strip()
+        authenticated = bool(code) and (
+            security.verify_totp(creds["totp_secret"], code)
+            or _consume_recovery_code(user["id"], code)
+        )
+        if not authenticated:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Code de vérification incorrect.",
+            )
+    public_id = user["public_id"]
+    try:
+        deleted = delete_user(user["id"])
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
+    if not deleted:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Compte introuvable.")
+    remove_athlete_space(public_id)
+    log.info("Compte %s supprimé par son propriétaire", public_id[:8])
 
 
 @lru_cache(maxsize=1)

@@ -623,6 +623,7 @@ export interface MeResponse {
   totp_enabled: boolean;
   avatar_url: string | null;
   email_verified: boolean;
+  has_password: boolean;
 }
 
 export interface AcceptInviteResponse {

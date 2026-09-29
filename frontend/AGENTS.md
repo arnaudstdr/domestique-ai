@@ -89,6 +89,10 @@ client. Les deltas de raisonnement sont affichés dans l'expander
   `acceptInviteLink`, sans doublon). Bandeau `EmailVerificationBanner.tsx` monté
   dans `AuthedShell` tant que `me.email_verified` est faux. `Roster.tsx` affiche
   aussi `ReusableInviteSection` (lien coach réutilisable, copie + régénération).
+- **Suppression de compte** — `DangerZoneSection` en bas de `/profil` : rappel
+  irréversible, confirmation par saisie de `SUPPRIMER`, mot de passe (si
+  `me.has_password`) + code TOTP (si `me.totp_enabled`), puis
+  `api.auth.deleteAccount` → `clearApiToken` → `/login`.
 
 ## Avatar — redimensionnement client
 

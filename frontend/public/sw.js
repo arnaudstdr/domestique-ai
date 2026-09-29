@@ -15,8 +15,8 @@
  * /manifest.json, /favicon.svg).
  */
 
-const STATIC_CACHE = "domestique-static-v8";
-const API_CACHE = "domestique-api-v8";
+const STATIC_CACHE = "domestique-static-v9";
+const API_CACHE = "domestique-api-v9";
 
 // Endpoints `/api/*` autorisés à être mis en cache (lecture historique sans
 // donnée personnelle sensible). Tout endpoint absent de cette liste passe

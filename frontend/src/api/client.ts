@@ -497,6 +497,11 @@ export const api = {
     },
     removeAvatar: () =>
       http<void>(`/api/auth/me/avatar`, { method: "DELETE" }),
+    deleteAccount: (password?: string | null, code?: string | null) =>
+      http<void>(`/api/auth/me`, {
+        method: "DELETE",
+        body: JSON.stringify({ password: password || null, code: code || null }),
+      }),
     login: (email: string, password: string) =>
       http<LoginResponse>(`/api/auth/login`, {
         method: "POST",

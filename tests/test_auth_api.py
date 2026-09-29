@@ -527,3 +527,98 @@ def test_link_rejected_for_coach_role(client: TestClient, monkeypatch: pytest.Mo
         headers=_bearer(coach_session),
     )
     assert r.status_code == 403
+
+
+# ---- Suppression de son propre compte ---------------------------------------
+
+
+def test_delete_own_account_removes_user_and_revokes_session(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from domestique_ai.platform_db import get_user_by_email
+
+    monkeypatch.setenv("DOMESTIQUE_AI_SIGNUP_ENABLED", "1")
+    body = _signup(client, role="athlete", email="a@b.c").json()
+    session = body["session_token"]
+
+    r = client.request(
+        "DELETE", "/api/auth/me", json={"password": _STRONG_PASSWORD}, headers=_bearer(session)
+    )
+    assert r.status_code == 204, r.text
+    # Compte effacé et session révoquée.
+    assert get_user_by_email("a@b.c") is None
+    assert client.get("/api/auth/me", headers=_bearer(session)).status_code == 401
+
+
+def test_delete_own_account_wrong_password_is_rejected(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from domestique_ai.platform_db import get_user_by_email
+
+    monkeypatch.setenv("DOMESTIQUE_AI_SIGNUP_ENABLED", "1")
+    body = _signup(client, role="athlete", email="a@b.c").json()
+    r = client.request(
+        "DELETE",
+        "/api/auth/me",
+        json={"password": "mauvais-mot-de-passe"},
+        headers=_bearer(body["session_token"]),
+    )
+    assert r.status_code == 401
+    assert get_user_by_email("a@b.c") is not None
+
+
+def test_delete_own_account_requires_totp_when_enabled(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("DOMESTIQUE_AI_SIGNUP_ENABLED", "1")
+    body = _signup(client, role="athlete", email="a@b.c").json()
+    _enable_totp(body["public_id"])
+
+    # Sans code → refusé.
+    r = client.request(
+        "DELETE",
+        "/api/auth/me",
+        json={"password": _STRONG_PASSWORD},
+        headers=_bearer(body["session_token"]),
+    )
+    assert r.status_code == 401
+
+    # Code TOTP valide → suppression.
+    import pyotp
+
+    code = pyotp.TOTP("JBSWY3DPEHPK3PXP").now()
+    r2 = client.request(
+        "DELETE",
+        "/api/auth/me",
+        json={"password": _STRONG_PASSWORD, "code": code},
+        headers=_bearer(body["session_token"]),
+    )
+    assert r2.status_code == 204, r2.text
+
+
+def test_delete_account_protects_bootstrap(client: TestClient) -> None:
+    r = client.request("DELETE", "/api/auth/me", json={}, headers=_bearer(_LEGACY))
+    assert r.status_code == 403
+
+
+def test_delete_own_account_removes_athlete_data_dir(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from domestique_ai.athlete_context import context_for_athlete
+    from domestique_ai.platform_db import get_user_by_public_id
+
+    monkeypatch.setenv("DOMESTIQUE_AI_SIGNUP_ENABLED", "1")
+    body = _signup(client, role="athlete", email="a@b.c").json()
+    user = get_user_by_public_id(body["public_id"])
+    assert user is not None
+    db_path = context_for_athlete(user).db_path
+    assert db_path.parent.exists()
+
+    r = client.request(
+        "DELETE",
+        "/api/auth/me",
+        json={"password": _STRONG_PASSWORD},
+        headers=_bearer(body["session_token"]),
+    )
+    assert r.status_code == 204, r.text
+    assert not db_path.parent.exists()

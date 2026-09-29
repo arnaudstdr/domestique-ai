@@ -24,10 +24,13 @@ varie pas d'un athlète à l'autre.
 
 from __future__ import annotations
 
+import logging
+import shutil
 from dataclasses import dataclass
 from pathlib import Path
 
 from domestique_ai.config import (
+    get_athletes_root,
     get_availability_path,
     get_db_path,
     get_ftp,
@@ -40,6 +43,8 @@ from domestique_ai.config import (
     get_profile_path,
     get_sex,
 )
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True, slots=True)
@@ -102,10 +107,8 @@ def context_for_athlete(user: dict) -> AthleteContext:
     if user.get("is_bootstrap"):
         return context_from_env()
 
-    # Imports locaux : `get_athletes_root` est dans config (déjà importé plus haut
-    # mais on garde l'accès explicite), `load_profile` vit dans llm.profile et
-    # importer ce module au top créerait un cycle (cf. config._profile_or_none).
-    from domestique_ai.config import get_athletes_root
+    # Imports locaux : `load_profile` vit dans llm.profile et l'importer au top
+    # créerait un cycle (cf. config._profile_or_none).
     from domestique_ai.llm.profile import load_profile
     from domestique_ai.platform_db import get_user_garmin_credentials
 
@@ -132,3 +135,22 @@ def context_for_athlete(user: dict) -> AthleteContext:
         garmin_email=garmin_email,
         garmin_password=garmin_password,
     )
+
+
+def remove_athlete_space(public_id: str) -> None:
+    """Supprime l'espace de données disque d'un athlète (best-effort).
+
+    Efface ``data/athletes/<public_id>/`` (base activités, tokens Garmin/Google
+    Health, YAML profil/objectif/dispo). No-op si ``public_id`` est vide
+    (bootstrap, dont les données legacy ne sont jamais supprimées) ou si le
+    dossier n'existe pas. Un échec d'I/O est loggé mais n'interrompt pas
+    l'appelant (la suppression du compte plateforme, elle, est déjà faite).
+    """
+    if not public_id:
+        return
+    target_dir = get_athletes_root() / public_id
+    try:
+        if target_dir.exists():
+            shutil.rmtree(target_dir, ignore_errors=True)
+    except OSError:  # noqa: BLE001 — best-effort
+        logger.warning("Suppression du dossier athlète %s échouée.", target_dir, exc_info=True)
