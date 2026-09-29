@@ -236,6 +236,8 @@
 @media (prefers-reduced-motion: reduce) {
   .stagger > *,
   .animate-rise,
+  .animate-fade-in,
+  .animate-sheet-up,
   .animate-coach-halo,
   .animate-alert-pulse {
     animation: none !important;
