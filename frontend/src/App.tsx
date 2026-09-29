@@ -1,5 +1,5 @@
 import { Link, Navigate, Route, Routes, useNavigate } from "react-router-dom";
-import { Eye, UserRound, Users, X } from "lucide-react";
+import { Eye, MessageSquare, UserRound, Users, X } from "lucide-react";
 import BottomNav from "./components/BottomNav";
 import EmailVerificationBanner from "./components/EmailVerificationBanner";
 import Dashboard from "./pages/Dashboard";
@@ -20,6 +20,7 @@ import ForgotPassword from "./pages/ForgotPassword";
 import ResetPassword from "./pages/ResetPassword";
 import Roster from "./pages/Roster";
 import Prescribe from "./pages/Prescribe";
+import Feedback from "./pages/Feedback";
 import { clearViewingAthlete } from "./api/client";
 import { MeProvider, useMe } from "./hooks/useMe";
 import { useViewing } from "./hooks/useViewing";
@@ -105,6 +106,18 @@ function AuthedShell() {
             )}
             {!viewing && (
               <Link
+                to="/feedback"
+                aria-label="Donner mon avis"
+                title="Donner mon avis"
+                className="grid h-9 w-9 place-items-center rounded-xl text-fg-soft
+                           border border-border/[0.06] bg-overlay/[0.03]
+                           hover:text-accent hover:border-accent/40 transition-colors"
+              >
+                <MessageSquare className="h-5 w-5" strokeWidth={1.75} aria-hidden="true" />
+              </Link>
+            )}
+            {!viewing && (
+              <Link
                 to="/profil"
                 aria-label="Profil"
                 title="Profil & paramètres"
@@ -141,6 +154,7 @@ function AuthedShell() {
           <Route path="/profil" element={<Profil />} />
           <Route path="/roster" element={<Roster />} />
           <Route path="/prescrire" element={<Prescribe />} />
+          <Route path="/feedback" element={<Feedback />} />
         </Routes>
       </main>
       <BottomNav viewing={!!viewing} />

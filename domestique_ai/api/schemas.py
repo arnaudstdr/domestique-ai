@@ -804,3 +804,22 @@ class TodayWorkoutResponse(BaseModel):
     morning_decision: str | None = None
     morning_reason: str | None = None
     morning_persisted: bool = False
+
+
+# ---- Feedback ----------------------------------------------------------------
+
+
+class FeedbackCreate(BaseModel):
+    """Retour laissé par un testeur via le formulaire ``/feedback``."""
+
+    category: Literal["bug", "idea", "remark", "other"]
+    message: str = Field(min_length=1, max_length=4000)
+    page: str | None = Field(default=None, max_length=200)
+    app_version: str | None = Field(default=None, max_length=50)
+
+
+class FeedbackCreated(BaseModel):
+    """Accusé de réception d'un retour."""
+
+    id: int
+    created_at: str

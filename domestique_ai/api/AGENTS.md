@@ -63,6 +63,28 @@ Le hook dans `_run_sync` (router garmin) enveloppe l'appel dans un `try/except` 
 
 **Extension future** : pour ajouter de nouveaux types de notifs (alerte overtraining qui change d'état, séance suggérée du matin), créer une fonction `notify_<event>()` dans le même module qui appelle `send_pushover` avec son propre formattage. Garder le principe : best-effort, jamais bloquant, et anti-spam via comparaison à un état précédent persisté si pertinent.
 
+## Formulaire de retour testeurs (`POST /api/feedback`)
+
+Retours laissés depuis la page `/feedback` (bouton d'en-tête, à côté de
+l'avatar). Data **plateforme** (cross-tenant), non scopée par athlète.
+
+- **Endpoint** — `POST /api/feedback` (authentifié, `get_current_user`) :
+  `category ∈ {bug, idea, remark, other}`, `message` (1-4000), `page` /
+  `app_version` optionnels. Rate-limité par utilisateur (10/h, `ratelimit`).
+  Renvoie 201 `{id, created_at}`.
+- **Persistance** — table `feedback` de `platform.db` : snapshot auteur
+  (`user_id`, `public_id`, `role`, `author_email`) + `user_agent` capturé
+  serveur. Helpers `insert_feedback` / `list_feedback` dans `platform_db.py`.
+- **Notification email** — `mailer.send_feedback_notification(to, feedback)`
+  vers `DOMESTIQUE_AI_FEEDBACK_EMAIL` (`config.get_feedback_notify_email()`),
+  **best-effort** (try/except dans le handler, jamais bloquant). Aucune adresse
+  configurée → pas d'envoi, le retour reste persisté. Envoi inline (pas de job
+  scheduler).
+- **Consultation** — email uniquement pour l'instant ; `list_feedback()`
+  permettrait d'ajouter plus tard une page coach / export CSV (pattern
+  `plan.py`).
+- Tests : `tests/test_feedback_api.py`.
+
 ## Heartbeat Healthchecks.io (dead man's switch)
 
 `domestique_ai/healthcheck.py` expose `ping_healthcheck()` — un GET best-effort sur l'URL Healthchecks.io. Le scheduler (`api/scheduler.py`) ajoute un 2e job APScheduler `healthcheck_ping` qui appelle cette fonction toutes les 5 min (configurable). Le 1er ping est lancé immédiatement au démarrage (`next_run_time=now`) pour que Healthchecks détecte tout de suite que l'app est UP.

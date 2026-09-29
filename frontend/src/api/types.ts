@@ -730,3 +730,19 @@ export interface ReconnectLink {
   reconnect_url: string;
   expires_at: string | null;
 }
+
+// ---- Feedback (retours testeurs) --------------------------------------------
+
+export type FeedbackCategory = "bug" | "idea" | "remark" | "other";
+
+export interface FeedbackPayload {
+  category: FeedbackCategory;
+  message: string;
+  page?: string | null;
+  app_version?: string | null;
+}
+
+export interface FeedbackCreated {
+  id: number;
+  created_at: string;
+}
