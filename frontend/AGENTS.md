@@ -73,8 +73,14 @@ remonte par **scroll infini** (`IntersectionObserver` en haut → `?before=<id>`
 position de scroll préservée ; sentinelle basse `?after=<id>` pour le cas
 « saut recherche »). L'envoi poste `session_id: null` : le serveur rattache le
 message à la session interne courante (rotation invisible après inactivité). La
-recherche (`GET /api/coach/search?q=`) affiche des hits ; cliquer un hit
-`message` recharge une fenêtre centrée (`?anchor=<id>`) et surligne la bulle.
+recherche (`GET /api/coach/search?q=`) se fait dans un **bottom sheet**
+(`components/CoachSearchSheet.tsx`) ouvert par le **bouton flottant** en bas à
+droite au-dessus de la barre de saisie : champ en **live + debounce 300 ms**
+(garde anti-réponse obsolète), fermeture par Escape / backdrop / X. Cliquer un
+hit `message` ferme le sheet et recharge une fenêtre centrée (`?anchor=<id>`) en
+surlignant la bulle ; un hit `fact`/`summary` (sans message) redirige vers
+`/profil`. Le lien « Mémoire du coach » (`Brain`) vit désormais dans l'en-tête de
+ce sheet (plus de carte de recherche en haut de page).
 
 ## Écrans & composants notables
 

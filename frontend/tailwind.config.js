@@ -83,6 +83,14 @@ export default {
           from: { opacity: "0", transform: "translateY(10px)" },
           to: { opacity: "1", transform: "none" },
         },
+        "fade-in": {
+          from: { opacity: "0" },
+          to: { opacity: "1" },
+        },
+        "sheet-up": {
+          from: { transform: "translateY(100%)" },
+          to: { transform: "none" },
+        },
         "coach-halo": {
           "0%, 100%": { opacity: "0.35", transform: "scale(1)" },
           "50%": { opacity: "0.6", transform: "scale(1.12)" },
@@ -94,6 +102,8 @@ export default {
       },
       animation: {
         rise: "rise 0.5s cubic-bezier(0.22, 1, 0.36, 1) both",
+        "fade-in": "fade-in 0.2s ease-out both",
+        "sheet-up": "sheet-up 0.3s cubic-bezier(0.22, 1, 0.36, 1) both",
         "coach-halo": "coach-halo 3.2s ease-in-out infinite",
         "alert-pulse": "alert-pulse 1.8s ease-in-out infinite",
       },

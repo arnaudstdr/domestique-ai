@@ -1,9 +1,10 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import { Link, useSearchParams } from "react-router-dom";
-import { Brain, Search, X } from "lucide-react";
+import { useSearchParams } from "react-router-dom";
+import { Search } from "lucide-react";
 import { api, ApiError, streamCoachChat } from "../api/client";
-import type { CoachMessage, CoachSearchHit } from "../api/types";
+import type { CoachMessage } from "../api/types";
 import ChatBubble from "../components/ChatBubble";
+import CoachSearchSheet from "../components/CoachSearchSheet";
 import { useToast } from "../hooks/useToast";
 
 const PAGE_SIZE = 30;
@@ -35,12 +36,6 @@ function toThread(message: CoachMessage): ThreadMessage {
   return { ...message, key: message.id != null ? `id-${message.id}` : localKey() };
 }
 
-const SOURCE_LABELS: Record<string, string> = {
-  message: "Message",
-  summary: "Résumé",
-  fact: "Mémoire",
-};
-
 function TypingDots() {
   return (
     <div className="flex justify-start">
@@ -67,9 +62,7 @@ export default function Coach() {
   const [draft, setDraft] = useState("");
   const [streaming, setStreaming] = useState(false);
   const [pending, setPending] = useState<PendingAssistant>(EMPTY_PENDING);
-  const [searchQuery, setSearchQuery] = useState("");
-  const [searchHits, setSearchHits] = useState<CoachSearchHit[]>([]);
-  const [searching, setSearching] = useState(false);
+  const [searchOpen, setSearchOpen] = useState(false);
   const [highlightId, setHighlightId] = useState<number | null>(null);
   const pendingRef = useRef<PendingAssistant>(EMPTY_PENDING);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
@@ -243,7 +236,6 @@ export default function Coach() {
     if (!message || streaming) return;
     setDraft("");
     setStreaming(true);
-    setSearchHits([]);
     setHighlightId(null);
     pendingRef.current = EMPTY_PENDING;
     setPending(EMPTY_PENDING);
@@ -314,22 +306,6 @@ export default function Coach() {
     }
   }
 
-  async function runSearch() {
-    const query = searchQuery.trim();
-    if (!query) {
-      setSearchHits([]);
-      return;
-    }
-    setSearching(true);
-    try {
-      setSearchHits(await api.coach.search(query));
-    } catch {
-      push("Recherche impossible.", "error");
-    } finally {
-      setSearching(false);
-    }
-  }
-
   async function jumpTo(messageId: number) {
     if (streaming) return;
     try {
@@ -337,8 +313,6 @@ export default function Coach() {
       setMessages(page.messages.map(toThread));
       setHasMoreBefore(page.has_more_before);
       setHasMoreAfter(page.has_more_after);
-      setSearchHits([]);
-      setSearchQuery("");
       setHighlightId(messageId);
       requestAnimationFrame(() => {
         document
@@ -354,97 +328,7 @@ export default function Coach() {
 
   return (
     <div className="space-y-3">
-      <div className="card space-y-2">
-        <div className="flex gap-2 items-center">
-          <div className="relative flex-1">
-            <Search
-              className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted"
-              strokeWidth={1.75}
-              aria-hidden="true"
-            />
-            <input
-              value={searchQuery}
-              onChange={(e) => {
-                setSearchQuery(e.target.value);
-                if (!e.target.value.trim()) setSearchHits([]);
-              }}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") {
-                  e.preventDefault();
-                  runSearch();
-                }
-              }}
-              placeholder="Rechercher dans le fil…"
-              className="input pl-9 pr-9"
-              aria-label="Rechercher dans le fil"
-            />
-            {searchQuery && (
-              <button
-                type="button"
-                onClick={() => {
-                  setSearchQuery("");
-                  setSearchHits([]);
-                }}
-                className="absolute right-2 top-1/2 -translate-y-1/2 text-muted hover:text-fg"
-                aria-label="Effacer la recherche"
-              >
-                <X className="h-4 w-4" strokeWidth={1.75} aria-hidden="true" />
-              </button>
-            )}
-          </div>
-          <button
-            type="button"
-            onClick={runSearch}
-            disabled={searching || !searchQuery.trim()}
-            className="btn-ghost disabled:opacity-40"
-            title="Rechercher"
-            aria-label="Rechercher"
-          >
-            <Search className="h-4 w-4" strokeWidth={1.75} aria-hidden="true" />
-          </button>
-          <Link
-            to="/profil"
-            className="btn-ghost"
-            title="Mémoire du coach"
-            aria-label="Mémoire du coach"
-          >
-            <Brain className="h-4 w-4" strokeWidth={1.75} aria-hidden="true" />
-          </Link>
-        </div>
-
-        {searchHits.length > 0 && (
-          <div className="space-y-1 border-t border-border/[0.06] pt-2">
-            {searchHits.map((hit, i) =>
-              hit.message_id != null ? (
-                <button
-                  key={`${hit.message_id}-${i}`}
-                  type="button"
-                  onClick={() => jumpTo(hit.message_id as number)}
-                  className="block w-full rounded-lg px-3 py-2 text-left text-sm hover:bg-sunken"
-                >
-                  <span className="mr-2 rounded bg-accent/15 px-1.5 py-0.5 text-[11px] font-medium text-accent">
-                    {SOURCE_LABELS[hit.source_type] || hit.source_type}
-                  </span>
-                  <span className="text-muted">{hit.text.slice(0, 140)}</span>
-                </button>
-              ) : (
-                <Link
-                  key={`${hit.source_type}-${i}`}
-                  to="/profil"
-                  className="block rounded-lg px-3 py-2 text-sm hover:bg-sunken"
-                >
-                  <span className="mr-2 rounded bg-overlay/10 px-1.5 py-0.5 text-[11px] font-medium text-muted">
-                    {SOURCE_LABELS[hit.source_type] || hit.source_type}
-                  </span>
-                  <span className="text-muted">{hit.text.slice(0, 140)}</span>
-                </Link>
-              ),
-            )}
-          </div>
-        )}
-      </div>
-
-      <div className="space-y-3 pb-40">
+      <div className="space-y-3 pb-48">
         <div ref={topSentinelRef} className="h-1" />
         {loadingBefore && <div className="py-2 text-center text-xs text-muted">Chargement…</div>}
         {!hasMoreBefore && messages.length > 0 && (
@@ -486,6 +370,21 @@ export default function Coach() {
         className="fixed bottom-16 inset-x-0 z-20 bg-surface/80 backdrop-blur-xl
                    border-t border-border/[0.06] pb-[env(safe-area-inset-bottom)]"
       >
+        <div className="pointer-events-none absolute -top-14 inset-x-0 mx-auto flex max-w-3xl justify-end px-4">
+          <button
+            type="button"
+            onClick={() => setSearchOpen(true)}
+            className="pointer-events-auto flex h-12 w-12 items-center justify-center rounded-full
+                       bg-accent text-accent-ink shadow-glow transition-all duration-150
+                       hover:-translate-y-px active:translate-y-0"
+            title="Rechercher dans le fil"
+            aria-label="Rechercher dans le fil"
+            aria-haspopup="dialog"
+            aria-expanded={searchOpen}
+          >
+            <Search className="h-5 w-5" strokeWidth={2} aria-hidden="true" />
+          </button>
+        </div>
         <div className="mx-auto max-w-3xl px-4 py-3 flex items-end gap-2">
           <textarea
             ref={textareaRef}
@@ -506,6 +405,8 @@ export default function Coach() {
           </button>
         </div>
       </div>
+
+      <CoachSearchSheet open={searchOpen} onClose={() => setSearchOpen(false)} onJump={jumpTo} />
     </div>
   );
 }
