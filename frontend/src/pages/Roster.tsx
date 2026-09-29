@@ -151,9 +151,9 @@ function AthletesSection() {
           {athletes.map((a) => (
             <li
               key={a.public_id}
-              className="flex items-center justify-between gap-3 rounded-xl border border-white/[0.06] bg-white/[0.03] px-3 py-2.5"
+              className="flex flex-col gap-3 rounded-xl border border-white/[0.06] bg-white/[0.03] px-3 py-2.5 sm:flex-row sm:items-center sm:justify-between"
             >
-              <div className="flex min-w-0 items-center gap-3">
+              <div className="flex w-full min-w-0 items-center gap-3 sm:w-auto">
                 <AthleteAvatar athlete={a} />
                 <div className="min-w-0">
                   <p className="truncate text-sm font-medium text-gray-100">
@@ -165,17 +165,19 @@ function AthletesSection() {
                       {a.n_activities} act.
                     </span>
                   </p>
-                  <p className="text-[11px] text-muted">{formatDate(a.last_activity_date)}</p>
+                  <p className="whitespace-nowrap text-[11px] text-muted">
+                    {formatDate(a.last_activity_date)}
+                  </p>
                 </div>
               </div>
-              <div className="flex shrink-0 items-center gap-1.5">
+              <div className="flex w-full items-center gap-1.5 sm:w-auto sm:shrink-0">
                 <button
                   type="button"
                   onClick={() => reconnectLink(a)}
                   disabled={linking === a.public_id}
                   aria-label="Générer un lien de reconnexion"
                   title="Lien de reconnexion (si l'athlète s'est déconnecté)"
-                  className="btn-ghost flex items-center gap-1.5 px-3 py-2 text-xs"
+                  className="btn-ghost flex flex-1 items-center justify-center gap-1.5 px-3 py-2 text-xs sm:flex-none"
                 >
                   <KeyRound className="h-4 w-4" strokeWidth={1.75} aria-hidden="true" />
                   {linking === a.public_id ? "…" : "Reconnexion"}
@@ -183,7 +185,7 @@ function AthletesSection() {
                 <button
                   type="button"
                   onClick={() => consult(a)}
-                  className="btn-ghost flex items-center gap-1.5 px-3 py-2 text-xs"
+                  className="btn-ghost flex flex-1 items-center justify-center gap-1.5 px-3 py-2 text-xs sm:flex-none"
                 >
                   <Eye className="h-4 w-4" strokeWidth={1.75} aria-hidden="true" />
                   Consulter
