@@ -475,6 +475,16 @@ export interface PlanCreateRequest {
   focus?: string | null;
 }
 
+export interface SubscriptionFeed {
+  enabled: boolean;
+  url: string;
+  webcal_url: string;
+  google_url: string;
+  qr_svg_data_uri: string;
+  athlete_public_id: string;
+  reason?: string | null;
+}
+
 export type PlanDecisionValue = "planned" | "adjusted" | "rest";
 
 export interface PlanDecision {

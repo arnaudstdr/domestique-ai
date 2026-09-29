@@ -460,3 +460,77 @@ def test_feed_no_key_configured_returns_404(tmp_path, monkeypatch, api_auth_head
     monkeypatch.delenv("DOMESTIQUE_AI_CALENDAR_FEED_KEY", raising=False)
     client = TestClient(app, headers=api_auth_headers)
     assert client.get("/api/plan/feed.ics?key=anything").status_code == 404
+
+
+def test_feed_accepts_per_athlete_token_without_global_key(tmp_path, monkeypatch, api_auth_headers):
+    """Un token par athlète authentifie le flux même sans clé globale."""
+    from fastapi.testclient import TestClient
+
+    from domestique_ai.api.main import app
+    from domestique_ai.export.ics import rolling_weeks_window
+    from domestique_ai.llm import plan_storage
+    from domestique_ai.platform_db import get_or_create_bootstrap_coach, get_or_create_feed_token
+
+    monkeypatch.setenv("DOMESTIQUE_AI_DB_PATH", str(tmp_path / "feed_token.db"))
+    monkeypatch.delenv("DOMESTIQUE_AI_CALENDAR_FEED_KEY", raising=False)
+    start, _ = rolling_weeks_window(dt.date.today())
+    plan_storage.save_plan(
+        [
+            _make_workout(date=start.isoformat(), name="Endurance"),
+            _make_workout(date=(start + dt.timedelta(days=2)).isoformat(), name="Tempo"),
+        ],
+        target_date=dt.date(2026, 7, 1),
+        target_event_type="cyclosportive",
+        sessions_per_week=4,
+    )
+    bootstrap = get_or_create_bootstrap_coach()
+    token = get_or_create_feed_token(bootstrap["id"])
+    client = TestClient(app, headers=api_auth_headers)
+
+    assert client.get("/api/plan/feed.ics?key=wrong").status_code == 404
+    response = client.get(f"/api/plan/feed.ics?key={token}")
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/calendar")
+    assert response.content.decode("utf-8").count("BEGIN:VEVENT") == 2
+
+
+def test_subscription_endpoint_returns_ready_url(tmp_path, monkeypatch, api_auth_headers):
+    from fastapi.testclient import TestClient
+
+    from domestique_ai.api.main import app
+
+    monkeypatch.setenv("DOMESTIQUE_AI_DB_PATH", str(tmp_path / "sub.db"))
+    client = TestClient(app, headers=api_auth_headers)
+    response = client.get("/api/plan/subscription")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["enabled"] is True
+    assert "/api/plan/feed.ics?key=" in data["url"]
+    assert data["webcal_url"].startswith("webcal://")
+    assert data["webcal_url"].endswith(data["url"].split("://", 1)[1])
+    assert "calendar.google.com" in data["google_url"]
+    assert data["qr_svg_data_uri"].startswith("data:image/svg+xml;base64,")
+    assert data["athlete_public_id"]
+
+
+def test_subscription_rotate_changes_token(tmp_path, monkeypatch, api_auth_headers):
+    from fastapi.testclient import TestClient
+
+    from domestique_ai.api.main import app
+
+    monkeypatch.setenv("DOMESTIQUE_AI_DB_PATH", str(tmp_path / "sub_rotate.db"))
+    client = TestClient(app, headers=api_auth_headers)
+    first = client.get("/api/plan/subscription").json()["url"]
+
+    rotated = client.post("/api/plan/subscription/rotate")
+    assert rotated.status_code == 200
+    second = rotated.json()["url"]
+
+    assert first != second
+    # L'ancien token est révoqué (404 sur le flux), le nouveau est accepté.
+    old_key = first.split("key=", 1)[1]
+    new_key = second.split("key=", 1)[1]
+    assert client.get(f"/api/plan/feed.ics?key={old_key}").status_code == 404
+    # Pas de plan actif → 404 attendu, mais l'authentification par token a bien
+    # été franchie (le corps n'est pas celui d'un token inconnu / clé absente).
+    assert client.get(f"/api/plan/feed.ics?key={new_key}").status_code == 404

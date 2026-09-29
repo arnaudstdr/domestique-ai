@@ -7,12 +7,13 @@ import datetime as _dt
 import json
 from collections.abc import AsyncGenerator
 from typing import Any
+from urllib.parse import quote, urlsplit, urlunsplit
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import Response
 from sse_starlette.sse import EventSourceResponse
 
-from domestique_ai.api.deps import get_athlete_context
+from domestique_ai.api.deps import get_athlete_context, get_current_user
 from domestique_ai.api.logging import get_logger
 from domestique_ai.api.schemas import (
     PlanCreateRequest,
@@ -20,11 +21,13 @@ from domestique_ai.api.schemas import (
     PlanDecisionOut,
     PlanDetail,
     PlanSummary,
+    SubscriptionFeed,
     WeeklyReviewOut,
     WorkoutSchema,
     WorkoutStepSchema,
 )
 from domestique_ai.athlete_context import AthleteContext
+from domestique_ai.config import get_app_base_url
 from domestique_ai.export.fit import plan_to_zip
 from domestique_ai.export.ics import plan_to_ics
 from domestique_ai.llm.availability import AvailabilityError
@@ -196,6 +199,88 @@ def get_active_plan(
     return _detail_from_plan(plan_id, plan, ctx)
 
 
+def _absolute_base_url(request: Request) -> str:
+    """Base URL publique : ``DOMESTIQUE_AI_APP_BASE_URL`` sinon l'origine requête."""
+    base = get_app_base_url()
+    if base:
+        return base
+    return str(request.base_url).rstrip("/")
+
+
+def _subscription_urls(request: Request, token: str) -> tuple[str, str, str]:
+    """Construit (https, webcal, Google Calendar) pour un token de flux."""
+    url = f"{_absolute_base_url(request)}/api/plan/feed.ics?key={quote(token, safe='')}"
+    parts = urlsplit(url)
+    webcal = urlunsplit(("webcal", parts.netloc, parts.path, parts.query, parts.fragment))
+    google = "https://calendar.google.com/calendar/render?cid=" + quote(webcal, safe="")
+    return url, webcal, google
+
+
+def _target_user_for_subscription(request: Request, ctx: AthleteContext) -> dict[str, Any]:
+    """Compte propriétaire du flux pour la requête courante.
+
+    Un coach consultant un athlète (``?athlete=``) cible CET athlète ; sinon le
+    compte courant (bootstrap inclus).
+    """
+    from domestique_ai.platform_db import get_user_by_public_id
+
+    if ctx.public_id:
+        target = get_user_by_public_id(ctx.public_id)
+        if target is not None:
+            return target
+    return get_current_user(request)
+
+
+@router.get("/subscription", response_model=SubscriptionFeed)
+def get_subscription(
+    request: Request,
+    ctx: AthleteContext = Depends(get_athlete_context),  # noqa: B008
+) -> SubscriptionFeed:
+    """URL d'abonnement iCalendar de l'athlète ciblé.
+
+    Le token est propre à l'athlète (généré à la demande) : l'URL identifie
+    l'athlète sans exposer la clé globale ni ``?athlete=``. Un coach consultant un
+    athlète obtient le flux de CET athlète (lecture seule).
+    """
+    from domestique_ai.platform_db import get_or_create_feed_token
+    from domestique_ai.security import qr_svg_data_uri
+
+    target = _target_user_for_subscription(request, ctx)
+    token = get_or_create_feed_token(target["id"])
+    url, webcal, google = _subscription_urls(request, token)
+    return SubscriptionFeed(
+        enabled=True,
+        url=url,
+        webcal_url=webcal,
+        google_url=google,
+        qr_svg_data_uri=qr_svg_data_uri(webcal),
+        athlete_public_id=target["public_id"],
+    )
+
+
+@router.post("/subscription/rotate", response_model=SubscriptionFeed)
+def rotate_subscription(request: Request) -> SubscriptionFeed:
+    """Régénère le token de flux du compte COURANT (révoque l'ancien abonnement).
+
+    ``?athlete=`` est ignoré : un coach ne peut pas révoquer le flux d'un athlète
+    depuis cette route.
+    """
+    from domestique_ai.platform_db import rotate_feed_token
+    from domestique_ai.security import qr_svg_data_uri
+
+    current = get_current_user(request)
+    token = rotate_feed_token(current["id"])
+    url, webcal, google = _subscription_urls(request, token)
+    return SubscriptionFeed(
+        enabled=True,
+        url=url,
+        webcal_url=webcal,
+        google_url=google,
+        qr_svg_data_uri=qr_svg_data_uri(webcal),
+        athlete_public_id=current["public_id"],
+    )
+
+
 @router.get("/feed.ics")
 def get_plan_feed(
     key: str = "",
@@ -209,35 +294,42 @@ def get_plan_feed(
     change à chaque revue hebdo.
 
     Auth : ce chemin est exempté du middleware Bearer (les clients calendrier
-    ne peuvent pas envoyer de header Authorization) — il est protégé par la
-    clé ``DOMESTIQUE_AI_CALENDAR_FEED_KEY`` passée en ``?key=``. Sans clé
-    configurée, le flux est désactivé (404).
+    ne peuvent pas envoyer de header Authorization). Deux modes de clé :
 
-    ``?athlete=<public_id>`` permet de cibler un athlète du roster (défaut :
-    le propriétaire bootstrap / données legacy).
+    1. **Token par athlète** (recommandé, exposé par ``GET /api/plan/subscription``) :
+       le token identifie directement l'athlète, ``?athlete=`` est ignoré.
+    2. **Clé globale** ``DOMESTIQUE_AI_CALENDAR_FEED_KEY`` (compat ascendante) :
+       auth partagée, ``?athlete=<public_id>`` cible un athlète du roster (défaut :
+       bootstrap). Sans clé globale configurée, seul le mode 1 fonctionne.
     """
     import hmac
 
-    from domestique_ai.config import get_calendar_feed_key
-    from domestique_ai.export.ics import plan_to_subscription_ics
-
-    expected = get_calendar_feed_key()
-    if not expected or not hmac.compare_digest(key, expected):
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Introuvable.")
-
     from domestique_ai.athlete_context import context_for_athlete, context_from_env
-    from domestique_ai.config import get_scheduler_timezone
-    from domestique_ai.export.ics import rolling_weeks_window, select_upcoming_workouts
+    from domestique_ai.config import get_calendar_feed_key, get_scheduler_timezone
+    from domestique_ai.export.ics import (
+        plan_to_subscription_ics,
+        rolling_weeks_window,
+        select_upcoming_workouts,
+    )
     from domestique_ai.llm.plan_storage import list_decisions, load_active_plan
-    from domestique_ai.platform_db import get_user_by_public_id
+    from domestique_ai.platform_db import get_user_by_feed_token, get_user_by_public_id
 
-    if athlete:
-        user = get_user_by_public_id(athlete)
-        if user is None:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Athlète inconnu.")
-        ctx = context_for_athlete(user)
+    target = get_user_by_feed_token(key) if key else None
+    if target is not None:
+        ctx = context_for_athlete(target)
     else:
-        ctx = context_from_env()
+        expected = get_calendar_feed_key()
+        if not expected or not hmac.compare_digest(key, expected):
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Introuvable.")
+        if athlete:
+            user = get_user_by_public_id(athlete)
+            if user is None:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND, detail="Athlète inconnu."
+                )
+            ctx = context_for_athlete(user)
+        else:
+            ctx = context_from_env()
 
     plan_meta = load_active_plan(db_path=ctx.db_path)
     if plan_meta is None:

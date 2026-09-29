@@ -40,6 +40,7 @@ import type {
   RideVolumeResponse,
   SimilarActivitiesResponse,
   StatusResponse,
+  SubscriptionFeed,
   SyncResult,
   SyncStatus,
   GarminStatus,
@@ -439,6 +440,14 @@ export const api = {
       http<PlanDecision>(`/api/plan/decision`, {
         method: "POST",
         body: JSON.stringify(payload),
+      }),
+    // URL d'abonnement calendrier de l'athlète consulté (token par athlète).
+    subscription: () => http<SubscriptionFeed>(`/api/plan/subscription`),
+    // Régénère le token du compte COURANT (le `?athlete=` éventuel est ignoré
+    // côté serveur — un coach ne révoque pas le flux d'un athlète).
+    rotateSubscription: () =>
+      http<SubscriptionFeed>(`/api/plan/subscription/rotate`, {
+        method: "POST",
       }),
     exportZip: async (id: number): Promise<{ blob: Blob; filename: string }> => {
       const response = await fetch(`${API_BASE}${withAthlete(`/api/plan/${id}/export.zip`)}`, {

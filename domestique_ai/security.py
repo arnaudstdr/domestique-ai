@@ -85,7 +85,12 @@ def totp_uri(secret: str, account: str, issuer: str = TOTP_ISSUER) -> str:
 
 def totp_qr_svg_data_uri(uri: str) -> str:
     """QR code de ``uri`` en data-URL SVG (base64) — pas de dépendance Pillow."""
-    image = qrcode.make(uri, image_factory=qrcode.image.svg.SvgPathImage)
+    return qr_svg_data_uri(uri)
+
+
+def qr_svg_data_uri(text: str) -> str:
+    """QR code de ``text`` en data-URL SVG (base64) — pas de dépendance Pillow."""
+    image = qrcode.make(text, image_factory=qrcode.image.svg.SvgPathImage)
     buffer = io.BytesIO()
     image.save(buffer)
     encoded = base64.b64encode(buffer.getvalue()).decode("ascii")

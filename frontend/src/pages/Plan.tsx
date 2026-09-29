@@ -28,6 +28,7 @@ import type {
   Workout,
 } from "../api/types";
 import ObjectiveForm from "../components/ObjectiveForm";
+import CalendarSubscribe from "../components/CalendarSubscribe";
 import PlanCalendar from "../components/PlanCalendar";
 import { useToast } from "../hooks/useToast";
 import { useViewing } from "../hooks/useViewing";
@@ -836,6 +837,8 @@ export default function Plan() {
           </>
         )}
       </div>
+
+      <CalendarSubscribe />
 
       {loadingDetail && (
         <div className="card text-sm text-muted">Chargement du plan…</div>

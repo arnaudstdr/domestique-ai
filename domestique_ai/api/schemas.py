@@ -626,6 +626,18 @@ class PlanCreateRequest(BaseModel):
     focus: str | None = None
 
 
+class SubscriptionFeed(BaseModel):
+    """URL d'abonnement iCalendar du plan actif (flux webcal par athlète)."""
+
+    enabled: bool = True
+    url: str = ""
+    webcal_url: str = ""
+    google_url: str = ""
+    qr_svg_data_uri: str = ""
+    athlete_public_id: str = ""
+    reason: str | None = None
+
+
 class PlanDecisionCreate(BaseModel):
     """Override manuel de la décision du jour (repos / séance allégée)."""
 

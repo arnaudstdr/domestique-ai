@@ -227,23 +227,29 @@ Le canal pour afficher les séances du plan dans Calendrier Apple/Google : un
 la sync CalDAV d'iOS se comporte mal. La fenêtre servie est la **semaine en
 cours + la semaine à venir**, et elle évolue après chaque revue hebdo.
 
+**Depuis l'UI (recommandé)** — rien à configurer côté serveur : l'URL
+d'abonnement est générée par athlète depuis **Plan → Abonnement calendrier**
+(ou **Réglages**). La carte affiche l'URL copiable, les boutons **Apple
+Calendrier** (`webcal://`) / **Google Calendar** et un **QR code**. Le token est
+propre à l'athlète (stocké dans `platform.db`) et régénérable (révoque l'ancien
+abonnement). Sur iPhone : scanner le QR, ou Réglages > Calendrier > Comptes >
+Ajouter un compte > Autre > Calendrier d'abonnement → coller l'URL.
+
+**Compat clé globale (optionnel)** — les abonnements existants restent servis
+via `DOMESTIQUE_AI_CALENDAR_FEED_KEY` :
+
 1. Générer une clé et l'ajouter au `.env` :
    ```
    DOMESTIQUE_AI_CALENDAR_FEED_KEY=<openssl rand -hex 24>
    ```
 2. Redémarrer le conteneur.
-3. Sur l'iPhone, **Réglages > Calendrier > Comptes > Ajouter un compte >
-   Autre > Calendrier d'abonnement**, puis coller :
+3. Coller comme calendrier d'abonnement :
    ```
    https://ai-stack.tail68aa7e.ts.net/api/plan/feed.ics?key=<CLÉ>
    ```
    (ou le hostname tailnet de ton RPi). Pour cibler un athlète du roster :
    `&athlete=<public_id>`.
 
-Le calendrier se met à jour tout seul après chaque revue hebdo. La description
-de chaque séance (structure par zones + TSS) est visible en ouvrant
-l'événement. Le flux est désactivé (404) sans clé.
-
-Le calendrier se met à jour tout seul après chaque revue hebdo (fenêtre = la
-semaine à venir). La description de chaque séance (structure par zones + TSS)
-est visible en ouvrant l'événement. Le flux est désactivé (404) sans clé.
+Le flux fonctionne **sans** clé globale (mode token par athlète). La description
+de chaque séance (structure par zones + TSS) est visible en ouvrant l'événement.
+Retrouve l'URL exacte dans l'UI plutôt que de la composer à la main.

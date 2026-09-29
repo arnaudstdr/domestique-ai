@@ -547,20 +547,30 @@ flux.
   stable `domestique-ai-<date>@domestique-ai`, `DTEND` explicite, heures UTC via
   `get_scheduler_timezone`). La `DESCRIPTION` porte la structure par zones +
   TSS + notes.
-- **Auth** : le chemin est exempté du middleware Bearer (`auth.py
-  _EXEMPT_API_PATHS`) car les clients calendrier ne peuvent pas envoyer de
-  header Authorization. Il est protégé par `DOMESTIQUE_AI_CALENDAR_FEED_KEY`
-  passé en `?key=` (404 si absent/incorrect, comme `/api/health`). Générer :
-  `openssl rand -hex 24`.
-- **Athlète** : défaut = bootstrap ; `?athlete=<public_id>` cible un athlète du
-  roster (ex. `?key=…&athlete=<public_id>`).
-- **URL d'abonnement** : `https://<hôte>/api/plan/feed.ics?key=<clé>` — à
+- **Auth (token par athlète)** : le chemin est exempté du middleware Bearer
+  (`auth.py _EXEMPT_API_PATHS`) car les clients calendrier ne peuvent pas envoyer
+  de header Authorization. L'URL porte un **token propre à l'athlète** (colonne
+  `users.feed_token` de `platform.db`, généré à la demande via
+  `get_or_create_feed_token`, exposé par `GET /api/plan/subscription`). Le token
+  identifie directement l'athlète : pas de clé globale exposée, pas de
+  `?athlete=`. `POST /api/plan/subscription/rotate` régénère/révoque le token du
+  **compte courant**.
+- **Compat clé globale** : `GET /api/plan/feed.ics?key=<DOMESTIQUE_AI_CALENDAR_FEED_KEY>
+  [&athlete=<public_id>]` reste supporté pour les abonnements existants. Le flux
+  n'exige plus la clé globale : le mode token par athlète fonctionne sans elle.
+- **UI** : la carte `frontend/src/components/CalendarSubscribe.tsx` (page Plan,
+  sous les boutons ZIP/.ics, et page Réglages) affiche l'URL copiable, les
+  boutons Apple (`webcal://`) / Google Calendar et un QR code. Le flux est
+  régénérable depuis l'UI ; masqué en consultation coach (rotation self-only).
+- **URL d'abonnement** : `https://<hôte>/api/plan/feed.ics?key=<token>` — à
   ajouter comme « Calendrier d'abonnement » dans Calendrier Apple/Google. Le
   client poll la même URL : la fenêtre évolue après chaque revue hebdo sans
   doublons (UID stables).
 
 Tests : `tests/test_ics_export.py` (multi-VEVENT, UID stables, DESCRIPTION,
-exigence de clé, fenêtre 2 semaines, flux désactivé sans clé).
+exigence de clé, token par athlète, endpoint `subscription` + rotation, fenêtre
+2 semaines, flux désactivé sans clé) et `tests/test_platform_db.py` (helpers
+`get_or_create_feed_token` / `get_user_by_feed_token` / `rotate` / `clear`).
 
 ## Conventions
 
@@ -581,6 +591,7 @@ exigence de clé, fenêtre 2 semaines, flux désactivé sans clé).
   les blocs réécrits à la main ne respectent pas le format Black-like du projet).
 - **Imports** : `from __future__ import annotations` en tête de chaque module Python.
 - **Fixtures de test** : utiliser `tmp_path` + `init_db(tmp_path/"x.db")` pour isoler la base. Neutraliser les vars HR via `monkeypatch.delenv("STRAVA_HR_REST", ...)` quand un test cible explicitement la branche TSS power (sinon la config locale du dev peut faire basculer le calcul).
+- **⚠️ Toujours une todo** : pour toute tâche non triviale (3+ étapes), maintenir une todo list (outil `todowrite`) — une seule tâche `in_progress` à la fois, mise à jour en temps réel (ne cocher `completed` qu'après vérification réelle, jamais sur intention).
 
 ## graphify
 

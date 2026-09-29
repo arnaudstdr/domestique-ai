@@ -284,3 +284,39 @@ def test_set_user_avatar_roundtrip_and_clear():
 
     pdb.set_user_avatar(user["id"], None)
     assert pdb.get_user_by_id(user["id"])["avatar"] is None
+
+
+def test_get_or_create_feed_token_is_stable_and_resolvable():
+    user = pdb.create_user(role="athlete")
+    assert pdb.get_user_by_feed_token("") is None
+
+    token = pdb.get_or_create_feed_token(user["id"])
+    assert token
+    # Idempotent : un second appel renvoie le même token.
+    assert pdb.get_or_create_feed_token(user["id"]) == token
+    # Résolution inverse → le bon utilisateur ; le secret n'est pas exposé.
+    resolved = pdb.get_user_by_feed_token(token)
+    assert resolved is not None
+    assert resolved["public_id"] == user["public_id"]
+    assert "feed_token" not in resolved
+
+
+def test_get_or_create_feed_token_unknown_user_raises():
+    with pytest.raises(ValueError):
+        pdb.get_or_create_feed_token(999999)
+
+
+def test_rotate_feed_token_invalidates_previous():
+    user = pdb.create_user(role="athlete")
+    old = pdb.get_or_create_feed_token(user["id"])
+    new = pdb.rotate_feed_token(user["id"])
+    assert new != old
+    assert pdb.get_user_by_feed_token(old) is None
+    assert pdb.get_user_by_feed_token(new)["public_id"] == user["public_id"]
+
+
+def test_clear_feed_token_disables_feed():
+    user = pdb.create_user(role="athlete")
+    token = pdb.get_or_create_feed_token(user["id"])
+    pdb.clear_feed_token(user["id"])
+    assert pdb.get_user_by_feed_token(token) is None

@@ -140,6 +140,16 @@ def init_platform_db(path: Path | None = None) -> None:
         # ``_user_dict`` (cf. ``get_user_garmin_credentials``).
         _ensure_column(conn, "users", "garmin_email", "TEXT")
         _ensure_column(conn, "users", "garmin_password", "TEXT")
+        # Token d'abonnement au flux iCalendar (webcal), par athlète. Remplace la
+        # clé globale ``DOMESTIQUE_AI_CALENDAR_FEED_KEY`` (conservée en compat) :
+        # l'URL du calendrier porte ce token opaque et identifie l'athlète, ce qui
+        # évite d'exposer la clé globale et supprime le besoin de ``?athlete=``.
+        # Jamais exposé dans ``_user_dict`` (secret).
+        _ensure_column(conn, "users", "feed_token", "TEXT")
+        conn.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_users_feed_token "
+            "ON users(feed_token) WHERE feed_token IS NOT NULL"
+        )
         conn.execute(
             "CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email "
             "ON users(email) WHERE email IS NOT NULL"
@@ -410,6 +420,68 @@ def set_user_avatar(user_id: int, avatar: str | None, path: Path | None = None) 
     conn = _connect(path)
     try:
         conn.execute("UPDATE users SET avatar = ? WHERE id = ?", (avatar, user_id))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def get_user_by_feed_token(token: str, path: Path | None = None) -> dict[str, Any] | None:
+    """Résout l'athlète propriétaire d'un token de flux iCalendar.
+
+    ``None`` si le token est vide/inconnu. Le token lui-même n'est jamais
+    retourné (``_user_dict`` ne l'expose pas).
+    """
+    normalized = (token or "").strip()
+    if not normalized:
+        return None
+    conn = _connect(path)
+    try:
+        row = conn.execute("SELECT * FROM users WHERE feed_token = ?", (normalized,)).fetchone()
+        return _user_dict(row) if row else None
+    finally:
+        conn.close()
+
+
+def get_or_create_feed_token(user_id: int, path: Path | None = None) -> str:
+    """Retourne le token de flux de l'utilisateur, en le générant si absent.
+
+    Idempotent : un token déjà posé n'est jamais écrasé (utiliser
+    ``rotate_feed_token`` pour le révoquer). Lève ``ValueError`` si l'utilisateur
+    n'existe pas.
+    """
+    conn = _connect(path)
+    try:
+        row = conn.execute("SELECT feed_token FROM users WHERE id = ?", (user_id,)).fetchone()
+        if row is None:
+            raise ValueError(f"utilisateur inconnu: {user_id}")
+        existing = row["feed_token"]
+        if existing:
+            return existing
+        token = secrets.token_urlsafe(32)
+        conn.execute("UPDATE users SET feed_token = ? WHERE id = ?", (token, user_id))
+        conn.commit()
+        return token
+    finally:
+        conn.close()
+
+
+def rotate_feed_token(user_id: int, path: Path | None = None) -> str:
+    """Régénère (révoque puis remplace) le token de flux de l'utilisateur."""
+    token = secrets.token_urlsafe(32)
+    conn = _connect(path)
+    try:
+        conn.execute("UPDATE users SET feed_token = ? WHERE id = ?", (token, user_id))
+        conn.commit()
+        return token
+    finally:
+        conn.close()
+
+
+def clear_feed_token(user_id: int, path: Path | None = None) -> None:
+    """Efface le token de flux (désactive l'abonnement existant)."""
+    conn = _connect(path)
+    try:
+        conn.execute("UPDATE users SET feed_token = NULL WHERE id = ?", (user_id,))
         conn.commit()
     finally:
         conn.close()

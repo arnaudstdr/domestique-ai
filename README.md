@@ -378,8 +378,11 @@ platform DB and tokens in `data/athletes/<public_id>/.garmin_tokens` — fully
 isolated between accounts. Activities sync every 30 minutes (auto-sync scheduler,
 all connected athletes), enriched with fields, GPS traces and weather. The plan is
 exported as a **`.ZIP` of `.FIT` files** or an **`.ICS`** file — and a **webcal
-feed** keeps Apple / Google Calendar in sync as the plan adapts
-(`/api/plan/feed.ics?key=<DOMESTIQUE_AI_CALENDAR_FEED_KEY>`).
+feed** keeps Apple / Google Calendar in sync as the plan adapts. The subscription
+link is generated **per athlete from the UI** (Plan → Abonnement calendrier, or
+Settings): copyable URL, Apple / Google buttons and a QR code. The legacy global
+key `/api/plan/feed.ics?key=<DOMESTIQUE_AI_CALENDAR_FEED_KEY>` still works for
+existing subscriptions but is no longer required.
 
 > `GARMIN_EMAIL` / `GARMIN_PASSWORD` / `GARMIN_TOKEN_DIR` in `.env` are
 > **bootstrap-only** (legacy fallback). The CLI
