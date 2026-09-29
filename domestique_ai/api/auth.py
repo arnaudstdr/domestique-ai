@@ -91,6 +91,11 @@ class BearerAuthMiddleware:
     _EXEMPT_API_PATHS = {
         "/api/health",
         "/api/auth/accept-invite",
+        "/api/auth/config",
+        "/api/auth/signup",
+        "/api/auth/verify-email",
+        "/api/auth/forgot-password",
+        "/api/auth/reset-password",
         "/api/auth/login",
         "/api/auth/login/totp",
         "/api/auth/reconnect",
@@ -105,6 +110,7 @@ class BearerAuthMiddleware:
         "/api/auth/me",
         "/api/auth/logout",
         "/api/auth/setup-credentials",
+        "/api/auth/resend-verification",
         "/api/auth/totp/enroll",
         "/api/auth/totp/verify",
     }

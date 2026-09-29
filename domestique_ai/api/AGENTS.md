@@ -13,6 +13,31 @@ Couches voisines : `ingestion/AGENTS.md`, `processing/AGENTS.md`, `llm/AGENTS.md
 - **DB** : colonnes `notes TEXT` / `rpe INTEGER` nullables (migration `_ensure_column` + `_ACTIVITY_COLUMNS`), écrites par `update_activity_fields()` (whitelist `_EDITABLE_ACTIVITY_COLUMNS`). `fetch_activities_from_db()` les expose ; `ActivitySummary`/`ActivityCreate` portent `notes`/`rpe`.
 - **UI** — bouton crayon sur la page détail (`ActivityDetail.tsx`) : l'en-tête bascule en formulaire inline (nom, type via `components/sports.ts`, RPE 1-10, commentaire) + carte « Notes / ressenti » en lecture + pastille RPE. Masqué en vue coach (`viewing`, non-GET refusé par `get_athlete_context`).
 
+## Fil de conversation du coach (fil unique)
+
+L'UI coach affiche **un seul fil** continu, toutes sessions internes fusionnées.
+
+- **`GET /api/coach/messages`** — page du fil ordonnée par `id` croissant, toutes
+  sessions confondues : `limit` (défaut 30, cap 200), `before=<id>` (remonte le
+  fil), `after=<id>` (redescend), `anchor=<id>` (fenêtre centrée, saut depuis la
+  recherche). Réponse `CoachThreadPage { messages, has_more_before,
+  has_more_after }` ; chaque message porte `id` (`conversations.id`), `role`,
+  `content`, `thinking`, `tool_calls`.
+- **`GET /api/coach/search?q=&limit=`** — recherche sémantique
+  (`get_relevant_memory`, types message/summary/fact). Les hits `message` portent
+  `message_id` (= `conversations.id`) pour se repositionner via `?anchor=`.
+- **`POST /api/coach/chat`** : sans `session_id` (cas normal), le serveur résout
+  la session interne courante via `current_or_new_session()` et **rotate** (ouvre
+  un nouveau chunk) après `SESSION_IDLE_FINALIZE_MINUTES` d'inactivité — la
+  session précédente est finalisée en tâche de fond (best-effort). Un
+  `session_id` explicite reste honoré tel quel.
+- Endpoints historiques conservés (tests/clients) : `GET /api/coach/sessions`,
+  `GET /api/coach/sessions/{id}/messages`, `DELETE /api/coach/sessions/{id}`,
+  `POST /api/coach/sessions/{id}/finalize`. La **génération de titre** n'est plus
+  déclenchée (plus de sélecteur côté UI).
+- Implémentation DB : `domestique_ai/llm/conversations.py` (`load_thread_page`,
+  `current_or_new_session`). Tests : `tests/test_coach_thread.py`.
+
 ## Auto-sync Garmin (scheduler APScheduler)
 
 Un `BackgroundScheduler` APScheduler tourne dans le process FastAPI et déclenche le sync Garmin à intervalle régulier — par défaut **toutes les 30 minutes**. Démarré au `lifespan` startup, arrêté proprement au shutdown.
@@ -82,6 +107,64 @@ stockant une **data URL** `data:image/<type>;base64,…`, `NULL` par défaut.
 - **Édition = compte courant** : les routes `/api/auth/*` ignorent le
   paramètre `?athlete=` (`withAthlete` les exclut) — un coach en consultation
   n'édite jamais la photo de l'athlète.
+
+## Inscription publique, vérification d'email, lien coach & mot de passe oublié
+
+Socle identité étendu (au-delà de l'entrée par invitation). Toute la logique DB
+est dans `platform_db.py`, les endpoints dans `api/routers/auth.py`.
+
+- **Inscription self-service** — `POST /api/auth/signup` (public, **exempté** du
+  Bearer) : email + mot de passe + `role` (`athlete`|`coach`). Désactivée par
+  défaut : `DOMESTIQUE_AI_SIGNUP_ENABLED` (403 sinon). Rate-limitée par IP
+  (5/h). Provisionne l'espace athlète et émet une session. Le compte est créé
+  **non vérifié** (`users.email_verified=0`) ; les comptes invités/legacy sont
+  vérifiés d'office (`accept_invitation` pose `email_verified=1`).
+  `GET /api/auth/config` (public) expose `{signup_enabled}` pour l'UI.
+- **Lien d'invitation réutilisable du coach** — un coach s'inscrivant reçoit
+  `invite_url=/accept-invite?coach=<code>`. Code opaque stocké **en clair**
+  (`users.coach_invite_code`, précédent `feed_token`), **self-only** (jamais dans
+  `_user_dict`), révocable : `GET /api/auth/coach-invite-link` /
+  `POST /api/auth/coach-invite-link/rotate` (coach-only). Un athlète ouvre
+  `?coach=<code>` : il crée son compte (`POST /api/auth/accept-invite` avec
+  `coach_code`) **ou**, s'il a déjà un compte, se connecte puis
+  `POST /api/auth/accept-invite/link` (authentifié, `role=athlete` requis) pour
+  être **relié sans doublon** (`consume_invitation_for_link` /
+  `link_coach_athlete`). Les invitations à usage unique (`?token=`) suivent le
+  même endpoint.
+- **Vérification d'email (souple, non bloquante)** — `POST /api/auth/verify-email`
+  (public) consomme un token `email_verify` ; `POST /api/auth/resend-verification`
+  (authentifié, autorisé pendant l'enrôlement 2FA) en renvoie un. Bandeau UI
+  `EmailVerificationBanner` tant que `me.email_verified` est faux.
+- **Mot de passe oublié** — `POST /api/auth/forgot-password` (public) : répond
+  **toujours 200** (anti-énumération), envoie un lien si le compte existe.
+  `POST /api/auth/reset-password` (public) : nouveau mot de passe, marque
+  l'email vérifié, **révoque toutes les sessions** (`revoke_all_sessions`), ne
+  touche pas au TOTP.
+- **Tokens éphémères** — table `auth_tokens(user_id, purpose, token_hash,
+  expires_at, consumed_at)`, `purpose ∈ {email_verify, password_reset}`,
+  hashés HMAC comme les sessions, à usage unique, TTL via
+  `get_email_verification_ttl_hours()` / `get_password_reset_ttl_minutes()`.
+- **Envoi d'emails** — `domestique_ai/mailer.py` (SMTP stdlib, best-effort :
+  no-op loggé si `SMTP_HOST` absent). Liens absolus via `get_app_base_url()`.
+- **Rate-limiting** — `domestique_ai/ratelimit.py` (fenêtre glissante
+  in-process) sur `signup` (IP), `forgot-password` (IP + email),
+  `resend-verification` (user). 429 au dépassement. État par process (single
+  worker uvicorn) ; `X-Forwarded-For` non géré (à faire derrière proxy).
+- **Suppression de son compte** — `DELETE /api/auth/me` (authentifié,
+  `DeleteAccountRequest`) : confirmation forte — mot de passe si le compte en a
+  un + code TOTP/code de secours si la 2FA est active. Refuse le bootstrap
+  (403). Efface la ligne plateforme (`delete_user` : sessions/invitations/tokens
+  en cascade) **puis** le dossier de données via
+  `athlete_context.remove_athlete_space(public_id)` (helper partagé avec la
+  suppression par un coach, `roster.py`). `MeResponse.has_password` permet à l'UI
+  de n'exiger le mot de passe que quand il existe.
+- **Middleware** (`api/auth.py`) : `/api/auth/{config,signup,verify-email,
+  forgot-password,reset-password}` sont dans `_EXEMPT_API_PATHS` ;
+  `/api/auth/resend-verification` dans `_TOTP_SETUP_ALLOWED_PATHS` (compte frais
+  pas encore conforme 2FA).
+
+Tests : `tests/test_auth_api.py`, `tests/test_platform_db.py`,
+`tests/test_ratelimit.py`, `tests/test_mailer.py`.
 
 ## Export iCalendar (`export/ics.py`)
 

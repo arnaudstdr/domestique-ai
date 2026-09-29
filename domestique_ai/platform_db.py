@@ -113,7 +113,9 @@ def init_platform_db(path: Path | None = None) -> None:
                 locked_until TEXT,
                 avatar TEXT,
                 garmin_email TEXT,
-                garmin_password TEXT
+                garmin_password TEXT,
+                email_verified INTEGER NOT NULL DEFAULT 0,
+                coach_invite_code TEXT
             )
         """)
         conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_users_public_id ON users(public_id)")
@@ -149,6 +151,17 @@ def init_platform_db(path: Path | None = None) -> None:
         conn.execute(
             "CREATE UNIQUE INDEX IF NOT EXISTS idx_users_feed_token "
             "ON users(feed_token) WHERE feed_token IS NOT NULL"
+        )
+        # Vérification d'email (inscription publique self-service). Les comptes
+        # créés par invitation/legacy sont considérés vérifiés (lien de confiance).
+        _ensure_column(conn, "users", "email_verified", "INTEGER NOT NULL DEFAULT 0")
+        # Lien d'invitation réutilisable d'un coach (partagé aux athlètes). Stocké
+        # en clair, comme ``feed_token`` : exposé uniquement à son propriétaire et
+        # régénérable. Jamais dans ``_user_dict``.
+        _ensure_column(conn, "users", "coach_invite_code", "TEXT")
+        conn.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_users_coach_invite_code "
+            "ON users(coach_invite_code) WHERE coach_invite_code IS NOT NULL"
         )
         conn.execute(
             "CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email "
@@ -217,6 +230,23 @@ def init_platform_db(path: Path | None = None) -> None:
             "ON reconnect_tokens(token_hash)"
         )
         conn.execute("""
+            CREATE TABLE IF NOT EXISTS auth_tokens (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                purpose TEXT NOT NULL CHECK (purpose IN ('email_verify', 'password_reset')),
+                token_hash TEXT NOT NULL UNIQUE,
+                created_at TEXT NOT NULL,
+                expires_at TEXT,
+                consumed_at TEXT
+            )
+        """)
+        conn.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_auth_tokens_hash ON auth_tokens(token_hash)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_auth_tokens_user ON auth_tokens(user_id, purpose)"
+        )
+        conn.execute("""
             CREATE TABLE IF NOT EXISTS coach_athlete (
                 coach_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
                 athlete_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -246,6 +276,7 @@ def _user_dict(row: sqlite3.Row) -> dict[str, Any]:
         "is_bootstrap": bool(row["is_bootstrap"]),
         "created_at": row["created_at"],
         "email": row["email"],
+        "email_verified": bool(row["email_verified"]),
         "totp_enabled": bool(row["totp_enabled"]),
         "has_password": bool(row["password_hash"]),
         "avatar": row["avatar"],
@@ -273,21 +304,60 @@ def _invitation_dict(row: sqlite3.Row) -> dict[str, Any]:
 
 
 def create_user(
-    role: str, display_name: str | None = None, is_bootstrap: bool = False, path: Path | None = None
+    role: str,
+    display_name: str | None = None,
+    is_bootstrap: bool = False,
+    path: Path | None = None,
+    *,
+    email: str | None = None,
+    password_hash: str | None = None,
+    email_verified: bool = True,
 ) -> dict[str, Any]:
+    """Crée un utilisateur. ``email``/``password_hash`` optionnels (inscription).
+
+    ``email_verified`` vaut ``True`` par défaut pour les usages historiques
+    (comptes bootstrap/invités = lien de confiance) ; l'inscription publique
+    passe explicitement ``False``.
+    """
     if role not in VALID_ROLES:
         raise ValueError(f"role invalide: {role!r}")
     conn = _connect(path)
     try:
         public_id = uuid.uuid4().hex
+        normalized_email = (email or "").strip().lower() or None
+        now = _now()
         cur = conn.execute(
-            "INSERT INTO users (public_id, role, display_name, is_bootstrap, created_at) "
-            "VALUES (?, ?, ?, ?, ?)",
-            (public_id, role, display_name, 1 if is_bootstrap else 0, _now()),
+            "INSERT INTO users (public_id, role, display_name, is_bootstrap, created_at, "
+            "email, password_hash, password_changed_at, email_verified) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                public_id,
+                role,
+                display_name,
+                1 if is_bootstrap else 0,
+                now,
+                normalized_email,
+                password_hash,
+                now if password_hash else None,
+                1 if email_verified else 0,
+            ),
         )
         conn.commit()
         row = conn.execute("SELECT * FROM users WHERE id = ?", (cur.lastrowid,)).fetchone()
         return _user_dict(row)
+    finally:
+        conn.close()
+
+
+def set_email_verified(user_id: int, verified: bool = True, path: Path | None = None) -> None:
+    """Pose le drapeau de vérification d'email d'un utilisateur."""
+    conn = _connect(path)
+    try:
+        conn.execute(
+            "UPDATE users SET email_verified = ? WHERE id = ?",
+            (1 if verified else 0, user_id),
+        )
+        conn.commit()
     finally:
         conn.close()
 
@@ -398,6 +468,23 @@ def set_user_credentials(
             ),
         )
         conn.commit()
+    finally:
+        conn.close()
+
+
+def revoke_all_sessions(user_id: int, path: Path | None = None) -> int:
+    """Révoque toutes les sessions actives d'un utilisateur. Retourne le nombre révoqué.
+
+    Utilisé à la réinitialisation du mot de passe (déconnexion globale).
+    """
+    conn = _connect(path)
+    try:
+        cur = conn.execute(
+            "UPDATE sessions SET revoked_at = ? WHERE user_id = ? AND revoked_at IS NULL",
+            (_now(), user_id),
+        )
+        conn.commit()
+        return cur.rowcount
     finally:
         conn.close()
 
@@ -916,8 +1003,8 @@ def accept_invitation(
         normalized_email = (email or "").strip().lower() or None
         cur = conn.execute(
             "INSERT INTO users (public_id, role, display_name, is_bootstrap, created_at, "
-            "email, password_hash, password_changed_at) "
-            "VALUES (?, ?, ?, 0, ?, ?, ?, ?)",
+            "email, password_hash, password_changed_at, email_verified) "
+            "VALUES (?, ?, ?, 0, ?, ?, ?, ?, 1)",
             (
                 public_id,
                 inv["role"],
@@ -955,6 +1042,63 @@ def accept_invitation(
         conn.commit()
         user = conn.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
         return (_user_dict(user), token)
+    finally:
+        conn.close()
+
+
+def consume_invitation_for_link(
+    plaintext: str, athlete_user_id: int, path: Path | None = None
+) -> dict[str, Any]:
+    """Consomme une invitation athlète pour RELIER un compte existant au coach.
+
+    Ne crée ni utilisateur ni session : l'athlète possède déjà son compte et
+    son identité. Le lien ``coach_athlete`` est créé, l'invitation passe
+    ``accepted``. Retourne l'invitation consommée.
+
+    Lève ``InvitationError`` si l'invitation est inconnue/expirée/déjà consommée,
+    n'est pas une invitation athlète, ou n'a pas été émise par un coach.
+    """
+    if not plaintext:
+        raise InvitationError("Invitation invalide.")
+    token_hash = _hash_token(plaintext)
+    conn = _connect(path)
+    try:
+        inv = conn.execute(
+            "SELECT * FROM invitations WHERE token_hash = ?", (token_hash,)
+        ).fetchone()
+        if inv is None:
+            raise InvitationError("Invitation inconnue.")
+        if inv["status"] != "pending":
+            raise InvitationError("Invitation déjà utilisée ou révoquée.")
+        if _is_expired(inv["expires_at"]):
+            conn.execute("UPDATE invitations SET status = 'expired' WHERE id = ?", (inv["id"],))
+            conn.commit()
+            raise InvitationError("Invitation expirée.")
+        if inv["role"] != "athlete":
+            raise InvitationError("Cette invitation n'est pas destinée à un athlète.")
+        created_by = inv["created_by"]
+        inviter = (
+            conn.execute("SELECT role FROM users WHERE id = ?", (created_by,)).fetchone()
+            if created_by is not None
+            else None
+        )
+        if inviter is None or inviter["role"] != "coach":
+            raise InvitationError("Invitation sans coach émetteur.")
+
+        now = _now()
+        conn.execute(
+            "INSERT OR IGNORE INTO coach_athlete (coach_id, athlete_id, created_at) "
+            "VALUES (?, ?, ?)",
+            (created_by, athlete_user_id, now),
+        )
+        conn.execute(
+            "UPDATE invitations SET status = 'accepted', accepted_user_id = ?, "
+            "accepted_at = ? WHERE id = ?",
+            (athlete_user_id, now, inv["id"]),
+        )
+        conn.commit()
+        updated = conn.execute("SELECT * FROM invitations WHERE id = ?", (inv["id"],)).fetchone()
+        return _invitation_dict(updated)
     finally:
         conn.close()
 
@@ -1026,6 +1170,86 @@ def consume_reconnect_token(plaintext: str, path: Path | None = None) -> dict[st
 
 
 # ---------------------------------------------------------------------------
+# Tokens éphémères d'auth (vérification d'email, reset de mot de passe)
+# ---------------------------------------------------------------------------
+
+
+def create_auth_token(
+    user_id: int,
+    purpose: str,
+    expires_at: str | None = None,
+    path: Path | None = None,
+) -> tuple[dict[str, Any], str]:
+    """Crée un token éphémère (``email_verify`` | ``password_reset``).
+
+    Retourne ``(row_dict, token_clair)``. Le clair n'est montré qu'ici. Invalide
+    au passage les tokens actifs du même ``purpose`` (un seul actif à la fois).
+    """
+    if purpose not in ("email_verify", "password_reset"):
+        raise ValueError(f"purpose invalide: {purpose!r}")
+    conn = _connect(path)
+    try:
+        token = _generate_token()
+        now = _now()
+        conn.execute(
+            "UPDATE auth_tokens SET consumed_at = ? "
+            "WHERE user_id = ? AND purpose = ? AND consumed_at IS NULL",
+            (now, user_id, purpose),
+        )
+        cur = conn.execute(
+            "INSERT INTO auth_tokens (user_id, purpose, token_hash, created_at, expires_at) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (user_id, purpose, _hash_token(token), now, expires_at),
+        )
+        conn.commit()
+        row = conn.execute("SELECT * FROM auth_tokens WHERE id = ?", (cur.lastrowid,)).fetchone()
+        return (
+            {
+                "id": row["id"],
+                "user_id": row["user_id"],
+                "purpose": row["purpose"],
+                "created_at": row["created_at"],
+                "expires_at": row["expires_at"],
+                "consumed_at": row["consumed_at"],
+            },
+            token,
+        )
+    finally:
+        conn.close()
+
+
+def consume_auth_token(
+    plaintext: str, purpose: str, path: Path | None = None
+) -> dict[str, Any] | None:
+    """Valide et consomme un token éphémère (usage unique). Retourne le user.
+
+    ``None`` si token inconnu, déjà consommé, d'un autre ``purpose`` ou expiré.
+    """
+    if not plaintext or purpose not in ("email_verify", "password_reset"):
+        return None
+    conn = _connect(path)
+    try:
+        row = conn.execute(
+            "SELECT id, user_id, expires_at, consumed_at FROM auth_tokens "
+            "WHERE token_hash = ? AND purpose = ?",
+            (_hash_token(plaintext), purpose),
+        ).fetchone()
+        if row is None or row["consumed_at"] is not None:
+            return None
+        if _is_expired(row["expires_at"]):
+            return None
+        conn.execute(
+            "UPDATE auth_tokens SET consumed_at = ? WHERE id = ?",
+            (_now(), row["id"]),
+        )
+        conn.commit()
+        user = conn.execute("SELECT * FROM users WHERE id = ?", (row["user_id"],)).fetchone()
+        return _user_dict(user) if user else None
+    finally:
+        conn.close()
+
+
+# ---------------------------------------------------------------------------
 # Relations coach ↔ athlète
 # ---------------------------------------------------------------------------
 
@@ -1053,6 +1277,71 @@ def list_athletes_for_coach(coach_id: int, path: Path | None = None) -> list[dic
             (coach_id,),
         ).fetchall()
         return [_user_dict(r) for r in rows]
+    finally:
+        conn.close()
+
+
+# ---------------------------------------------------------------------------
+# Lien d'invitation réutilisable d'un coach
+# ---------------------------------------------------------------------------
+
+
+def get_or_create_coach_invite_code(coach_id: int, path: Path | None = None) -> str:
+    """Retourne le code d'invitation du coach, en le générant si absent.
+
+    Idempotent : un code déjà posé n'est jamais écrasé (utiliser
+    ``rotate_coach_invite_code`` pour le révoquer). Lève ``ValueError`` si
+    l'utilisateur n'existe pas ou n'est pas un coach.
+    """
+    conn = _connect(path)
+    try:
+        row = conn.execute(
+            "SELECT role, coach_invite_code FROM users WHERE id = ?", (coach_id,)
+        ).fetchone()
+        if row is None:
+            raise ValueError(f"utilisateur inconnu: {coach_id}")
+        if row["role"] != "coach":
+            raise ValueError("seul un coach a un lien d'invitation")
+        existing = row["coach_invite_code"]
+        if existing:
+            return existing
+        code = secrets.token_urlsafe(24)
+        conn.execute("UPDATE users SET coach_invite_code = ? WHERE id = ?", (code, coach_id))
+        conn.commit()
+        return code
+    finally:
+        conn.close()
+
+
+def get_user_by_coach_invite_code(code: str, path: Path | None = None) -> dict[str, Any] | None:
+    """Résout le coach propriétaire d'un code d'invitation. ``None`` si inconnu."""
+    normalized = (code or "").strip()
+    if not normalized:
+        return None
+    conn = _connect(path)
+    try:
+        row = conn.execute(
+            "SELECT * FROM users WHERE coach_invite_code = ? AND role = 'coach'",
+            (normalized,),
+        ).fetchone()
+        return _user_dict(row) if row else None
+    finally:
+        conn.close()
+
+
+def rotate_coach_invite_code(coach_id: int, path: Path | None = None) -> str:
+    """Régénère (révoque puis remplace) le code d'invitation du coach."""
+    code = secrets.token_urlsafe(24)
+    conn = _connect(path)
+    try:
+        row = conn.execute("SELECT role FROM users WHERE id = ?", (coach_id,)).fetchone()
+        if row is None:
+            raise ValueError(f"utilisateur inconnu: {coach_id}")
+        if row["role"] != "coach":
+            raise ValueError("seul un coach a un lien d'invitation")
+        conn.execute("UPDATE users SET coach_invite_code = ? WHERE id = ?", (code, coach_id))
+        conn.commit()
+        return code
     finally:
         conn.close()
 

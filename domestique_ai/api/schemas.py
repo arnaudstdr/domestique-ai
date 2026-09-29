@@ -525,10 +525,29 @@ class CoachSession(BaseModel):
 
 
 class CoachMessage(BaseModel):
+    id: int | None = None
     role: Literal["user", "assistant"]
     content: str
     thinking: str | None = None
     tool_calls: list[dict[str, Any]] | None = None
+
+
+class CoachThreadPage(BaseModel):
+    """Page du fil unique (toutes sessions confondues), ordonnée par id croissant."""
+
+    messages: list[CoachMessage]
+    has_more_before: bool = False
+    has_more_after: bool = False
+
+
+class CoachSearchHit(BaseModel):
+    """Résultat de recherche sémantique dans la mémoire / les échanges."""
+
+    message_id: int | None = None
+    session_id: str | None = None
+    source_type: str
+    text: str
+    score: float
 
 
 class CoachChatRequest(BaseModel):

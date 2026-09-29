@@ -9,7 +9,6 @@ passent **pas** par la garde d'impersonation lecture seule (``?athlete=``) — l
 from __future__ import annotations
 
 import datetime as dt
-import shutil
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
@@ -24,7 +23,11 @@ from domestique_ai.api.schemas import (
     ReconnectLink,
     WorkoutSchema,
 )
-from domestique_ai.athlete_context import AthleteContext, context_for_athlete
+from domestique_ai.athlete_context import (
+    AthleteContext,
+    context_for_athlete,
+    remove_athlete_space,
+)
 from domestique_ai.config import get_app_base_url
 from domestique_ai.llm.availability import AvailabilityError
 from domestique_ai.llm.plan_storage import (
@@ -255,7 +258,7 @@ def delete_roster_athlete(
             detail="Athlète introuvable.",
         )
 
-    _remove_athlete_dir(public_id)
+    remove_athlete_space(public_id)
     log.info(
         "Coach %s supprime l'athlète %s — %s activités, %s métriques matin, "
         "%s plans, dossier %s (%d fichier(s))",
@@ -317,17 +320,3 @@ def _count_athlete_data(public_id: str) -> dict[str, Any]:
     except sqlite3.Error:  # noqa: BLE001 — base illisible : on garde None
         pass
     return stats
-
-
-def _remove_athlete_dir(public_id: str) -> None:
-    """Supprime l'espace de données disque de l'athlète (best-effort)."""
-    if not public_id:
-        return
-    from domestique_ai.config import get_athletes_root
-
-    target_dir = get_athletes_root() / public_id
-    try:
-        if target_dir.exists():
-            shutil.rmtree(target_dir, ignore_errors=True)
-    except OSError:  # noqa: BLE001 — best-effort, on n'échoue pas la suppression du compte
-        log.warning("Suppression du dossier athlète %s échouée.", target_dir, exc_info=True)

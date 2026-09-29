@@ -1,6 +1,7 @@
 import { Link, Navigate, Route, Routes, useNavigate } from "react-router-dom";
 import { Eye, UserRound, Users, X } from "lucide-react";
 import BottomNav from "./components/BottomNav";
+import EmailVerificationBanner from "./components/EmailVerificationBanner";
 import Dashboard from "./pages/Dashboard";
 import Activities from "./pages/Activities";
 import ActivityDetail from "./pages/ActivityDetail";
@@ -10,9 +11,13 @@ import Plan from "./pages/Plan";
 import Profil from "./pages/Profil";
 import Tendances from "./pages/Tendances";
 import Login from "./pages/Login";
+import Signup from "./pages/Signup";
 import AcceptInvite from "./pages/AcceptInvite";
 import Reconnect from "./pages/Reconnect";
 import SetupTwoFactor from "./pages/SetupTwoFactor";
+import VerifyEmail from "./pages/VerifyEmail";
+import ForgotPassword from "./pages/ForgotPassword";
+import ResetPassword from "./pages/ResetPassword";
 import Roster from "./pages/Roster";
 import Prescribe from "./pages/Prescribe";
 import { clearViewingAthlete } from "./api/client";
@@ -122,6 +127,7 @@ function AuthedShell() {
           </div>
         </div>
       </header>
+      <EmailVerificationBanner />
       <main className="mx-auto max-w-3xl px-4 pt-4 pb-24">
         <Routes>
           <Route path="/" element={<Dashboard />} />
@@ -146,9 +152,13 @@ export default function App() {
   return (
     <Routes>
       <Route path="/login" element={<Login />} />
+      <Route path="/signup" element={<Signup />} />
       <Route path="/accept-invite" element={<AcceptInvite />} />
       <Route path="/reconnect" element={<Reconnect />} />
       <Route path="/setup-2fa" element={<SetupTwoFactor />} />
+      <Route path="/verify-email" element={<VerifyEmail />} />
+      <Route path="/forgot-password" element={<ForgotPassword />} />
+      <Route path="/reset-password" element={<ResetPassword />} />
       <Route path="/*" element={<AuthenticatedLayout />} />
     </Routes>
   );
