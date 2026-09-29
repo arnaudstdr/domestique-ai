@@ -405,10 +405,25 @@ export interface CoachSession {
 }
 
 export interface CoachMessage {
+  id?: number;
   role: "user" | "assistant";
   content: string;
   thinking: string | null;
   tool_calls: { name: string; arguments: unknown; result: unknown }[] | null;
+}
+
+export interface CoachThreadPage {
+  messages: CoachMessage[];
+  has_more_before: boolean;
+  has_more_after: boolean;
+}
+
+export interface CoachSearchHit {
+  message_id: number | null;
+  session_id: string | null;
+  source_type: "message" | "summary" | "fact" | string;
+  text: string;
+  score: number;
 }
 
 export type CoachMemoryCategory =

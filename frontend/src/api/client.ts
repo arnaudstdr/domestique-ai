@@ -13,8 +13,8 @@ import type {
   AthleteSummary,
   Availability,
   CoachMemoryFact,
-  CoachMessage,
-  CoachSession,
+  CoachSearchHit,
+  CoachThreadPage,
   DailyBriefResponse,
   FtpProjectionResponse,
   GoogleHealthAuthResponse,
@@ -369,15 +369,23 @@ export const api = {
     syncStatus: () => http<SyncStatus>(`/api/garmin/sync-status`),
   },
   coach: {
-    sessions: () => http<CoachSession[]>(`/api/coach/sessions`),
-    messages: (sessionId: string) =>
-      http<CoachMessage[]>(`/api/coach/sessions/${sessionId}/messages`),
-    deleteSession: (sessionId: string) =>
-      http<void>(`/api/coach/sessions/${sessionId}`, { method: "DELETE" }),
-    finalizeSession: (sessionId: string) =>
-      http<{ session_id: string; summarized: boolean }>(
-        `/api/coach/sessions/${sessionId}/finalize`,
-        { method: "POST" },
+    thread: (params: {
+      limit?: number;
+      before?: number;
+      after?: number;
+      anchor?: number;
+    } = {}) => {
+      const qs = new URLSearchParams();
+      if (params.limit) qs.set("limit", String(params.limit));
+      if (params.before != null) qs.set("before", String(params.before));
+      if (params.after != null) qs.set("after", String(params.after));
+      if (params.anchor != null) qs.set("anchor", String(params.anchor));
+      const suffix = qs.toString() ? `?${qs.toString()}` : "";
+      return http<CoachThreadPage>(`/api/coach/messages${suffix}`);
+    },
+    search: (query: string, limit = 20) =>
+      http<CoachSearchHit[]>(
+        `/api/coach/search?q=${encodeURIComponent(query)}&limit=${limit}`,
       ),
     memory: {
       list: (activeOnly = true) =>

@@ -34,7 +34,7 @@ Pour ajouter un tool :
 
 Mode `thinking` activé sur le 1ᵉʳ tour de tool-calling (fiabilise la décision d'appeler les tools sur gemma3/4), désactivé sur les tours suivants pour gagner du temps. Les deltas de raisonnement sont streamés au client et affichés dans l'expander « 🧠 Raisonnement » de la page Coach (debug).
 
-Persistance : chaque message (user / assistant / tool) est stocké en JSON brut dans la table `conversations` (clé `session_id`, ordre par `id`). Reprise d'une session via le sélecteur de la page Coach.
+Persistance : chaque message (user / assistant / tool) est stocké en JSON brut dans la table `conversations` (clé `session_id`, ordre par `id`). L'UI présente **un fil unique** fusionnant toutes les sessions ; en interne le fil est découpé en **sessions invisibles** : `current_or_new_session()` rattache le message à la session courante et en ouvre une nouvelle si le fil est inactif depuis `SESSION_IDLE_FINALIZE_MINUTES` (rotation transparente). `load_thread_page()` pagine le fil toutes sessions confondues (`before` / `after` / `anchor`). La génération de titre (`generate_session_title`) n'est plus appelée par le router (plus de sélecteur côté UI).
 
 ## Objectif de l'athlète
 
@@ -45,7 +45,7 @@ Objectif : `data/objective.yaml` (gitignoré, template `data/objective.yaml.exam
 Le coach garde une mémoire **entre les sessions**, à 3 étages, dans le SQLite de l'athlète (`ctx.db_path`) :
 
 - **Faits durables** (`coach_memory`) : préférences, contraintes/blessures, objectifs, accords, perso. Toujours injectés dans le prompt système. Population par l'outil `remember_fact` (explicite) **et** extraction auto en fin de session. Dédup par similarité (cosine > 0.9 → mise à jour).
-- **Résumés épisodiques** (`session_summaries`) : un résumé par session. **Résumé roulant** tous les `SESSION_SUMMARY_EVERY_MESSAGES` messages (défaut 8) ; **finalisation** (résumé final + extraction de faits) quand une session est inactive > `SESSION_IDLE_FINALIZE_MINUTES` (défaut 45, job APScheduler `finalize_sessions`), ou sur appel explicite `POST /api/coach/sessions/{id}/finalize` (front au `startNew`/changement de session). Le garde-fou `last_summarized_message_id` évite les régénérations.
+- **Résumés épisodiques** (`session_summaries`) : un résumé par session. **Résumé roulant** tous les `SESSION_SUMMARY_EVERY_MESSAGES` messages (défaut 8) ; **finalisation** (résumé final + extraction de faits) quand une session est inactive > `SESSION_IDLE_FINALIZE_MINUTES` (défaut 45, job APScheduler `finalize_sessions`), **ou** automatiquement à la rotation du fil (nouveau chunk ouvert par `POST /api/coach/chat`), ou sur appel explicite `POST /api/coach/sessions/{id}/finalize` (conservé pour tests/clients). Le garde-fou `last_summarized_message_id` évite les régénérations.
 - **RAG** (`memory_vectors`) : index de retrieval unifié (messages, résumés, faits). Embeddings via Ollama (`OLLAMA_EMBED_MODEL`, défaut `nomic-embed-text` — `ollama pull nomic-embed-text`), cosine brute-force numpy (numpy déjà tiré par pandas). `build_memory_block(query)` assemble faits + 5 derniers résumés + top-4 passages pertinents, avec budget de contexte.
 
 Intégration : `build_initial_messages()` injecte le bloc mémoire en message `system` **à chaque tour** ; `run_turn_stream()` le calcule une fois par tour. L'historique verbatim de session est plafonné à `MAX_HISTORY_MESSAGES` (24) — le résumé roulant prend le relais. Outils exposés : `remember_fact` (écriture), `search_conversations` (lecture RAG).
