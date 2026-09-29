@@ -252,9 +252,64 @@ def _extract_header(scope: Scope, name: bytes) -> str | None:
     return None
 
 
+class CacheControlMiddleware:
+    """Politique de cache HTTP du build React servi à la racine.
+
+    - assets hashés (``/assets/*``) → immuables 1 an : Vite change leur nom à
+      chaque build, aucun risque de servir une version périmée.
+    - app shell (``/``, ``/index.html``, ``/sw.js``, ``/manifest.webmanifest``)
+      et toute réponse HTML → ``no-cache`` : le navigateur revalide à chaque
+      fois (ETag/Last-Modified de Starlette). Cela évite un ``index.html`` figé
+      — notamment sur iOS/PWA — sans casser le fallback offline, le service
+      worker gardant sa propre copie en Cache Storage.
+
+    L'API (``/api/*``) n'est jamais touchée (auth, SSE du coach, données perso).
+    """
+
+    _IMMUTABLE_PREFIX = "/assets/"
+    _NO_CACHE_PATHS = {"/", "/index.html", "/sw.js", "/manifest.webmanifest"}
+
+    def __init__(self, app: ASGIApp) -> None:
+        self.app = app
+
+    @classmethod
+    def _header_value(cls, path: str) -> str | None:
+        if path.startswith(cls._IMMUTABLE_PREFIX):
+            return "public, max-age=31536000, immutable"
+        if path in cls._NO_CACHE_PATHS:
+            return "no-cache"
+        return None
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http" or scope["path"].startswith("/api/"):
+            await self.app(scope, receive, send)
+            return
+
+        fixed = self._header_value(scope["path"])
+
+        async def send_with_cache(message: Message) -> None:
+            if message["type"] == "http.response.start":
+                headers = list(message.get("headers") or [])
+                if not any(key.lower() == b"cache-control" for key, _ in headers):
+                    value = fixed
+                    if value is None:
+                        content_type = next(
+                            (v for k, v in headers if k.lower() == b"content-type"),
+                            b"",
+                        )
+                        if b"text/html" in content_type.lower():
+                            value = "no-cache"
+                    if value is not None:
+                        headers.append((b"cache-control", value.encode("latin-1")))
+                message = {**message, "headers": headers}
+            await send(message)
+
+        await self.app(scope, receive, send_with_cache)
+
+
 # Ordre de la stack (de l'intérieur vers l'extérieur, donc inverse de
 # l'ordre d'ajout) :
-#   handler → BearerAuth → RequestLogging → CORS
+#   handler → BearerAuth → RequestLogging → CORS → CacheControl
 # Ainsi le RequestLogging trace aussi les 401 émis par BearerAuth, et CORS
 # répond aux preflights avant tout filtrage applicatif.
 app.add_middleware(
@@ -270,6 +325,7 @@ app.add_middleware(
     allow_headers=["*"],
     expose_headers=["x-request-id"],
 )
+app.add_middleware(CacheControlMiddleware)
 
 # Routeur d'identité : non gaté (gère lui-même /me, accept-invite public, etc.).
 app.include_router(auth_router.router)

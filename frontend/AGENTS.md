@@ -10,7 +10,23 @@ Endpoints consommés : `domestique_ai/api/AGENTS.md`. Données/coach :
 ## Stack & dev
 
 - React 18 + Vite + TypeScript + Tailwind + recharts + react-leaflet.
-- Service worker manuel dans `public/sw.js` (NetworkFirst sur `/api/`).
+- **Service worker généré par `vite-plugin-pwa`** (`registerType: "autoUpdate"`,
+  stratégie Workbox `generateSW`) : precache révisionné automatiquement à
+  chaque build, `navigateFallback` sur `/index.html`, `cleanupOutdatedCaches`.
+  Plus de `public/sw.js` à maintenir ni de cache à bumper à la main. Le SW n'est
+  **pas** actif en dev (`devOptions.enabled: false`) ; il se teste via
+  `npm run build` puis FastAPI sur 8501.
+- Mise à jour transparente : à l'activation d'une nouvelle version, le SW prend
+  la main et le client recharge la page. `src/main.tsx` diffère le reload tant
+  que l'onglet est visible (évite de couper une saisie) et l'applique au
+  prochain passage en arrière-plan.
+- **Cache runtime** : whitelist stricte dans `vite.config.ts` (`/api/metrics`,
+  `/api/activities` en `NetworkFirst`, 3 s). Tout le reste — `/api/coach/*`,
+  `/api/morning`, `/api/objective`, `/api/profile`, `/api/availability`, auth —
+  n'est intercepté par aucune route et part directement sur le réseau (jamais
+  mis en cache).
+- **Headers HTTP** : `domestique_ai/api/main.py` (`CacheControlMiddleware`) sert
+  les `/assets/*` en `immutable` et l'app shell / HTML en `no-cache`.
 - Dev : `cd frontend && npm run dev` → Vite écoute sur **5173** et proxy `/api`
   vers `http://localhost:8501`. Build : `npm run build` (FastAPI sert ensuite le
   bundle sur le port 8501).
@@ -37,8 +53,10 @@ composants : passer par ces tokens. Les charts recharts lisent les tokens à la
 volée via `chartTheme.ts` (`themeColor`, accesseurs) — les couleurs restent
 centralisées dans ce module.
 
-⚠️ Après édition de `index.html` ou d'un asset mis en cache, bumper
-`STATIC_CACHE` / `API_CACHE` dans `public/sw.js` (le `/` est mis en cache).
+⚠️ Le nom et l'empreinte du precache sont gérés par le build : ne pas
+réintroduire de `public/sw.js` ni de version de cache à bumper manuellement.
+Nouvelle whitelist d'API à cacher → l'ajouter dans `workbox.runtimeCaching`
+de `vite.config.ts`.
 
 ## Streaming SSE du coach
 
