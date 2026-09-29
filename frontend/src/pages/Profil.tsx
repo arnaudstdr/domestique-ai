@@ -88,6 +88,7 @@ export default function Profil() {
       <MemoryPanel />
       <SecuritySection />
       <AccountSection />
+      <DangerZoneSection />
     </div>
   );
 }
@@ -714,6 +715,120 @@ function AccountSection() {
         <LogOut className="h-4 w-4" strokeWidth={1.75} aria-hidden="true" />
         Se déconnecter
       </button>
+    </section>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Zone de danger — suppression du compte
+// ---------------------------------------------------------------------------
+
+function DangerZoneSection() {
+  const me = useMe();
+  const [open, setOpen] = useState(false);
+  const [password, setPassword] = useState("");
+  const [code, setCode] = useState("");
+  const [confirmText, setConfirmText] = useState("");
+  const [busy, setBusy] = useState(false);
+  const { push } = useToast();
+
+  const needsPassword = me?.has_password ?? false;
+  const needsTotp = me?.totp_enabled ?? false;
+  const canSubmit = confirmText === "SUPPRIMER" && (!needsPassword || password.length > 0);
+
+  async function remove() {
+    setBusy(true);
+    try {
+      await api.auth.deleteAccount(needsPassword ? password : null, needsTotp ? code : null);
+      clearApiToken();
+      window.location.assign("/login");
+    } catch (err) {
+      push(err instanceof ApiError ? err.message : "Suppression impossible.", "error");
+      setBusy(false);
+    }
+  }
+
+  return (
+    <section className="card space-y-3 border-red-500/30">
+      <h3 className="flex items-center gap-2 text-sm font-medium text-red-400">
+        <Trash2 className="h-4 w-4" strokeWidth={1.75} aria-hidden="true" />
+        Zone de danger
+      </h3>
+      <p className="text-xs text-muted">
+        Supprime définitivement ton compte et toutes tes données (activités, profil,
+        plans, connexions). Irréversible.
+      </p>
+      {!open ? (
+        <button
+          type="button"
+          onClick={() => setOpen(true)}
+          className="btn-ghost w-full border-red-500/40 text-red-400 hover:border-red-500/60"
+        >
+          Supprimer mon compte
+        </button>
+      ) : (
+        <div className="space-y-3">
+          {needsPassword && (
+            <label className="block">
+              <span className="text-xs text-muted">Mot de passe</span>
+              <input
+                type="password"
+                autoComplete="current-password"
+                value={password}
+                onChange={(event) => setPassword(event.target.value)}
+                className="input mt-1 w-full"
+              />
+            </label>
+          )}
+          {needsTotp && (
+            <label className="block">
+              <span className="text-xs text-muted">Code de vérification (2FA)</span>
+              <input
+                inputMode="text"
+                autoComplete="one-time-code"
+                value={code}
+                onChange={(event) => setCode(event.target.value)}
+                placeholder="123456 ou code de secours"
+                className="input mt-1 w-full tracking-widest"
+              />
+            </label>
+          )}
+          <label className="block">
+            <span className="text-xs text-muted">
+              Tape <strong>SUPPRIMER</strong> pour confirmer
+            </span>
+            <input
+              type="text"
+              value={confirmText}
+              onChange={(event) => setConfirmText(event.target.value)}
+              placeholder="SUPPRIMER"
+              className="input mt-1 w-full"
+            />
+          </label>
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={() => {
+                setOpen(false);
+                setPassword("");
+                setCode("");
+                setConfirmText("");
+              }}
+              className="btn-ghost flex-1"
+            >
+              Annuler
+            </button>
+            <button
+              type="button"
+              onClick={remove}
+              disabled={busy || !canSubmit}
+              className="btn-primary flex-1 bg-red-500/90 hover:bg-red-500 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {busy ? "Suppression…" : "Supprimer définitivement"}
+            </button>
+          </div>
+        </div>
+      )}
     </section>
   );
 }

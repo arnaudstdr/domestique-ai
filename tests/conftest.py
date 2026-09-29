@@ -30,6 +30,16 @@ def _isolate_platform_db(tmp_path, monkeypatch):
     init_platform_db()
 
 
+@pytest.fixture(autouse=True)
+def _reset_ratelimit():
+    """Vide l'état du rate-limiter in-process entre les tests (état global module)."""
+    from domestique_ai import ratelimit
+
+    ratelimit.reset()
+    yield
+    ratelimit.reset()
+
+
 @pytest.fixture()
 def api_auth_headers() -> dict[str, str]:
     """Header Bearer pour les tests qui montent le vrai ``app``.

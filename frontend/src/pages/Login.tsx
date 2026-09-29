@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 import { ApiError, api, setApiToken } from "../api/client";
 
 /**
@@ -15,6 +16,14 @@ export default function Login() {
   const [useRecovery, setUseRecovery] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [signupEnabled, setSignupEnabled] = useState(false);
+
+  useEffect(() => {
+    api.auth
+      .config()
+      .then((c) => setSignupEnabled(c.signup_enabled))
+      .catch(() => setSignupEnabled(false));
+  }, []);
 
   function redirect() {
     const params = new URLSearchParams(window.location.search);
@@ -169,6 +178,19 @@ export default function Login() {
               ? "Valider"
               : "Se connecter"}
         </button>
+
+        {!challenge && (
+          <div className="flex items-center justify-between text-xs text-muted">
+            <Link to="/forgot-password" className="hover:text-accent">
+              Mot de passe oublié ?
+            </Link>
+            {signupEnabled && (
+              <Link to="/signup" className="hover:text-accent">
+                Créer un compte
+              </Link>
+            )}
+          </div>
+        )}
       </form>
     </div>
   );

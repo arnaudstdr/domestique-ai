@@ -6,12 +6,19 @@ import {
   Copy,
   Eye,
   KeyRound,
+  Link2,
   Plus,
+  RefreshCw,
   Trash2,
   Users,
 } from "lucide-react";
 import { api, ApiError, setViewingAthlete } from "../api/client";
-import type { AthleteSummary, InvitationCreated, InvitationOut } from "../api/types";
+import type {
+  AthleteSummary,
+  CoachInviteLink,
+  InvitationCreated,
+  InvitationOut,
+} from "../api/types";
 import { useToast } from "../hooks/useToast";
 
 export default function Roster() {
@@ -28,6 +35,7 @@ export default function Roster() {
         </p>
       </header>
       <AthletesSection />
+      <ReusableInviteSection />
       <InvitationsSection />
     </div>
   );
@@ -235,6 +243,87 @@ async function copyToClipboard(text: string): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+function ReusableInviteSection() {
+  const [link, setLink] = useState<CoachInviteLink | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [rotating, setRotating] = useState(false);
+  const { push } = useToast();
+
+  useEffect(() => {
+    api.auth
+      .coachInviteLink()
+      .then(setLink)
+      .catch(() => setLink(null))
+      .finally(() => setLoading(false));
+  }, []);
+
+  const url = link ? `${window.location.origin}${link.invite_url}` : "";
+
+  async function copy() {
+    if (!url) return;
+    const ok = await copyToClipboard(url);
+    push(ok ? "Lien copié." : "Copie impossible — sélectionne le lien.", ok ? "success" : "error");
+  }
+
+  async function rotate() {
+    setRotating(true);
+    try {
+      const next = await api.auth.rotateCoachInviteLink();
+      setLink(next);
+      push("Nouveau lien généré. L'ancien est révoqué.", "success");
+    } catch (err) {
+      const msg = err instanceof ApiError ? err.message : String(err);
+      push(`Régénération : ${msg}`, "error");
+    } finally {
+      setRotating(false);
+    }
+  }
+
+  return (
+    <section className="card space-y-3">
+      <h3 className="flex items-center gap-2 text-sm font-medium text-fg-soft">
+        <Link2 className="h-4 w-4 text-accent" strokeWidth={1.75} aria-hidden="true" />
+        Mon lien d'invitation
+      </h3>
+      <p className="text-xs text-muted">
+        Un lien réutilisable à partager avec tes athlètes : ceux qui n'ont pas de
+        compte le créent en l'ouvrant ; ceux qui en ont déjà un le relient à toi
+        après connexion.
+      </p>
+      {loading ? (
+        <p className="text-xs text-muted">Chargement…</p>
+      ) : url ? (
+        <div className="space-y-2 rounded-xl border border-accent/30 bg-accent/[0.06] p-3">
+          <p className="label-eyebrow">Lien réutilisable</p>
+          <div className="flex items-center gap-2">
+            <input className="input flex-1 font-mono text-xs" readOnly value={url} />
+            <button
+              type="button"
+              onClick={copy}
+              aria-label="Copier le lien"
+              className="btn-ghost flex shrink-0 items-center gap-1.5 px-3 py-2 text-xs"
+            >
+              <Copy className="h-4 w-4" strokeWidth={1.75} aria-hidden="true" />
+              Copier
+            </button>
+          </div>
+          <button
+            type="button"
+            onClick={rotate}
+            disabled={rotating}
+            className="btn-ghost flex items-center gap-1.5 px-3 py-1.5 text-xs disabled:opacity-50"
+          >
+            <RefreshCw className="h-3.5 w-3.5" strokeWidth={1.75} aria-hidden="true" />
+            {rotating ? "Régénération…" : "Régénérer (révoque l'ancien)"}
+          </button>
+        </div>
+      ) : (
+        <p className="text-xs text-muted">Lien indisponible.</p>
+      )}
+    </section>
+  );
 }
 
 function InvitationsSection() {
