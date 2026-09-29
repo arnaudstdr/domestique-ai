@@ -141,7 +141,7 @@ export default function SimilarActivities({ data }: Props) {
             {data.matches.map((m) => (
               <tr
                 key={m.external_id}
-                className="border-t border-white/5"
+                className="border-t border-border/5"
               >
                 <td className="py-1.5">
                   <Link
@@ -151,8 +151,8 @@ export default function SimilarActivities({ data }: Props) {
                     {formatDate(m.date)}
                   </Link>
                 </td>
-                <td className="py-1.5 text-gray-200">{formatHm(m.duration_sec)}</td>
-                <td className="py-1.5 text-gray-200">
+                <td className="py-1.5 text-fg-soft">{formatHm(m.duration_sec)}</td>
+                <td className="py-1.5 text-fg-soft">
                   {m.training_load != null ? Math.round(m.training_load) : "—"}
                 </td>
                 <td className="py-1.5">{formatDeltaPct(m.tss_delta_pct)}</td>

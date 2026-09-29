@@ -124,9 +124,9 @@ export default function PlanCalendar({ workouts, decisions = [] }: Props) {
 
       {weeks.map((week, weekIdx) => (
         <div key={week.weekStart} className="card space-y-2">
-          <div className="flex items-center justify-between border-b border-white/5 pb-2">
+          <div className="flex items-center justify-between border-b border-border/5 pb-2">
             <div>
-              <div className="text-sm font-medium text-gray-100">
+              <div className="text-sm font-medium text-fg">
                 Semaine {weekIdx + 1}
               </div>
               <div className="text-xs text-muted">{week.weekLabel}</div>
@@ -153,7 +153,7 @@ export default function PlanCalendar({ workouts, decisions = [] }: Props) {
                         REPOS
                       </span>
                       <div className="min-w-0">
-                        <div className="truncate text-sm text-gray-100">
+                        <div className="truncate text-sm text-fg">
                           {w.name}
                         </div>
                         <div className="text-xs text-muted">
@@ -193,7 +193,7 @@ export default function PlanCalendar({ workouts, decisions = [] }: Props) {
                       </span>
                     )}
                     <div className="min-w-0">
-                      <div className="truncate text-sm text-gray-100">
+                      <div className="truncate text-sm text-fg">
                         {w.name}
                       </div>
                       <div className="text-xs text-muted">
@@ -209,7 +209,7 @@ export default function PlanCalendar({ workouts, decisions = [] }: Props) {
                 </button>
 
                 {isOpen && (
-                  <div className="mt-2 space-y-1 border-t border-white/5 pt-2">
+                  <div className="mt-2 space-y-1 border-t border-border/5 pt-2">
                     {w.notes && (
                       <div className="text-xs italic text-muted">{w.notes}</div>
                     )}
@@ -224,7 +224,7 @@ export default function PlanCalendar({ workouts, decisions = [] }: Props) {
                             key={idx}
                             className="flex items-center justify-between rounded bg-surface/40 px-2 py-1"
                           >
-                            <span className="text-gray-200">
+                            <span className="text-fg-soft">
                               {s.repeat > 1 && (
                                 <span className="text-accent">
                                   ×{s.repeat}{" "}

@@ -38,13 +38,13 @@ export default function Reconnect() {
   }, [token]);
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-surface px-4 text-gray-100">
+    <div className="min-h-screen flex items-center justify-center bg-surface px-4 text-fg">
       <div className="card w-full max-w-sm space-y-4 p-6 text-center">
         <img
           src="/icon-192.png"
           alt=""
           aria-hidden="true"
-          className="mx-auto h-16 w-16 rounded-2xl ring-1 ring-white/10 shadow-card"
+          className="mx-auto h-16 w-16 rounded-2xl ring-1 ring-border/10 shadow-card"
         />
         <h1 className="font-display text-xl font-extrabold tracking-tight">
           Domestique<span className="text-accent">AI</span>
@@ -54,7 +54,7 @@ export default function Reconnect() {
             <p className="text-sm text-red-400" role="alert">
               {error}
             </p>
-            <p className="text-xs text-gray-500">
+            <p className="text-xs text-muted">
               Demande un nouveau lien à ton coach, ou{" "}
               <a href="/login" className="hover:text-accent">
                 connecte-toi avec un token
@@ -63,7 +63,7 @@ export default function Reconnect() {
             </p>
           </>
         ) : (
-          <p className="text-sm text-gray-300">Reconnexion en cours…</p>
+          <p className="text-sm text-fg-soft">Reconnexion en cours…</p>
         )}
       </div>
     </div>

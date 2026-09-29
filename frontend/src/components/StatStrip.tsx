@@ -40,7 +40,7 @@ export default function StatStrip({ items, columns = 3, className = "" }: Props)
             )}
           </div>
           <span className="flex items-baseline gap-1">
-            <span className="metric-num text-xl sm:text-2xl font-semibold leading-none text-gray-50 whitespace-nowrap">
+            <span className="metric-num text-xl sm:text-2xl font-semibold leading-none text-fg whitespace-nowrap">
               {item.value}
             </span>
             {item.unit && <span className="text-xs text-muted">{item.unit}</span>}

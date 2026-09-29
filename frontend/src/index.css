@@ -10,16 +10,82 @@
      que les référencer (voir tailwind.config.js).
    ─────────────────────────────────────────────────────────────────────── */
 @layer base {
+  /* Thème clair (défaut). Le mode sombre surcharge ces tokens via `.dark`,
+     classe posée sur <html> par le script anti-flash (index.html) et
+     `hooks/useTheme.tsx`. */
   :root {
+    --surface: 244 246 249; /* #f4f6f9 — fond app clair, légèrement froid    */
+    --surface-2: 238 241 246; /* #eef1f6 — haut du dégradé d'ambiance        */
+    --card: 255 255 255; /* #ffffff — surface élevée                           */
+    --card-hover: 241 244 248; /* #f1f4f8 — survol / haut du dégradé carte    */
+    --muted: 100 109 123; /* #646d7b — texte secondaire                        */
+    --fg: 24 26 32; /* #181a20 — texte principal                             */
+    --fg-soft: 71 78 90; /* #474e5a — texte secondaire (plus contrasté)      */
+    --border: 15 18 24; /* liserés translucides (alpha via Tailwind)          */
+    --overlay: 15 18 24; /* surfaces surélevées translucides                  */
+    --sunken: 15 18 24; /* creux (inputs / selects)                           */
+    --accent: 92 138 0; /* #5c8a00 — lime assombri, lisible sur fond clair    */
+    --accent-ink: 255 255 255; /* texte posé sur un fond accent               */
+    --ctl: 37 99 235; /* #2563eb — forme (azur)                              */
+    --atl: 220 38 38; /* #dc2626 — fatigue (corail)                           */
+    --tsb: 5 150 105; /* #059669 — fraîcheur (émeraude)                      */
+    --tsb-neg: 217 119 6; /* #d97706 — ambre                                  */
+    /* Nuances « statut » (assombries pour la lisibilité sur fond clair). */
+    --red-300: 220 38 38;
+    --red-400: 220 38 38;
+    --red-500: 220 38 38;
+    --orange-300: 234 88 12;
+    --amber-300: 217 119 6;
+    --amber-400: 217 119 6;
+    --amber-500: 217 119 6;
+    --yellow-200: 202 138 4;
+    --yellow-300: 202 138 4;
+    --emerald-300: 5 150 105;
+    --emerald-500: 5 150 105;
+    --green-300: 22 163 74;
+    --green-400: 22 163 74;
+    --blue-300: 37 99 235;
+    --rose-400: 225 29 72;
+    --sky-400: 2 132 199;
+    --violet-400: 124 58 237;
+  }
+
+  /* Thème sombre « Instrument cockpit, au crépuscule » (historique). */
+  .dark {
     --surface: 12 13 16; /* #0c0d10 — fond app, near-black légèrement froid  */
+    --surface-2: 16 18 22; /* #101216 — haut du dégradé d'ambiance         */
     --card: 21 23 28; /* #15171c — surface élevée                          */
     --card-hover: 28 31 39; /* #1c1f27                                      */
     --muted: 142 150 164; /* #8e96a4 — texte secondaire                     */
+    --fg: 237 239 243; /* #edeff3 — texte principal                          */
+    --fg-soft: 226 230 236; /* #e2e6ec — texte secondaire contrasté        */
+    --border: 255 255 255; /* liserés translucides (alpha via Tailwind)      */
+    --overlay: 255 255 255; /* surfaces surélevées translucides            */
+    --sunken: 0 0 0; /* creux (inputs / selects)                             */
     --accent: 199 242 74; /* #c7f24a — vert acide signal                    */
+    --accent-ink: 12 13 16; /* texte posé sur un fond accent                */
     --ctl: 74 168 255; /* #4aa8ff — forme (azur)                           */
     --atl: 255 93 93; /* #ff5d5d — fatigue (corail)                        */
     --tsb: 52 211 153; /* #34d399 — fraîcheur (émeraude)                    */
     --tsb-neg: 245 165 36; /* #f5a524 — ambre                               */
+    /* Nuances « statut » d'origine (thème sombre). */
+    --red-300: 252 165 165;
+    --red-400: 248 113 113;
+    --red-500: 239 68 68;
+    --orange-300: 253 186 116;
+    --amber-300: 252 211 77;
+    --amber-400: 251 191 36;
+    --amber-500: 245 158 11;
+    --yellow-200: 254 240 138;
+    --yellow-300: 253 224 71;
+    --emerald-300: 110 231 183;
+    --emerald-500: 16 185 129;
+    --green-300: 134 239 172;
+    --green-400: 74 222 128;
+    --blue-300: 147 197 253;
+    --rose-400: 251 113 133;
+    --sky-400: 56 189 248;
+    --violet-400: 167 139 250;
   }
 
   html,
@@ -34,7 +100,7 @@
     -webkit-font-smoothing: antialiased;
     text-rendering: optimizeLegibility;
     overscroll-behavior-y: none;
-    color: rgb(237 239 243);
+    color: rgb(var(--fg));
     background-color: rgb(var(--surface));
   }
 
@@ -57,7 +123,7 @@
         rgb(var(--ctl) / 0.05),
         transparent 60%
       ),
-      linear-gradient(180deg, rgb(16 18 22), rgb(var(--surface)) 40%);
+      linear-gradient(180deg, rgb(var(--surface-2)), rgb(var(--surface)) 40%);
   }
 
   /* Grain fin par-dessus tout (très basse opacité). */
@@ -81,7 +147,7 @@
 
 @layer components {
   .card {
-    @apply rounded-2xl border border-white/[0.07] p-4 shadow-card;
+    @apply rounded-2xl border border-border/[0.07] p-4 shadow-card;
     background:
       linear-gradient(
         180deg,
@@ -94,18 +160,19 @@
            text-sm font-semibold tracking-tight transition-all duration-150
            disabled:opacity-50 disabled:cursor-not-allowed;
   }
-  /* Accent lime → texte sombre obligatoire (sinon illisible), glow au survol. */
+  /* Accent → encre d'accent (sombre en thème sombre, blanche en thème clair),
+     glow au survol. */
   .btn-primary {
-    @apply btn bg-accent text-surface hover:shadow-glow
+    @apply btn bg-accent text-accent-ink hover:shadow-glow
            hover:-translate-y-px active:translate-y-0;
   }
   .btn-ghost {
-    @apply btn bg-white/[0.04] text-gray-200 border border-white/[0.08]
-           hover:bg-white/[0.07] hover:border-white/[0.14];
+    @apply btn bg-overlay/[0.04] text-fg-soft border border-border/[0.08]
+           hover:bg-overlay/[0.07] hover:border-border/[0.14];
   }
   .input {
-    @apply w-full min-w-0 rounded-xl bg-white/[0.04] border border-white/[0.08]
-           px-3 py-2 text-gray-100 placeholder:text-muted transition-colors
+    @apply w-full min-w-0 rounded-xl bg-overlay/[0.04] border border-border/[0.08]
+           px-3 py-2 text-fg placeholder:text-muted transition-colors
            focus:outline-none focus:border-accent/60 focus:ring-2 focus:ring-accent/30;
   }
   /* iOS Safari : neutraliser le min-width intrinsèque des inputs date/time
@@ -175,7 +242,7 @@
   }
 }
 
-/* Leaflet : reset sombre par défaut pour qu'on voie la carte sur fond app. */
+/* Leaflet : fond aligné sur la surface de l'app (clair comme sombre). */
 .leaflet-container {
   background: rgb(var(--surface));
 }

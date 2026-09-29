@@ -60,7 +60,7 @@ export default function ActivityCreateForm({ onCreated, onClose }: Props) {
   return (
     <div className="card space-y-3">
       <div className="flex items-center justify-between">
-        <h3 className="font-display text-sm font-bold text-gray-50">
+        <h3 className="font-display text-sm font-bold text-fg">
           Ajouter une activité
         </h3>
         <button onClick={onClose} className="btn-ghost !px-2 !py-1" aria-label="Fermer">

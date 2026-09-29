@@ -5,10 +5,15 @@ import {
   Dna,
   Link2,
   LogOut,
+  Monitor,
+  Moon,
+  Palette,
   Save,
   ShieldCheck,
+  Sun,
   Trash2,
   UserRound,
+  type LucideIcon,
 } from "lucide-react";
 import { api, ApiError, clearApiToken } from "../api/client";
 import type {
@@ -23,6 +28,7 @@ import CalendarSubscribe from "../components/CalendarSubscribe";
 import MemoryPanel from "../components/MemoryPanel";
 import { useToast } from "../hooks/useToast";
 import { useMe, useMeRefresh } from "../hooks/useMe";
+import { useTheme, type ThemeChoice } from "../hooks/useTheme";
 import { useViewing } from "../hooks/useViewing";
 import { resizeImageToSquare } from "../lib/image";
 
@@ -64,7 +70,7 @@ export default function Profil() {
   return (
     <div className="stagger space-y-4">
       <header>
-        <h2 className="flex items-center gap-2 font-display text-2xl font-extrabold tracking-tight text-gray-50">
+        <h2 className="flex items-center gap-2 font-display text-2xl font-extrabold tracking-tight text-fg">
           <UserRound className="h-6 w-6 text-accent" strokeWidth={1.75} aria-hidden="true" />
           Profil
         </h2>
@@ -74,6 +80,7 @@ export default function Profil() {
         </p>
       </header>
       <AvatarSection />
+      <ThemeSection />
       <ProfileSection />
       <AvailabilitySection />
       <GarminSection />
@@ -132,12 +139,12 @@ function AvatarSection() {
 
   return (
     <section className="card space-y-3">
-      <h3 className="flex items-center gap-2 text-sm font-medium text-gray-200">
+      <h3 className="flex items-center gap-2 text-sm font-medium text-fg-soft">
         <Camera className="h-4 w-4 text-accent" strokeWidth={1.75} aria-hidden="true" />
         Photo de profil
       </h3>
       <div className="flex items-center gap-4">
-        <div className="grid h-16 w-16 shrink-0 place-items-center overflow-hidden rounded-2xl border border-white/10 bg-white/[0.04]">
+        <div className="grid h-16 w-16 shrink-0 place-items-center overflow-hidden rounded-2xl border border-border/10 bg-overlay/[0.04]">
           {me?.avatar_url ? (
             <img
               src={me.avatar_url}
@@ -180,6 +187,53 @@ function AvatarSection() {
       <p className="text-xs text-muted">
         L'image est recadrée en carré et redimensionnée (256 px) avant l'envoi.
         Elle remplace l'icône profil en haut à droite.
+      </p>
+    </section>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// 0. Apparence (thème clair / sombre / auto)
+// ---------------------------------------------------------------------------
+
+const THEME_OPTIONS: { value: ThemeChoice; label: string; Icon: LucideIcon }[] = [
+  { value: "light", label: "Clair", Icon: Sun },
+  { value: "dark", label: "Sombre", Icon: Moon },
+  { value: "system", label: "Auto", Icon: Monitor },
+];
+
+function ThemeSection() {
+  const { theme, setTheme } = useTheme();
+  return (
+    <section className="card space-y-3">
+      <h3 className="flex items-center gap-2 text-sm font-medium text-fg-soft">
+        <Palette className="h-4 w-4 text-accent" strokeWidth={1.75} aria-hidden="true" />
+        Apparence
+      </h3>
+      <div className="grid grid-cols-3 gap-2" role="group" aria-label="Thème de l'interface">
+        {THEME_OPTIONS.map(({ value, label, Icon }) => {
+          const active = theme === value;
+          return (
+            <button
+              key={value}
+              type="button"
+              onClick={() => setTheme(value)}
+              aria-pressed={active}
+              className={`flex flex-col items-center gap-1.5 rounded-xl border px-3 py-3
+                          text-xs font-semibold transition-colors ${
+                            active
+                              ? "border-accent/50 bg-accent/15 text-accent"
+                              : "border-border/10 bg-overlay/[0.03] text-fg-soft hover:border-border/20 hover:text-fg"
+                          }`}
+            >
+              <Icon className="h-5 w-5" strokeWidth={1.75} aria-hidden="true" />
+              {label}
+            </button>
+          );
+        })}
+      </div>
+      <p className="text-xs text-muted">
+        « Auto » suit le réglage clair/sombre de ton appareil.
       </p>
     </section>
   );
@@ -295,7 +349,7 @@ function GarminSection() {
 
   return (
     <section className="card space-y-3">
-      <h3 className="flex items-center gap-2 text-sm font-medium text-gray-200">
+      <h3 className="flex items-center gap-2 text-sm font-medium text-fg-soft">
         <Link2 className="h-4 w-4 text-accent" strokeWidth={1.75} aria-hidden="true" />
         Garmin Connect
       </h3>
@@ -378,7 +432,7 @@ function GarminSection() {
             value={mfaCode}
             onChange={(e) => setMfaCode(e.target.value)}
             placeholder="Code MFA"
-            className="w-full rounded-md border border-white/10 bg-black/20 px-3 py-2 text-sm"
+            className="w-full rounded-md border border-border/10 bg-sunken/20 px-3 py-2 text-sm"
             required
           />
           <div className="flex gap-2">
@@ -405,7 +459,7 @@ function GarminSection() {
             value={email}
             onChange={(e) => setEmail(e.target.value)}
             placeholder="Email Garmin Connect"
-            className="w-full rounded-md border border-white/10 bg-black/20 px-3 py-2 text-sm"
+            className="w-full rounded-md border border-border/10 bg-sunken/20 px-3 py-2 text-sm"
             required
           />
           <input
@@ -414,7 +468,7 @@ function GarminSection() {
             value={password}
             onChange={(e) => setPassword(e.target.value)}
             placeholder="Mot de passe"
-            className="w-full rounded-md border border-white/10 bg-black/20 px-3 py-2 text-sm"
+            className="w-full rounded-md border border-border/10 bg-sunken/20 px-3 py-2 text-sm"
             required
           />
           <button type="submit" disabled={busy} className="btn-primary w-full">
@@ -508,7 +562,7 @@ function SecuritySection() {
 
   return (
     <section className="card space-y-4">
-      <h3 className="flex items-center gap-2 text-sm font-medium text-gray-200">
+      <h3 className="flex items-center gap-2 text-sm font-medium text-fg-soft">
         <ShieldCheck className="h-4 w-4 text-accent" strokeWidth={1.75} aria-hidden="true" />
         Sécurité
       </h3>
@@ -522,7 +576,7 @@ function SecuritySection() {
             Double authentification active ({me.email})
           </span>
         ) : (
-          <span className="flex flex-wrap items-center gap-2 text-gray-300">
+          <span className="flex flex-wrap items-center gap-2 text-fg-soft">
             Double authentification inactive.
             <a href="/setup-2fa" className="text-accent hover:underline">
               Activer la 2FA
@@ -567,16 +621,16 @@ function SecuritySection() {
       </form>
 
       {me?.totp_enabled ? (
-        <div className="space-y-2 border-t border-white/5 pt-3">
+        <div className="space-y-2 border-t border-border/5 pt-3">
           <p className="label-eyebrow">Double authentification</p>
           {newCodes ? (
             <div className="space-y-2">
-              <p className="text-xs text-gray-300">
+              <p className="text-xs text-fg-soft">
                 Nouveaux codes de secours (affichés une seule fois) :
               </p>
               <ul className="grid grid-cols-2 gap-1.5 rounded-lg border border-accent/30 bg-accent/[0.06] p-3 font-mono text-xs">
                 {newCodes.map((c) => (
-                  <li key={c} className="tracking-wide text-gray-100">
+                  <li key={c} className="tracking-wide text-fg">
                     {c}
                   </li>
                 ))}
@@ -640,12 +694,12 @@ function AccountSection() {
 
   return (
     <section className="card space-y-3">
-      <h3 className="flex items-center gap-2 text-sm font-medium text-gray-200">
+      <h3 className="flex items-center gap-2 text-sm font-medium text-fg-soft">
         <UserRound className="h-4 w-4 text-accent" strokeWidth={1.75} aria-hidden="true" />
         Compte
       </h3>
       {me ? (
-        <p className="text-sm text-gray-300">
+        <p className="text-sm text-fg-soft">
           {me.display_name || "Sans nom"}{" "}
           <span className="text-muted">· {me.role}</span>
         </p>
@@ -748,7 +802,7 @@ function ProfileSection() {
 
   return (
     <section className="card space-y-3">
-      <h3 className="flex items-center gap-2 text-sm font-medium text-gray-200">
+      <h3 className="flex items-center gap-2 text-sm font-medium text-fg-soft">
         <Dna className="h-4 w-4 text-accent" strokeWidth={1.75} aria-hidden="true" />
         Infos perso
       </h3>
@@ -817,7 +871,7 @@ function ProfileSection() {
         </label>
         <div className="block">
           <span className="text-xs text-muted">Rapport poids/puissance</span>
-          <div className="mt-1 flex h-9 items-center rounded-lg border border-white/10 bg-white/5 px-3 text-sm text-gray-200">
+          <div className="mt-1 flex h-9 items-center rounded-lg border border-border/10 bg-overlay/5 px-3 text-sm text-fg-soft">
             {wkg != null ? `${wkg.toFixed(2)} W/kg` : "—"}
           </div>
         </div>
@@ -1006,7 +1060,7 @@ function AvailabilitySection() {
 
   return (
     <section className="card space-y-3">
-      <h3 className="flex items-center gap-2 text-sm font-medium text-gray-200">
+      <h3 className="flex items-center gap-2 text-sm font-medium text-fg-soft">
         <CalendarDays className="h-4 w-4 text-accent" strokeWidth={1.75} aria-hidden="true" />
         Disponibilité hebdo
       </h3>
@@ -1030,9 +1084,9 @@ function AvailabilitySection() {
                   onChange={(e) =>
                     updateDay(wd.key, "enabled", e.target.checked)
                   }
-                  className="h-4 w-4 rounded border-white/20 bg-surface accent-accent"
+                  className="h-4 w-4 rounded border-border/20 bg-surface accent-accent"
                 />
-                <span className="font-medium text-gray-200">{wd.label}</span>
+                <span className="font-medium text-fg-soft">{wd.label}</span>
               </label>
               {day.enabled && (
                 <div className="grid grid-cols-2 gap-2 pl-6">
@@ -1078,7 +1132,7 @@ function AvailabilitySection() {
         })}
       </div>
 
-      <div className="grid grid-cols-2 gap-3 border-t border-white/5 pt-3">
+      <div className="grid grid-cols-2 gap-3 border-t border-border/5 pt-3">
         <label className="block">
           <span className="text-xs text-muted">
             Jour endurance longue (préférence)

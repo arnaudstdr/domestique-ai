@@ -15,7 +15,7 @@ export default function CoachAvatar({ size = 32 }: Props) {
     >
       <span className="absolute inset-0 rounded-xl bg-accent/25 blur-md animate-coach-halo" />
       <span
-        className="relative grid place-items-center rounded-xl bg-accent font-display text-[15px] font-extrabold text-surface ring-1 ring-accent/50"
+        className="relative grid place-items-center rounded-xl bg-accent font-display text-[15px] font-extrabold text-accent-ink ring-1 ring-accent/50"
         style={{ width: size, height: size }}
       >
         D

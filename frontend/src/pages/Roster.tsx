@@ -18,7 +18,7 @@ export default function Roster() {
   return (
     <div className="stagger space-y-4">
       <header>
-        <h2 className="flex items-center gap-2 font-display text-2xl font-extrabold tracking-tight text-gray-50">
+        <h2 className="flex items-center gap-2 font-display text-2xl font-extrabold tracking-tight text-fg">
           <Users className="h-6 w-6 text-accent" strokeWidth={1.75} aria-hidden="true" />
           Roster
         </h2>
@@ -53,7 +53,7 @@ function initials(name: string | null): string {
 
 function AthleteAvatar({ athlete }: { athlete: AthleteSummary }) {
   return (
-    <div className="grid h-10 w-10 shrink-0 place-items-center overflow-hidden rounded-xl border border-white/[0.08] bg-white/[0.04]">
+    <div className="grid h-10 w-10 shrink-0 place-items-center overflow-hidden rounded-xl border border-border/[0.08] bg-overlay/[0.04]">
       {athlete.avatar_url ? (
         <img
           src={athlete.avatar_url}
@@ -136,7 +136,7 @@ function AthletesSection() {
 
   return (
     <section className="card space-y-3">
-      <h3 className="flex items-center gap-2 text-sm font-medium text-gray-200">
+      <h3 className="flex items-center gap-2 text-sm font-medium text-fg-soft">
         <Users className="h-4 w-4 text-accent" strokeWidth={1.75} aria-hidden="true" />
         Athlètes
       </h3>
@@ -151,12 +151,12 @@ function AthletesSection() {
           {athletes.map((a) => (
             <li
               key={a.public_id}
-              className="flex flex-col gap-3 rounded-xl border border-white/[0.06] bg-white/[0.03] px-3 py-2.5 sm:flex-row sm:items-center sm:justify-between"
+              className="flex flex-col gap-3 rounded-xl border border-border/[0.06] bg-overlay/[0.03] px-3 py-2.5 sm:flex-row sm:items-center sm:justify-between"
             >
               <div className="flex w-full min-w-0 items-center gap-3 sm:w-auto">
                 <AthleteAvatar athlete={a} />
                 <div className="min-w-0">
-                  <p className="truncate text-sm font-medium text-gray-100">
+                  <p className="truncate text-sm font-medium text-fg">
                     {a.display_name || "Sans nom"}
                   </p>
                   <p className="flex items-center gap-1.5 text-[11px] text-muted">
@@ -289,7 +289,7 @@ function InvitationsSection() {
 
   return (
     <section className="card space-y-3">
-      <h3 className="flex items-center gap-2 text-sm font-medium text-gray-200">
+      <h3 className="flex items-center gap-2 text-sm font-medium text-fg-soft">
         <Plus className="h-4 w-4 text-accent" strokeWidth={1.75} aria-hidden="true" />
         Inviter un athlète
       </h3>

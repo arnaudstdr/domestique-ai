@@ -48,31 +48,31 @@ export default function AcceptInvite() {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-surface px-4 py-8 text-gray-100">
+    <div className="min-h-screen flex items-center justify-center bg-surface px-4 py-8 text-fg">
       <div className="card w-full max-w-md space-y-4 p-6">
         <div className="text-center">
           <img
             src="/icon-192.png"
             alt=""
             aria-hidden="true"
-            className="mx-auto h-16 w-16 rounded-2xl ring-1 ring-white/10 shadow-card"
+            className="mx-auto h-16 w-16 rounded-2xl ring-1 ring-border/10 shadow-card"
           />
           <h1 className="mt-3 font-display text-xl font-extrabold tracking-tight">
             Domestique<span className="text-accent">AI</span>
           </h1>
-          <p className="mt-1 text-xs text-gray-400">Rejoindre via une invitation</p>
+          <p className="mt-1 text-xs text-muted">Rejoindre via une invitation</p>
         </div>
 
         {stage === "totp" ? (
           <TwoFactorSetup onDone={() => window.location.assign("/")} />
         ) : (
           <form onSubmit={submit} className="space-y-4">
-            <p className="text-sm text-gray-300">
+            <p className="text-sm text-fg-soft">
               Crée ton compte : choisis un email et un mot de passe, puis active
               la double authentification.
             </p>
             <label className="block">
-              <span className="text-xs text-gray-400">Nom d'affichage (optionnel)</span>
+              <span className="text-xs text-muted">Nom d'affichage (optionnel)</span>
               <input
                 type="text"
                 autoFocus
@@ -83,7 +83,7 @@ export default function AcceptInvite() {
               />
             </label>
             <label className="block">
-              <span className="text-xs text-gray-400">Email</span>
+              <span className="text-xs text-muted">Email</span>
               <input
                 type="email"
                 autoComplete="email"
@@ -94,7 +94,7 @@ export default function AcceptInvite() {
               />
             </label>
             <label className="block">
-              <span className="text-xs text-gray-400">Mot de passe</span>
+              <span className="text-xs text-muted">Mot de passe</span>
               <input
                 type="password"
                 autoComplete="new-password"
@@ -105,7 +105,7 @@ export default function AcceptInvite() {
               />
             </label>
             <label className="block">
-              <span className="text-xs text-gray-400">Confirmer le mot de passe</span>
+              <span className="text-xs text-muted">Confirmer le mot de passe</span>
               <input
                 type="password"
                 autoComplete="new-password"
@@ -135,7 +135,7 @@ export default function AcceptInvite() {
               {submitting ? "Création…" : "Créer mon compte"}
             </button>
 
-            <p className="text-center text-xs text-gray-500">
+            <p className="text-center text-xs text-muted">
               <a href="/login" className="hover:text-accent">
                 J'ai déjà un compte
               </a>

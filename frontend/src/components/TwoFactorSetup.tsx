@@ -82,14 +82,14 @@ export default function TwoFactorSetup({ onDone }: { onDone: () => void }) {
           <ShieldCheck className="h-5 w-5" strokeWidth={1.75} aria-hidden="true" />
           <h3 className="font-display text-lg font-extrabold">Codes de secours</h3>
         </div>
-        <p className="text-sm text-gray-300">
+        <p className="text-sm text-fg-soft">
           Conserve ces codes en lieu sûr : ils permettent de te connecter si tu
           perds l'accès à ton application d'authentification. Chaque code n'est
           utilisable qu'une fois — ils ne seront plus affichés.
         </p>
         <ul className="grid grid-cols-2 gap-2 rounded-xl border border-accent/30 bg-accent/[0.06] p-3 font-mono text-sm">
           {recoveryCodes.map((c) => (
-            <li key={c} className="tracking-wider text-gray-100">
+            <li key={c} className="tracking-wider text-fg">
               {c}
             </li>
           ))}
@@ -112,7 +112,7 @@ export default function TwoFactorSetup({ onDone }: { onDone: () => void }) {
             Télécharger
           </button>
         </div>
-        <label className="flex items-start gap-2 text-sm text-gray-300">
+        <label className="flex items-start gap-2 text-sm text-fg-soft">
           <input
             type="checkbox"
             checked={acknowledged}
@@ -139,7 +139,7 @@ export default function TwoFactorSetup({ onDone }: { onDone: () => void }) {
         <ShieldCheck className="h-5 w-5" strokeWidth={1.75} aria-hidden="true" />
         <h3 className="font-display text-lg font-extrabold">Activer la 2FA</h3>
       </div>
-      <p className="text-sm text-gray-300">
+      <p className="text-sm text-fg-soft">
         Scanne ce QR code avec ton application d'authentification (Google
         Authenticator, Authy, 1Password…), puis saisis le code à 6 chiffres.
       </p>
@@ -148,11 +148,11 @@ export default function TwoFactorSetup({ onDone }: { onDone: () => void }) {
           <img
             src={enroll.qr_svg_data_uri}
             alt="QR code d'enrôlement TOTP"
-            className="mx-auto h-48 w-48 rounded-xl bg-white p-2 ring-1 ring-white/10"
+            className="mx-auto h-48 w-48 rounded-xl bg-white p-2 ring-1 ring-border/10"
           />
           <p className="text-center text-xs text-muted">
             Ou saisis la clé manuellement :{" "}
-            <code className="select-all rounded bg-white/10 px-1 py-0.5 font-mono text-[11px]">
+            <code className="select-all rounded bg-overlay/10 px-1 py-0.5 font-mono text-[11px]">
               {enroll.secret}
             </code>
           </p>
@@ -161,7 +161,7 @@ export default function TwoFactorSetup({ onDone }: { onDone: () => void }) {
         <p className="text-center text-xs text-muted">Génération du QR code…</p>
       )}
       <label className="block">
-        <span className="text-xs text-gray-400">Code de vérification</span>
+        <span className="text-xs text-muted">Code de vérification</span>
         <input
           inputMode="numeric"
           autoComplete="one-time-code"

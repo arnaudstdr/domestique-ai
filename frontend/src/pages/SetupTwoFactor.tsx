@@ -58,7 +58,7 @@ export default function SetupTwoFactor() {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-surface px-4 py-8 text-gray-100">
+    <div className="min-h-screen flex items-center justify-center bg-surface px-4 py-8 text-fg">
       <div className="card w-full max-w-md space-y-4 p-6">
         {needsCredentials === null ? (
           <p className="text-center text-sm text-muted">Chargement…</p>
@@ -70,12 +70,12 @@ export default function SetupTwoFactor() {
                 Définir tes identifiants
               </h3>
             </div>
-            <p className="text-sm text-gray-300">
+            <p className="text-sm text-fg-soft">
               Choisis un email et un mot de passe. La double authentification
               (2FA) sera activée à l'étape suivante.
             </p>
             <label className="block">
-              <span className="text-xs text-gray-400">Email</span>
+              <span className="text-xs text-muted">Email</span>
               <input
                 type="email"
                 autoComplete="email"
@@ -86,7 +86,7 @@ export default function SetupTwoFactor() {
               />
             </label>
             <label className="block">
-              <span className="text-xs text-gray-400">Mot de passe</span>
+              <span className="text-xs text-muted">Mot de passe</span>
               <input
                 type="password"
                 autoComplete="new-password"
@@ -97,7 +97,7 @@ export default function SetupTwoFactor() {
               />
             </label>
             <label className="block">
-              <span className="text-xs text-gray-400">Confirmer</span>
+              <span className="text-xs text-muted">Confirmer</span>
               <input
                 type="password"
                 autoComplete="new-password"

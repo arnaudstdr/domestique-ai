@@ -20,8 +20,8 @@ export default function ChatBubble({ role, content, thinking, toolCalls }: Props
       <div
         className={`max-w-[85%] px-4 py-3 text-sm leading-relaxed ${
           isUser
-            ? "rounded-[18px_18px_4px_18px] bg-accent font-medium text-surface whitespace-pre-wrap shadow-glow"
-            : "rounded-[18px_18px_18px_4px] bg-card border border-white/[0.07] text-gray-100 shadow-card"
+            ? "rounded-[18px_18px_4px_18px] bg-accent font-medium text-accent-ink whitespace-pre-wrap shadow-glow"
+            : "rounded-[18px_18px_18px_4px] bg-card border border-border/[0.07] text-fg shadow-card"
         }`}
       >
         {isUser ? (
@@ -35,7 +35,7 @@ export default function ChatBubble({ role, content, thinking, toolCalls }: Props
           <details
             open={openThinking}
             onToggle={(e) => setOpenThinking((e.target as HTMLDetailsElement).open)}
-            className="mt-3 border-t border-white/5 pt-2"
+            className="mt-3 border-t border-border/5 pt-2"
           >
             <summary className="flex cursor-pointer items-center gap-1.5 text-xs text-muted">
               <Lightbulb className="h-3.5 w-3.5" strokeWidth={1.75} aria-hidden="true" />
@@ -50,7 +50,7 @@ export default function ChatBubble({ role, content, thinking, toolCalls }: Props
           <details
             open={openTools}
             onToggle={(e) => setOpenTools((e.target as HTMLDetailsElement).open)}
-            className="mt-2 border-t border-white/5 pt-2"
+            className="mt-2 border-t border-border/5 pt-2"
           >
             <summary className="flex cursor-pointer items-center gap-1.5 text-xs text-muted">
               <Wrench className="h-3.5 w-3.5" strokeWidth={1.75} aria-hidden="true" />
@@ -76,11 +76,11 @@ export default function ChatBubble({ role, content, thinking, toolCalls }: Props
 function MarkdownBody({ content }: { content: string }) {
   return (
     <div
-      className="prose prose-invert prose-sm max-w-none
+      className="prose dark:prose-invert prose-sm max-w-none
                  prose-p:my-2 prose-p:leading-relaxed
                  prose-ul:my-2 prose-ol:my-2 prose-li:my-0.5
-                 prose-headings:my-2 prose-headings:text-gray-100
-                 prose-strong:text-gray-50
+                 prose-headings:my-2 prose-headings:text-fg
+                 prose-strong:text-fg
                  prose-code:bg-black/30 prose-code:px-1 prose-code:py-0.5
                  prose-code:rounded prose-code:text-accent prose-code:before:content-none
                  prose-code:after:content-none

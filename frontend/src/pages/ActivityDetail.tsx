@@ -291,7 +291,7 @@ export default function ActivityDetail() {
       {editing ? (
         <div className="card space-y-3">
           <div className="flex items-center justify-between">
-            <h3 className="font-display text-sm font-bold text-gray-50">
+            <h3 className="font-display text-sm font-bold text-fg">
               Modifier l'activité
             </h3>
             <button
@@ -382,7 +382,7 @@ export default function ActivityDetail() {
       ) : (
         <div className="card flex items-start justify-between gap-3">
           <div className="min-w-0">
-            <h2 className="font-display text-xl font-bold tracking-tight text-gray-50">
+            <h2 className="font-display text-xl font-bold tracking-tight text-fg">
               {a.name || "Activité"}
             </h2>
             <p className="metric-num text-xs text-muted">
@@ -516,11 +516,11 @@ export default function ActivityDetail() {
           <h3 className="label-eyebrow mb-2">Notes / ressenti</h3>
           {a.rpe != null && (
             <p className="text-muted">
-              Effort ressenti : <span className="text-gray-50">{a.rpe}/10</span>
+              Effort ressenti : <span className="text-fg">{a.rpe}/10</span>
             </p>
           )}
           {a.notes && (
-            <p className="mt-1 whitespace-pre-wrap text-gray-50">{a.notes}</p>
+            <p className="mt-1 whitespace-pre-wrap text-fg">{a.notes}</p>
           )}
         </div>
       )}
@@ -530,7 +530,7 @@ export default function ActivityDetail() {
           <h3 className="label-eyebrow mb-2">Météo</h3>
           <div className="flex flex-wrap gap-x-5 gap-y-1 text-muted">
             <span>
-              <span className="text-gray-50">{weather.description ?? "—"}</span>
+              <span className="text-fg">{weather.description ?? "—"}</span>
               {weather.temp_c != null && ` · ${weather.temp_c.toFixed(1)} °C`}
               {weather.apparent_temp_c != null &&
                 weather.apparent_temp_c !== weather.temp_c &&

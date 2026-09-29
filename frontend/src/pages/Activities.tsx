@@ -139,7 +139,7 @@ export default function Activities() {
   return (
     <div className="stagger space-y-3">
       <div className="flex items-baseline justify-between gap-3">
-        <h2 className="font-display text-2xl font-extrabold tracking-tight text-gray-50">
+        <h2 className="font-display text-2xl font-extrabold tracking-tight text-fg">
           Activités
         </h2>
         <div className="flex items-center gap-2">

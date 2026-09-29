@@ -32,7 +32,7 @@ function alertTone(severity: "warning" | "danger" | undefined): string {
   if (severity === "danger") return "bg-red-500/10 border-red-500/30 text-red-300";
   if (severity === "warning")
     return "bg-orange-500/10 border-orange-500/30 text-orange-300";
-  return "bg-white/5 border-white/10 text-muted";
+  return "bg-overlay/5 border-border/10 text-muted";
 }
 
 export default function DailyBriefCard({ data, loading, secondaryAlerts = [] }: Props) {
@@ -43,9 +43,9 @@ export default function DailyBriefCard({ data, loading, secondaryAlerts = [] }: 
   if (loading && !data) {
     return (
       <div className="card animate-pulse space-y-3">
-        <div className="h-3 w-32 rounded bg-white/10" />
-        <div className="h-5 w-3/4 rounded bg-white/10" />
-        <div className="h-3 w-1/2 rounded bg-white/10" />
+        <div className="h-3 w-32 rounded bg-overlay/10" />
+        <div className="h-5 w-3/4 rounded bg-overlay/10" />
+        <div className="h-3 w-1/2 rounded bg-overlay/10" />
       </div>
     );
   }
@@ -92,7 +92,7 @@ export default function DailyBriefCard({ data, loading, secondaryAlerts = [] }: 
           <div className="flex items-start gap-2.5">
             <CoachAvatar size={30} />
             <p
-              className={`flex-1 text-sm text-gray-100 leading-relaxed ${
+              className={`flex-1 text-sm text-fg leading-relaxed ${
                 summaryOpen ? "" : "line-clamp-2"
               }`}
             >
@@ -120,7 +120,7 @@ export default function DailyBriefCard({ data, loading, secondaryAlerts = [] }: 
       </div>
 
       {data.coach_tip && (
-        <div className="flex items-start gap-2 rounded-lg border border-accent/20 bg-accent/[0.05] px-3 py-2 text-xs text-gray-100">
+        <div className="flex items-start gap-2 rounded-lg border border-accent/20 bg-accent/[0.05] px-3 py-2 text-xs text-fg">
           <Lightbulb
             className="mt-0.5 h-3.5 w-3.5 shrink-0 text-accent"
             strokeWidth={1.75}
@@ -138,14 +138,14 @@ export default function DailyBriefCard({ data, loading, secondaryAlerts = [] }: 
           <div className="label-eyebrow text-[10px]">Semaine</div>
           {data.week_tss_planned != null ? (
             <>
-              <div className="metric-num text-lg font-semibold text-gray-50">
+              <div className="metric-num text-lg font-semibold text-fg">
                 {Math.round(data.week_tss_done ?? 0)}
                 <span className="text-muted text-sm">
                   {" "}
                   / {Math.round(data.week_tss_planned)} TSS
                 </span>
               </div>
-              <div className="mt-1 h-1.5 w-full overflow-hidden rounded-full bg-white/10">
+              <div className="mt-1 h-1.5 w-full overflow-hidden rounded-full bg-overlay/10">
                 <div
                   className="h-full rounded-full bg-accent"
                   style={{
@@ -199,7 +199,7 @@ interface TodayBarProps {
 function TodayBar({ workout, expanded, hasDetail, onToggle }: TodayBarProps) {
   if (workout.rest_day) {
     return (
-      <div className="rounded-lg border border-white/10 bg-surface/40 px-3 py-2 text-xs">
+      <div className="rounded-lg border border-border/10 bg-surface/40 px-3 py-2 text-xs">
         <span className="text-muted uppercase tracking-wide">Aujourd'hui</span>{" "}
         <span className="font-semibold text-muted">Repos</span>
         {workout.reason && <div className="mt-0.5 text-[11px] text-muted">{workout.reason}</div>}
@@ -216,7 +216,7 @@ function TodayBar({ workout, expanded, hasDetail, onToggle }: TodayBarProps) {
       onClick={onToggle}
       disabled={!hasDetail}
       aria-expanded={expanded}
-      className="group w-full rounded-lg border border-white/10 bg-surface/40 px-3 py-2 text-left disabled:cursor-default enabled:hover:border-accent/40 transition-colors"
+      className="group w-full rounded-lg border border-border/10 bg-surface/40 px-3 py-2 text-left disabled:cursor-default enabled:hover:border-accent/40 transition-colors"
       title={hasDetail ? "Voir le détail de la séance" : undefined}
     >
       <div className="flex items-center justify-between gap-2">
@@ -233,7 +233,7 @@ function TodayBar({ workout, expanded, hasDetail, onToggle }: TodayBarProps) {
       </div>
       <div className="mt-1 flex items-center gap-2">
         <span className={`pill ${tone} text-[10px] py-0.5 px-1.5`}>{label}</span>
-        <span className="metric-num text-xs text-gray-200">
+        <span className="metric-num text-xs text-fg-soft">
           {workout.duration_min != null ? `${workout.duration_min} min` : "—"}
           {workout.target_zone && (
             <span className="ml-1 text-muted">· {workout.target_zone.toUpperCase()}</span>
@@ -304,7 +304,7 @@ function AlertSurface({ primary, secondary, open, onToggle, accentColor }: Alert
       </div>
       {primary && <div className="mt-1">{primary.message}</div>}
       {open && secondary.length > 0 && (
-        <ul className="mt-1.5 space-y-1 border-t border-white/10 pt-1.5">
+        <ul className="mt-1.5 space-y-1 border-t border-border/10 pt-1.5">
           {secondary.map((a, i) => (
             <li key={i} className={a.level === "danger" ? "text-red-300" : "text-orange-300"}>
               {a.message}
@@ -318,9 +318,9 @@ function AlertSurface({ primary, secondary, open, onToggle, accentColor }: Alert
 
 function WorkoutDetail({ workout }: { workout: DailyBriefWorkout }) {
   return (
-    <div className="rounded-lg border border-white/10 bg-surface/40 p-3 space-y-2">
+    <div className="rounded-lg border border-border/10 bg-surface/40 p-3 space-y-2">
       <div className="flex items-baseline justify-between gap-2">
-        <div className="text-sm font-medium text-gray-100">{workout.name}</div>
+        <div className="text-sm font-medium text-fg">{workout.name}</div>
         {workout.estimated_tss != null && (
           <span className="text-[11px] text-muted">~{Math.round(workout.estimated_tss)} TSS</span>
         )}
@@ -332,7 +332,7 @@ function WorkoutDetail({ workout }: { workout: DailyBriefWorkout }) {
             key={idx}
             className="flex items-center justify-between rounded bg-surface/60 px-2 py-1"
           >
-            <span className="text-gray-200">
+            <span className="text-fg-soft">
               <span className="text-muted">{PHASE_LABELS[step.phase] || step.phase}</span> ·{" "}
               {step.zone.toUpperCase()}
             </span>

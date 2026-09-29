@@ -431,7 +431,7 @@ export default function Plan() {
         ) : (
           <div className="space-y-1 text-sm">
             <div className="flex items-center justify-between gap-2">
-              <span className="text-gray-100">
+              <span className="text-fg">
                 {OBJECTIVE_LABELS[objective.type] || objective.type}
               </span>
               {objective.date && (
@@ -477,14 +477,14 @@ export default function Plan() {
           <ClipboardList className="h-4 w-4 text-accent" strokeWidth={1.75} aria-hidden="true" />
           Générer un plan
         </h2>
-        <div className="flex rounded-lg overflow-hidden border border-white/10 text-xs">
+        <div className="flex rounded-lg overflow-hidden border border-border/10 text-xs">
           <button
             type="button"
             onClick={() => setMode("classic")}
             className={`flex-1 px-3 py-2 transition-colors ${
               mode === "classic"
-                ? "bg-accent text-surface font-semibold"
-                : "bg-white/[0.04] text-muted hover:bg-white/[0.08]"
+                ? "bg-accent text-accent-ink font-semibold"
+                : "bg-overlay/[0.04] text-muted hover:bg-overlay/[0.08]"
             }`}
           >
             Périodisation classique
@@ -494,8 +494,8 @@ export default function Plan() {
             onClick={() => setMode("llm")}
             className={`flex-1 px-3 py-2 transition-colors ${
               mode === "llm"
-                ? "bg-accent text-surface font-semibold"
-                : "bg-white/[0.04] text-muted hover:bg-white/[0.08]"
+                ? "bg-accent text-accent-ink font-semibold"
+                : "bg-overlay/[0.04] text-muted hover:bg-overlay/[0.08]"
             }`}
           >
             Coach IA (bêta)
@@ -567,7 +567,7 @@ export default function Plan() {
       {(generating && mode === "llm") || llmStream.weeks.length > 0 || llmStream.error ? (
         <div className="card space-y-2">
           <div className="flex items-center justify-between">
-            <h3 className="flex items-center gap-2 text-sm font-medium text-gray-200">
+            <h3 className="flex items-center gap-2 text-sm font-medium text-fg-soft">
               <Bot className="h-4 w-4 text-accent" strokeWidth={1.75} aria-hidden="true" />
               Génération coach IA
             </h3>
@@ -598,7 +598,7 @@ export default function Plan() {
                 className="rounded bg-surface/40 px-2 py-1.5 space-y-1"
               >
                 <div className="flex items-center justify-between">
-                  <span className="text-gray-200">
+                  <span className="text-fg-soft">
                     Semaine {week.index + 1} ·{" "}
                     {week.workouts.length} séance{week.workouts.length > 1 ? "s" : ""}
                   </span>
@@ -662,7 +662,7 @@ export default function Plan() {
             className={`rounded-xl border px-3 py-2.5 text-sm ${
               reviewResult.error
                 ? "border-red-500/30 bg-red-500/10 text-red-400"
-                : "border-accent/30 bg-accent/[0.06] text-gray-100"
+                : "border-accent/30 bg-accent/[0.06] text-fg"
             }`}
           >
             <div className="flex flex-wrap items-center gap-2">
@@ -672,7 +672,7 @@ export default function Plan() {
                     ? "bg-yellow-500/15 text-yellow-300"
                     : reviewResult.decision === "progress"
                       ? "bg-emerald-500/15 text-emerald-300"
-                      : "bg-surface/60 text-gray-200"
+                      : "bg-surface/60 text-fg-soft"
                 }`}
               >
                 {reviewResult.decision}
@@ -683,7 +683,7 @@ export default function Plan() {
                 </span>
               )}
               {reviewResult.skipped && (
-                <span className="pill bg-surface/60 text-gray-300">
+                <span className="pill bg-surface/60 text-fg-soft">
                   déjà faite cette semaine
                 </span>
               )}
@@ -733,17 +733,17 @@ export default function Plan() {
                   <RefreshCw className="h-3.5 w-3.5" strokeWidth={1.75} aria-hidden="true" />
                   Suivi du coach (évolution semaine après semaine)
                 </span>
-                <ol className="space-y-1.5 border-l border-white/10 pl-3">
+                <ol className="space-y-1.5 border-l border-border/10 pl-3">
                   {versions.map((v, i) => (
                     <li key={v.id} className="relative text-[11px]">
                       <span
                         className={`absolute -left-[17px] top-1.5 h-2 w-2 rounded-full ${
-                          v.status === "active" ? "bg-accent" : "bg-white/20"
+                          v.status === "active" ? "bg-accent" : "bg-overlay/20"
                         }`}
                         aria-hidden="true"
                       />
                       <div className="flex items-center justify-between gap-2">
-                        <span className="text-gray-200">
+                        <span className="text-fg-soft">
                           {v.start_date ?? formatCreatedAt(v.created_at)}
                           {v.status === "active" ? (
                             <span className="ml-1 pill bg-accent/15 text-accent">actif</span>
@@ -883,7 +883,7 @@ function PrescriptionsSection() {
             className="rounded-xl border border-accent/30 bg-accent/[0.06] px-3 py-2.5"
           >
             <div className="flex items-center justify-between gap-2">
-              <span className="truncate text-sm text-gray-100">{p.workout.name}</span>
+              <span className="truncate text-sm text-fg">{p.workout.name}</span>
               <span className="pill bg-accent/15 text-accent shrink-0">
                 par ton coach
               </span>

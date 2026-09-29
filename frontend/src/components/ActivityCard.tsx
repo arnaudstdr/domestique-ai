@@ -29,7 +29,7 @@ export default function ActivityCard({ activity }: Props) {
       className="card flex items-start gap-3 transition-colors hover:bg-cardHover"
     >
       <div className="min-w-0 flex-1">
-        <h3 className="truncate font-medium text-gray-100">
+        <h3 className="truncate font-medium text-fg">
           {activity.name || activity.sport_type || "Activité"}
         </h3>
         <p className="mt-0.5 text-xs text-muted">{formatDate(activity.date)}</p>
@@ -60,7 +60,7 @@ function Metric({ label, value }: { label: string; value: string }) {
   return (
     <div>
       <div className="text-[10px] uppercase tracking-wider text-muted">{label}</div>
-      <div className="metric-num text-sm font-medium text-gray-100">{value}</div>
+      <div className="metric-num text-sm font-medium text-fg">{value}</div>
     </div>
   );
 }

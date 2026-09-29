@@ -5,6 +5,25 @@
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <meta name="theme-color" content="#0c0d10" />
+    <script>
+      // Anti-flash : applique le thème (light/dark/auto) avant le premier
+      // paint. Doit rester synchrone et identique à la logique de
+      // src/hooks/useTheme.tsx (même clé de stockage).
+      (function () {
+        try {
+          var stored = localStorage.getItem("domestique-theme");
+          var dark =
+            stored === "dark" ||
+            ((stored === "system" || !stored) &&
+              window.matchMedia("(prefers-color-scheme: dark)").matches);
+          document.documentElement.classList.toggle("dark", dark);
+          var meta = document.querySelector('meta[name="theme-color"]');
+          if (meta) meta.setAttribute("content", dark ? "#0c0d10" : "#f4f6f9");
+        } catch (e) {
+          /* localStorage indisponible : on laisse le thème clair par défaut. */
+        }
+      })();
+    </script>
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <link rel="manifest" href="/manifest.json" />
@@ -17,7 +36,7 @@
     />
     <title>DomestiqueAI</title>
   </head>
-  <body class="bg-surface text-gray-100">
+  <body class="bg-surface text-fg">
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>

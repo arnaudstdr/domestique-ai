@@ -15,6 +15,31 @@ Endpoints consommés : `domestique_ai/api/AGENTS.md`. Données/coach :
   vers `http://localhost:8501`. Build : `npm run build` (FastAPI sert ensuite le
   bundle sur le port 8501).
 
+## Thème clair / sombre / auto
+
+L'UI supporte trois modes : **clair**, **sombre** et **auto** (suit
+`prefers-color-scheme`). Le thème est piloté par la classe `dark` sur `<html>`
+(Tailwind `darkMode: "class"`), posée par :
+
+- un **script inline anti-flash** dans `index.html` (avant le premier paint) ;
+- `hooks/useTheme.tsx` (`ThemeProvider` monté dans `main.tsx`, hook `useTheme`)
+  qui persiste le choix dans `localStorage` (`domestique-theme`) et suit l'OS en
+  mode auto. Le sélecteur (Clair / Sombre / Auto) est la section « Apparence »
+  de `pages/Profil.tsx`.
+
+Les couleurs sont des **tokens sémantiques** définis dans `src/index.css`
+(`:root` = thème clair, `.dark` = override sombre) : `fg` / `fg-soft` (texte),
+`border` / `overlay` / `sunken` (liserés et surfaces translucides, à utiliser
+avec un modificateur d'alpha), `accent-ink` (texte posé sur un fond `accent`),
+plus `surface` / `card` / `muted` / `accent` / `ctl` / `atl` / `tsb` / `tsb_neg`.
+**Ne pas remettre de `text-gray-*`, `border-white/*` ou `bg-white/*`** dans les
+composants : passer par ces tokens. Les charts recharts lisent les tokens à la
+volée via `chartTheme.ts` (`themeColor`, accesseurs) — les couleurs restent
+centralisées dans ce module.
+
+⚠️ Après édition de `index.html` ou d'un asset mis en cache, bumper
+`STATIC_CACHE` / `API_CACHE` dans `public/sw.js` (le `/` est mis en cache).
+
 ## Streaming SSE du coach
 
 Le coach LLM streame via **SSE** (`/api/coach/chat`) — `run_turn_stream()` yield

@@ -105,7 +105,7 @@ export default function CalendarSubscribe() {
         )}
       </div>
 
-      <p className="text-sm text-gray-300">
+      <p className="text-sm text-fg-soft">
         Ajoute tes séances à Apple Calendrier ou Google Calendar : elles se
         mettent à jour automatiquement après chaque adaptation du plan.
       </p>
@@ -113,7 +113,7 @@ export default function CalendarSubscribe() {
       {loading && <p className="text-sm text-muted">Chargement du lien…</p>}
 
       {!loading && error && (
-        <div className="rounded-lg border border-white/10 bg-white/[0.03] p-3 text-sm text-muted">
+        <div className="rounded-lg border border-border/10 bg-overlay/[0.03] p-3 text-sm text-muted">
           {error}
         </div>
       )}
@@ -172,33 +172,33 @@ export default function CalendarSubscribe() {
             </a>
           </div>
 
-          <div className="flex flex-col items-center gap-4 rounded-xl border border-white/[0.06] bg-white/[0.02] p-3 sm:flex-row sm:items-start">
+          <div className="flex flex-col items-center gap-4 rounded-xl border border-border/[0.06] bg-overlay/[0.02] p-3 sm:flex-row sm:items-start">
             <img
               src={feed.qr_svg_data_uri}
               alt="QR code du flux calendrier"
               className="h-40 w-40 shrink-0 rounded-lg bg-white p-2"
             />
             <div className="space-y-2 text-xs text-muted">
-              <p className="flex items-center gap-1.5 text-gray-300">
+              <p className="flex items-center gap-1.5 text-fg-soft">
                 <Info className="h-3.5 w-3.5" strokeWidth={1.75} aria-hidden="true" />
                 Scanner depuis un autre appareil
               </p>
               <details className="group">
-                <summary className="cursor-pointer text-gray-300 hover:text-accent">
+                <summary className="cursor-pointer text-fg-soft hover:text-accent">
                   Comment ajouter le flux ?
                 </summary>
                 <ul className="mt-1.5 ml-3 list-disc space-y-1">
                   <li>
-                    <span className="text-gray-300">Apple :</span> bouton
+                    <span className="text-fg-soft">Apple :</span> bouton
                     ci-dessus, ou Fichier → Nouvel abonnement à un calendrier →
                     colle l'URL.
                   </li>
                   <li>
-                    <span className="text-gray-300">Google :</span> Autres
+                    <span className="text-fg-soft">Google :</span> Autres
                     agendas → À partir d'une URL → colle l'URL.
                   </li>
                   <li>
-                    <span className="text-gray-300">Outlook / autres :</span>{" "}
+                    <span className="text-fg-soft">Outlook / autres :</span>{" "}
                     abonne-toi à partir de l'URL du flux (le champ ci-dessus).
                   </li>
                 </ul>

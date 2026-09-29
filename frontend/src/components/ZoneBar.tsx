@@ -12,6 +12,7 @@ import {
   CHART,
   ZONE_COLORS,
   axisProps,
+  hairline,
   tooltipItemStyle,
   tooltipStyle,
 } from "../chartTheme";
@@ -53,7 +54,7 @@ export default function ZoneBar({ zones }: Props) {
             <XAxis type="number" {...axisProps} />
             <YAxis dataKey="zone" type="category" width={36} {...axisProps} />
             <Tooltip
-              cursor={{ fill: "rgba(255,255,255,0.04)" }}
+              cursor={{ fill: hairline(0.04) }}
               contentStyle={tooltipStyle}
               itemStyle={tooltipItemStyle}
               formatter={(v) => [`${v} min`, "Temps"]}

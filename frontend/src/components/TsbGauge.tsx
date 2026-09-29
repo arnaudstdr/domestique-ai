@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { isDarkTheme, themeColor } from "../chartTheme";
 
 interface Props {
   value: number | null;
@@ -8,19 +9,20 @@ interface Props {
 }
 
 // Couleur d'état : cohérente avec les tons texte déjà utilisés dans l'app
-// (emerald Frais, lime Optimal, ambre Fatigué, rouge Surentraîné).
+// (émeraude Frais, accent Optimal, ambre Fatigué, rouge Surentraîné) et relue
+// à chaque rendu pour suivre le thème clair/sombre.
 export function zoneColor(zone: string | null | undefined): string {
   switch (zone) {
     case "Frais":
-      return "#34d399";
+      return themeColor("--tsb", "#34d399");
     case "Optimal":
-      return "#c7f24a";
+      return themeColor("--accent", "#c7f24a");
     case "Fatigué":
-      return "#f5a524";
+      return themeColor("--tsb-neg", "#f5a524");
     case "Surentraîné":
-      return "#ff5d5d";
+      return themeColor("--atl", "#ff5d5d");
     default:
-      return "#8e96a4";
+      return themeColor("--muted", "#8e96a4");
   }
 }
 
@@ -86,7 +88,7 @@ export default function TsbGauge({ value, zone, size = 108, label = "TSB" }: Pro
           cy="54"
           r={R}
           fill="none"
-          stroke="rgba(255,255,255,0.07)"
+          stroke={isDarkTheme() ? "rgba(255,255,255,0.07)" : "rgba(15,18,24,0.10)"}
           strokeWidth="8"
         />
         <circle

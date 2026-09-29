@@ -112,8 +112,8 @@ export default function ActivityFilters({
                   className={
                     "pill text-xs transition-colors " +
                     (active
-                      ? "bg-accent text-surface"
-                      : "bg-cardHover text-gray-200 hover:bg-cardHover/70")
+                      ? "bg-accent text-accent-ink"
+                      : "bg-cardHover text-fg-soft hover:bg-cardHover/70")
                   }
                 >
                   {sport}

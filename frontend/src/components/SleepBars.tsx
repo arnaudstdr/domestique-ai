@@ -36,7 +36,7 @@ export default function SleepBars({ history, baseline }: Props) {
       <div className="relative flex items-end gap-1 h-12">
         {hasBaseline && (
           <div
-            className="pointer-events-none absolute inset-x-0 border-t border-dashed border-white/20"
+            className="pointer-events-none absolute inset-x-0 border-t border-dashed border-border/20"
             style={{ bottom: `${Math.min(100, (baseline! / MAX_HOURS) * 100)}%` }}
           />
         )}

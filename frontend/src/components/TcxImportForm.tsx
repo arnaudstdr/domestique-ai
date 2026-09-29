@@ -40,7 +40,7 @@ export default function TcxImportForm({ onImported, onClose }: Props) {
   return (
     <div className="card space-y-3">
       <div className="flex items-center justify-between">
-        <h3 className="font-display text-sm font-bold text-gray-50">
+        <h3 className="font-display text-sm font-bold text-fg">
           Importer des fichiers TCX
         </h3>
         <button onClick={onClose} className="btn-ghost !px-2 !py-1" aria-label="Fermer">
@@ -93,7 +93,7 @@ export default function TcxImportForm({ onImported, onClose }: Props) {
                 ●
               </span>
               <span className="min-w-0 flex-1">
-                <span className="text-gray-200">{r.filename}</span>
+                <span className="text-fg-soft">{r.filename}</span>
                 {" — "}
                 {r.status === "imported"
                   ? `${r.activities.length} activité(s) importée(s)`

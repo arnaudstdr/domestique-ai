@@ -25,7 +25,7 @@ export default function MetricCard({ label, value, hint, badge }: Props) {
           </span>
         )}
       </div>
-      <span className="metric-num text-xl sm:text-[28px] font-semibold leading-none text-gray-50 whitespace-nowrap">
+      <span className="metric-num text-xl sm:text-[28px] font-semibold leading-none text-fg whitespace-nowrap">
         {value}
       </span>
       {hint && <span className="text-xs text-muted">{hint}</span>}

@@ -35,7 +35,7 @@ export default function BottomNav({ viewing = false }: { viewing?: boolean }) {
   return (
     <nav
       className="fixed bottom-0 inset-x-0 z-[1100] bg-surface/80 backdrop-blur-xl
-                 border-t border-white/[0.06] pb-[env(safe-area-inset-bottom)]
+                 border-t border-border/[0.06] pb-[env(safe-area-inset-bottom)]
                  shadow-[0_-8px_24px_-16px_rgb(0_0_0/0.8)]
                  will-change-transform [transform:translateZ(0)]
                  [-webkit-backface-visibility:hidden]"
@@ -52,7 +52,7 @@ export default function BottomNav({ viewing = false }: { viewing?: boolean }) {
               className={({ isActive }) =>
                 `group relative flex flex-col items-center gap-1 py-2.5
                  text-[11px] font-medium tracking-tight transition-colors ${
-                   isActive ? "text-accent" : "text-muted hover:text-gray-300"
+                   isActive ? "text-accent" : "text-muted hover:text-fg-soft"
                  }`
               }
             >

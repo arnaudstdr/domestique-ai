@@ -11,7 +11,7 @@ const CONFIDENCE_LABELS: Record<FtpProjectionResponse["confidence"], string> = {
 };
 
 const CONFIDENCE_TONE: Record<FtpProjectionResponse["confidence"], string> = {
-  low: "text-muted bg-white/5",
+  low: "text-muted bg-overlay/5",
   medium: "text-yellow-300 bg-yellow-500/10",
   high: "text-emerald-300 bg-emerald-500/10",
 };
@@ -43,7 +43,7 @@ export default function FtpProjectionCard({ data }: Props) {
       <div className="grid grid-cols-3 gap-3">
         <div>
           <div className="text-xs uppercase tracking-wide text-muted">Actuelle</div>
-          <div className="metric-num text-2xl font-semibold text-gray-50">{formatFtp(data.current_ftp)}</div>
+          <div className="metric-num text-2xl font-semibold text-fg">{formatFtp(data.current_ftp)}</div>
         </div>
         <div className={`text-center self-end pb-1 ${trendTone}`}>
           <div className="text-3xl leading-none">{trendArrow}</div>
@@ -56,18 +56,18 @@ export default function FtpProjectionCard({ data }: Props) {
       </div>
 
       {data.weight_kg != null && (
-        <div className="flex items-center justify-between rounded-lg bg-white/5 px-3 py-2 text-xs">
+        <div className="flex items-center justify-between rounded-lg bg-overlay/5 px-3 py-2 text-xs">
           <span className="text-muted">
             Rapport poids/puissance <span className="text-muted/70">({data.weight_kg.toFixed(1)} kg)</span>
           </span>
-          <span className="text-gray-200">
+          <span className="text-fg-soft">
             {formatWkg(data.current_wkg)} → <span className="text-accent">{formatWkg(data.projected_wkg)}</span>
           </span>
         </div>
       )}
 
-      <div className="rounded-lg bg-white/5 p-3 text-xs text-muted space-y-1">
-        <div className="font-medium text-gray-300">Heuristique</div>
+      <div className="rounded-lg bg-overlay/5 p-3 text-xs text-muted space-y-1">
+        <div className="font-medium text-fg-soft">Heuristique</div>
         <p>
           +1 % de FTP par +5 points de CTL net sur 28 jours, plafonné à ±5 %.
           La confiance monte à « élevée » si la part Z4-Z5 reste entre 4 % et 25 %
@@ -76,19 +76,19 @@ export default function FtpProjectionCard({ data }: Props) {
         <div className="pt-1 flex flex-wrap gap-x-4 gap-y-1">
           <span>
             ΔCTL 28 j :{" "}
-            <span className="text-gray-200">
+            <span className="text-fg-soft">
               {data.delta_ctl_28d == null ? "—" : data.delta_ctl_28d.toFixed(2)}
             </span>
           </span>
           <span>
             CTL :{" "}
-            <span className="text-gray-200">
+            <span className="text-fg-soft">
               {data.ctl_current == null ? "—" : data.ctl_current.toFixed(1)}
             </span>
           </span>
           <span>
             Z4-Z5 :{" "}
-            <span className="text-gray-200">
+            <span className="text-fg-soft">
               {data.z4_z5_share_pct == null ? "—" : `${data.z4_z5_share_pct.toFixed(1)} %`}
             </span>
           </span>

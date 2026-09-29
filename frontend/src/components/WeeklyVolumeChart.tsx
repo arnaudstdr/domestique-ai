@@ -9,7 +9,7 @@ import {
   YAxis,
 } from "recharts";
 import type { WeeklyVolumeEntry } from "../api/types";
-import { CHART, axisProps, tooltipStyle } from "../chartTheme";
+import { CHART, axisProps, hairline, tooltipStyle } from "../chartTheme";
 
 interface Props {
   data: WeeklyVolumeEntry[];
@@ -82,7 +82,7 @@ export default function WeeklyVolumeChart({ data, embedded = false }: Props) {
               labelFormatter={(d) => `Semaine du ${formatDay(d as string)}`}
             />
             {currentWeek && (
-              <ReferenceLine x={currentWeek} stroke="rgba(255,255,255,0.35)" />
+              <ReferenceLine x={currentWeek} stroke={hairline(0.35)} />
             )}
             <Area
               type="monotone"

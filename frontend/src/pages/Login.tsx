@@ -69,7 +69,7 @@ export default function Login() {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-surface px-4 text-gray-100">
+    <div className="min-h-screen flex items-center justify-center bg-surface px-4 text-fg">
       <form
         onSubmit={challenge ? submitCode : submitCredentials}
         className="card w-full max-w-sm space-y-4 p-6"
@@ -79,25 +79,25 @@ export default function Login() {
             src="/icon-192.png"
             alt=""
             aria-hidden="true"
-            className="mx-auto h-16 w-16 rounded-2xl ring-1 ring-white/10 shadow-card"
+            className="mx-auto h-16 w-16 rounded-2xl ring-1 ring-border/10 shadow-card"
           />
           <h1 className="mt-3 font-display text-xl font-extrabold tracking-tight">
             Domestique<span className="text-accent">AI</span>
           </h1>
-          <p className="mt-1 text-xs text-gray-400">
+          <p className="mt-1 text-xs text-muted">
             {challenge ? "Vérification en 2 étapes" : "Connexion"}
           </p>
         </div>
 
         {challenge ? (
           <>
-            <p className="text-sm text-gray-300">
+            <p className="text-sm text-fg-soft">
               {useRecovery
                 ? "Saisis l'un de tes codes de secours."
                 : "Saisis le code à 6 chiffres de ton application d'authentification."}
             </p>
             <label className="block">
-              <span className="text-xs text-gray-400">
+              <span className="text-xs text-muted">
                 {useRecovery ? "Code de secours" : "Code de vérification"}
               </span>
               <input
@@ -107,7 +107,7 @@ export default function Login() {
                 value={code}
                 onChange={(event) => setCode(event.target.value)}
                 placeholder={useRecovery ? "xxxxx-xxxxx" : "123456"}
-                className="mt-1 w-full rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm tracking-widest focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent"
+                className="mt-1 w-full rounded-lg border border-border/10 bg-overlay/5 px-3 py-2 text-sm tracking-widest focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent"
               />
             </label>
             <button
@@ -117,7 +117,7 @@ export default function Login() {
                 setCode("");
                 setError(null);
               }}
-              className="text-xs text-gray-400 hover:text-accent"
+              className="text-xs text-muted hover:text-accent"
             >
               {useRecovery
                 ? "Utiliser un code à 6 chiffres"
@@ -127,7 +127,7 @@ export default function Login() {
         ) : (
           <>
             <label className="block">
-              <span className="text-xs text-gray-400">Email</span>
+              <span className="text-xs text-muted">Email</span>
               <input
                 type="email"
                 autoFocus
@@ -135,18 +135,18 @@ export default function Login() {
                 value={email}
                 onChange={(event) => setEmail(event.target.value)}
                 placeholder="toi@exemple.com"
-                className="mt-1 w-full rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent"
+                className="mt-1 w-full rounded-lg border border-border/10 bg-overlay/5 px-3 py-2 text-sm focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent"
               />
             </label>
             <label className="block">
-              <span className="text-xs text-gray-400">Mot de passe</span>
+              <span className="text-xs text-muted">Mot de passe</span>
               <input
                 type="password"
                 autoComplete="current-password"
                 value={password}
                 onChange={(event) => setPassword(event.target.value)}
                 placeholder="••••••••••••"
-                className="mt-1 w-full rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent"
+                className="mt-1 w-full rounded-lg border border-border/10 bg-overlay/5 px-3 py-2 text-sm focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent"
               />
             </label>
           </>
@@ -161,7 +161,7 @@ export default function Login() {
         <button
           type="submit"
           disabled={submitting || (challenge ? !code.trim() : !email.trim() || !password)}
-          className="w-full rounded-lg bg-accent py-2 text-sm font-semibold text-surface transition-colors hover:bg-accent/90 disabled:cursor-not-allowed disabled:opacity-50"
+          className="w-full rounded-lg bg-accent py-2 text-sm font-semibold text-accent-ink transition-colors hover:bg-accent/90 disabled:cursor-not-allowed disabled:opacity-50"
         >
           {submitting
             ? "Connexion…"

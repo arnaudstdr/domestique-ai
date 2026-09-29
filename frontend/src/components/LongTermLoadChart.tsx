@@ -10,7 +10,7 @@ import {
   YAxis,
 } from "recharts";
 import type { TrendLoadPoint, TrendResolution } from "../api/types";
-import { CHART, axisProps, legendStyle, tooltipStyle } from "../chartTheme";
+import { CHART, axisProps, hairline, legendStyle, tooltipStyle } from "../chartTheme";
 
 interface Props {
   data: TrendLoadPoint[];
@@ -58,7 +58,7 @@ export default function LongTermLoadChart({ data, resolution }: Props) {
                 dataKey="date"
                 height={22}
                 stroke={CHART.ctl}
-                fill="rgba(255,255,255,0.02)"
+                fill={hairline(0.02)}
                 travellerWidth={8}
                 tickFormatter={(d) => formatTick(d as string, resolution)}
               />

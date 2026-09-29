@@ -222,12 +222,12 @@ export default function MemoryPanel() {
   return (
     <section className="card space-y-4">
       <div className="flex items-start gap-2">
-        <h3 className="flex items-center gap-2 text-sm font-medium text-gray-200">
+        <h3 className="flex items-center gap-2 text-sm font-medium text-fg-soft">
           <Brain className="h-4 w-4 text-accent" strokeWidth={1.75} aria-hidden="true" />
           Mémoire du coach
         </h3>
         {facts.length > 0 && (
-          <span className="pill bg-white/[0.06] text-muted">{facts.length}</span>
+          <span className="pill bg-overlay/[0.06] text-muted">{facts.length}</span>
         )}
         <button
           type="button"
@@ -308,7 +308,7 @@ export default function MemoryPanel() {
         <p className="text-xs text-muted">Aucun fait mémorisé pour l'instant.</p>
       ) : visibleCount === 0 ? (
         <p className="text-xs text-muted">
-          Aucun fait ne correspond à « <span className="text-gray-200">{query.trim()}</span> ».
+          Aucun fait ne correspond à « <span className="text-fg-soft">{query.trim()}</span> ».
         </p>
       ) : (
         <div className="space-y-3">
@@ -316,8 +316,8 @@ export default function MemoryPanel() {
             <div className="card border-accent/25">
               <div className="mb-1 flex items-center gap-2">
                 <Pin className="h-4 w-4 text-accent" strokeWidth={1.75} aria-hidden="true" />
-                <span className="text-sm font-medium text-gray-200">Épinglés</span>
-                <span className="pill bg-white/[0.06] text-muted">{pinned.length}</span>
+                <span className="text-sm font-medium text-fg-soft">Épinglés</span>
+                <span className="pill bg-overlay/[0.06] text-muted">{pinned.length}</span>
                 <span className="ml-auto text-[11px] text-muted">toujours transmis</span>
               </div>
               <div>
@@ -380,8 +380,8 @@ function CategoryCard({
     >
       <summary className="flex cursor-pointer list-none items-center gap-2 [&::-webkit-details-marker]:hidden">
         <Icon className={`h-4 w-4 ${accent}`} strokeWidth={1.75} aria-hidden="true" />
-        <span className="text-sm font-medium text-gray-200">{label}</span>
-        <span className="pill bg-white/[0.06] text-muted">{items.length}</span>
+        <span className="text-sm font-medium text-fg-soft">{label}</span>
+        <span className="pill bg-overlay/[0.06] text-muted">{items.length}</span>
         <ChevronDown
           className={`ml-auto h-4 w-4 text-muted transition-transform duration-200 motion-reduce:transition-none ${
             open ? "rotate-180" : ""
@@ -402,7 +402,7 @@ function CategoryCard({
 function FactRow({ fact, ...rp }: { fact: CoachMemoryFact } & RowProps) {
   if (rp.editingId === fact.id) {
     return (
-      <div className="flex items-center gap-2 border-b border-white/5 py-2 last:border-0">
+      <div className="flex items-center gap-2 border-b border-border/5 py-2 last:border-0">
         <input
           type="text"
           value={rp.editContent}
@@ -434,11 +434,11 @@ function FactRow({ fact, ...rp }: { fact: CoachMemoryFact } & RowProps) {
   }
 
   return (
-    <div className="flex items-start gap-2 border-b border-white/5 py-2 last:border-0">
+    <div className="flex items-start gap-2 border-b border-border/5 py-2 last:border-0">
       {fact.pinned && (
         <Pin className="mt-0.5 h-3.5 w-3.5 shrink-0 text-accent" strokeWidth={1.75} aria-hidden="true" />
       )}
-      <span className="flex-1 text-sm leading-relaxed text-gray-200">{fact.content}</span>
+      <span className="flex-1 text-sm leading-relaxed text-fg-soft">{fact.content}</span>
       <FactMenu
         fact={fact}
         open={rp.menuId === fact.id}
@@ -503,7 +503,7 @@ function FactMenu({
       {open && (
         <div
           role="menu"
-          className="absolute right-0 z-20 mt-1 w-48 overflow-hidden rounded-xl border border-white/10 bg-surface/95 py-1 shadow-card backdrop-blur"
+          className="absolute right-0 z-20 mt-1 w-48 overflow-hidden rounded-xl border border-border/10 bg-surface/95 py-1 shadow-card backdrop-blur"
         >
           <MenuItem
             icon={fact.pinned ? PinOff : Pin}
@@ -534,8 +534,8 @@ function MenuItem({
       type="button"
       role="menuitem"
       onClick={onClick}
-      className={`flex w-full items-center gap-2 px-3 py-2 text-left text-sm transition-colors hover:bg-white/[0.06] ${
-        danger ? "text-rose-400" : "text-gray-200"
+      className={`flex w-full items-center gap-2 px-3 py-2 text-left text-sm transition-colors hover:bg-overlay/[0.06] ${
+        danger ? "text-rose-400" : "text-fg-soft"
       }`}
     >
       <Icon size={15} strokeWidth={1.75} aria-hidden="true" />

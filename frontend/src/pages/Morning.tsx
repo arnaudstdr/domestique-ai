@@ -357,7 +357,7 @@ export default function Morning() {
                   {SLEEP_STAGES.map((s) => {
                     const min = latestEntry[s.key];
                     return (
-                      <div key={s.key} className="flex items-center justify-between rounded-lg bg-white/[0.04] px-3 py-2">
+                      <div key={s.key} className="flex items-center justify-between rounded-lg bg-overlay/[0.04] px-3 py-2">
                         <span className="flex items-center gap-2 text-sm">
                           <span
                             className="inline-block h-2 w-2 rounded-full"
@@ -664,7 +664,7 @@ function HypnogramBody({ entry }: { entry: MorningEntry }) {
             <span className="w-12 shrink-0 text-right text-[10px] uppercase tracking-wide text-muted">
               {row.label}
             </span>
-            <div className="relative h-6 flex-1 overflow-hidden rounded-md bg-white/[0.03]">
+            <div className="relative h-6 flex-1 overflow-hidden rounded-md bg-overlay/[0.03]">
               {row.segments.map((s, i) => {
                 const startMs = new Date(s.start).getTime();
                 const endMs = new Date(s.end).getTime();
@@ -733,7 +733,7 @@ function SleepStackTooltip({
           <span>{formatMin(p.value || 0)}</span>
         </div>
       ))}
-      <div className="mt-1 flex items-center justify-between gap-4 border-t border-white/10 pt-1 font-medium">
+      <div className="mt-1 flex items-center justify-between gap-4 border-t border-border/10 pt-1 font-medium">
         <span>Total</span>
         <span>{formatMin(total)}</span>
       </div>

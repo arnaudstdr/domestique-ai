@@ -31,7 +31,7 @@ export default function Prescribe() {
   return (
     <div className="stagger space-y-4">
       <header>
-        <h2 className="flex items-center gap-2 font-display text-2xl font-extrabold tracking-tight text-gray-50">
+        <h2 className="flex items-center gap-2 font-display text-2xl font-extrabold tracking-tight text-fg">
           <Dumbbell className="h-6 w-6 text-accent" strokeWidth={1.75} aria-hidden="true" />
           Prescrire
         </h2>
@@ -100,7 +100,7 @@ function PrescribeSessionSection({ publicId }: { publicId: string }) {
 
   return (
     <section className="card space-y-3">
-      <h3 className="flex items-center gap-2 text-sm font-medium text-gray-200">
+      <h3 className="flex items-center gap-2 text-sm font-medium text-fg-soft">
         <CalendarPlus className="h-4 w-4 text-accent" strokeWidth={1.75} aria-hidden="true" />
         Séance ponctuelle
       </h3>
@@ -162,10 +162,10 @@ function PrescribeSessionSection({ publicId }: { publicId: string }) {
           {items.map((p) => (
             <li
               key={p.id}
-              className="flex items-center justify-between gap-3 rounded-xl border border-white/[0.06] bg-white/[0.03] px-3 py-2.5"
+              className="flex items-center justify-between gap-3 rounded-xl border border-border/[0.06] bg-overlay/[0.03] px-3 py-2.5"
             >
               <div className="min-w-0">
-                <p className="truncate text-sm text-gray-100">{p.workout.name}</p>
+                <p className="truncate text-sm text-fg">{p.workout.name}</p>
                 <p className="text-[11px] text-muted">
                   {p.date} · {p.workout.duration_min}′ · {p.workout.target_zone.toUpperCase()}
                 </p>
@@ -217,7 +217,7 @@ function AssignPlanSection({ publicId }: { publicId: string }) {
 
   return (
     <section className="card space-y-3">
-      <h3 className="flex items-center gap-2 text-sm font-medium text-gray-200">
+      <h3 className="flex items-center gap-2 text-sm font-medium text-fg-soft">
         <ClipboardList className="h-4 w-4 text-accent" strokeWidth={1.75} aria-hidden="true" />
         Assigner un plan complet
       </h3>
