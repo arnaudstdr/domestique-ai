@@ -185,6 +185,15 @@ def get_smtp_starttls() -> bool:
     return os.getenv("SMTP_STARTTLS", "1").strip().lower() not in {"0", "false", "no"}
 
 
+def get_feedback_notify_email() -> str | None:
+    """Adresse notifiée à chaque retour utilisateur (``DOMESTIQUE_AI_FEEDBACK_EMAIL``).
+
+    ``None`` → aucune notification envoyée (le retour reste persisté en base).
+    """
+    raw = os.getenv("DOMESTIQUE_AI_FEEDBACK_EMAIL")
+    return raw.strip() if raw and raw.strip() else None
+
+
 def get_profile_path() -> Path:
     """Chemin du YAML profil athlète. Override via DOMESTIQUE_AI_PROFILE_PATH."""
     custom = os.getenv("DOMESTIQUE_AI_PROFILE_PATH")

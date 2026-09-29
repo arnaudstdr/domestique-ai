@@ -11,12 +11,20 @@ from __future__ import annotations
 import logging
 import smtplib
 from email.message import EmailMessage
+from typing import Any
 
 from domestique_ai import config
 
 log = logging.getLogger(__name__)
 
 _SMTP_TIMEOUT_S = 10
+
+_FEEDBACK_CATEGORIES = {
+    "bug": "Bug",
+    "idea": "Idée",
+    "remark": "Remarque",
+    "other": "Autre",
+}
 
 
 def send_email(to: str, subject: str, body: str) -> bool:
@@ -78,3 +86,24 @@ def send_password_reset_email(to: str, token: str) -> bool:
         "ignore cet email : ton mot de passe actuel reste inchangé.\n"
     )
     return send_email(to, "Réinitialise ton mot de passe — DomestiqueAI", body)
+
+
+def send_feedback_notification(to: str, feedback: dict[str, Any]) -> bool:
+    """Notifie par email un nouveau retour utilisateur (best-effort)."""
+    category = _FEEDBACK_CATEGORIES.get(
+        feedback.get("category") or "", feedback.get("category") or "—"
+    )
+    author = feedback.get("public_id") or "utilisateur inconnu"
+    email = feedback.get("author_email")
+    lines = [
+        f"Catégorie : {category}",
+        f"Auteur : {author}" + (f" <{email}>" if email else ""),
+        f"Rôle : {feedback.get('role') or '—'}",
+        f"Date : {feedback.get('created_at') or '—'}",
+    ]
+    if feedback.get("page"):
+        lines.append(f"Page : {feedback['page']}")
+    if feedback.get("app_version"):
+        lines.append(f"Version : {feedback['app_version']}")
+    body = "\n".join(lines) + "\n\n" + (feedback.get("message") or "") + "\n"
+    return send_email(to, f"[DomestiqueAI][Feedback] {category} — {author}", body)

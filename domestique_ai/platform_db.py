@@ -257,6 +257,23 @@ def init_platform_db(path: Path | None = None) -> None:
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_coach_athlete_athlete ON coach_athlete(athlete_id)"
         )
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS feedback (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+                public_id TEXT,
+                role TEXT,
+                author_email TEXT,
+                category TEXT NOT NULL,
+                message TEXT NOT NULL,
+                page TEXT,
+                app_version TEXT,
+                user_agent TEXT,
+                created_at TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'new'
+            )
+        """)
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_feedback_created ON feedback(created_at DESC)")
         conn.commit()
     finally:
         conn.close()
@@ -295,6 +312,23 @@ def _invitation_dict(row: sqlite3.Row) -> dict[str, Any]:
         "created_at": row["created_at"],
         "expires_at": row["expires_at"],
         "accepted_at": row["accepted_at"],
+    }
+
+
+def _feedback_dict(row: sqlite3.Row) -> dict[str, Any]:
+    return {
+        "id": row["id"],
+        "user_id": row["user_id"],
+        "public_id": row["public_id"],
+        "role": row["role"],
+        "author_email": row["author_email"],
+        "category": row["category"],
+        "message": row["message"],
+        "page": row["page"],
+        "app_version": row["app_version"],
+        "user_agent": row["user_agent"],
+        "created_at": row["created_at"],
+        "status": row["status"],
     }
 
 
@@ -394,6 +428,69 @@ def list_users(role: str | None = None, path: Path | None = None) -> list[dict[s
                 "SELECT * FROM users WHERE role = ? ORDER BY id", (role,)
             ).fetchall()
         return [_user_dict(r) for r in rows]
+    finally:
+        conn.close()
+
+
+# ---------------------------------------------------------------------------
+# Feedback (retours des testeurs — data plateforme, cross-tenant)
+# ---------------------------------------------------------------------------
+
+
+def insert_feedback(
+    *,
+    category: str,
+    message: str,
+    user_id: int | None = None,
+    public_id: str | None = None,
+    role: str | None = None,
+    author_email: str | None = None,
+    page: str | None = None,
+    app_version: str | None = None,
+    user_agent: str | None = None,
+    path: Path | None = None,
+) -> dict[str, Any]:
+    """Enregistre un retour utilisateur et le retourne sérialisé."""
+    conn = _connect(path)
+    try:
+        now = _now()
+        cur = conn.execute(
+            "INSERT INTO feedback (user_id, public_id, role, author_email, category, "
+            "message, page, app_version, user_agent, created_at, status) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'new')",
+            (
+                user_id,
+                public_id,
+                role,
+                (author_email or "").strip().lower() or None,
+                category,
+                message,
+                page,
+                app_version,
+                user_agent,
+                now,
+            ),
+        )
+        conn.commit()
+        row = conn.execute("SELECT * FROM feedback WHERE id = ?", (cur.lastrowid,)).fetchone()
+        return _feedback_dict(row)
+    finally:
+        conn.close()
+
+
+def list_feedback(limit: int | None = None, path: Path | None = None) -> list[dict[str, Any]]:
+    """Liste les retours, du plus récent au plus ancien."""
+    conn = _connect(path)
+    try:
+        if limit is None:
+            rows = conn.execute(
+                "SELECT * FROM feedback ORDER BY created_at DESC, id DESC"
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT * FROM feedback ORDER BY created_at DESC, id DESC LIMIT ?", (limit,)
+            ).fetchall()
+        return [_feedback_dict(r) for r in rows]
     finally:
         conn.close()
 

@@ -30,6 +30,9 @@ from domestique_ai.api.routers import (
     coach as coach_router,
 )
 from domestique_ai.api.routers import (
+    feedback as feedback_router,
+)
+from domestique_ai.api.routers import (
     garmin as garmin_router,
 )
 from domestique_ai.api.routers import (
@@ -345,6 +348,10 @@ app.include_router(coach_router.router)
 app.include_router(plan_router.router)
 app.include_router(roster_router.router)
 app.include_router(prescriptions_router.router)
+
+# Retours testeurs : data plateforme (platform.db), accessible à tout compte
+# authentifié — non scopé par athlète.
+app.include_router(feedback_router.router)
 
 
 @app.get("/api/health", tags=["meta"])

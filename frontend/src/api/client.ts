@@ -17,6 +17,8 @@ import type {
   CoachSearchHit,
   CoachThreadPage,
   DailyBriefResponse,
+  FeedbackCreated,
+  FeedbackPayload,
   FtpProjectionResponse,
   GoogleHealthAuthResponse,
   GoogleHealthStatusResponse,
@@ -660,6 +662,14 @@ export const api = {
       }),
     deleteAthlete: (publicId: string) =>
       http<void>(`/api/roster/athletes/${publicId}`, { method: "DELETE" }),
+  },
+  // Retours testeurs (page /feedback) — data plateforme, pas scopé par athlète.
+  feedback: {
+    create: (payload: FeedbackPayload) =>
+      http<FeedbackCreated>(`/api/feedback`, {
+        method: "POST",
+        body: JSON.stringify(payload),
+      }),
   },
 };
 
