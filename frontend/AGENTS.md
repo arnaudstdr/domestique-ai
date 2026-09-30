@@ -161,8 +161,9 @@ ce sheet (plus de carte de recherche en haut de page).
 - **Admin** — page `/admin` (`pages/Admin.tsx`), lien d'en-tête `ShieldCheck`
   affiché uniquement si `me.role === "admin"` (`AuthedShell`). Sections :
   réglages plateforme (toggle `signup_enabled`, toggle `maintenance_mode`,
-  message diffusé), comptes, invitations (toutes
-  provenances, révocation des `pending`), retours testeurs
+  message diffusé), comptes, invitations (création d'un lien à usage unique
+  `athlète`|`coach` à copier, toutes provenances, révocation des `pending` ;
+  le lien est accepté même si `signup_enabled` est faux), retours testeurs
   cross-tenant (filtre par statut + changement de statut
   `new`/`acknowledged`/`done`/`rejected`), et journal d'audit (dernières actions
   admin, libellés FR), et un encart **Plateforme** (stats + statut ops :

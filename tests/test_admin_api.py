@@ -393,6 +393,52 @@ def test_invitations_forbidden_for_non_admin(client: TestClient):
     assert client.get("/api/admin/invitations", headers=_bearer(athlete_token)).status_code == 403
 
 
+def test_admin_creates_invitation(client: TestClient):
+    admin_token, admin_pid = _session("admin")
+    r = client.post("/api/admin/invitations", headers=_bearer(admin_token), json={"role": "coach"})
+    assert r.status_code == 201, r.text
+    body = r.json()
+    assert body["invite_url"].startswith("/accept-invite?token=")
+    assert body["invitation"]["role"] == "coach"
+    assert body["invitation"]["status"] == "pending"
+    assert body["invitation"]["created_by_public_id"] == admin_pid
+
+    rows = client.get("/api/admin/invitations", headers=_bearer(admin_token)).json()
+    assert any(i["id"] == body["invitation"]["id"] for i in rows)
+
+
+def test_admin_created_invitation_accepts_with_signup_disabled(client: TestClient):
+    """Le lien admin crée un compte même quand l'inscription publique est coupée."""
+    pdb.set_setting("signup_enabled", "0")
+    admin_token, _ = _session("admin")
+    # Signup public désactivé → refusé.
+    denied = client.post(
+        "/api/auth/signup",
+        json={"email": "x@example.com", "password": "secret123456", "role": "coach"},
+    )
+    assert denied.status_code == 403, denied.text
+
+    r = client.post("/api/admin/invitations", headers=_bearer(admin_token), json={"role": "coach"})
+    invite_token = r.json()["invite_url"].split("token=", 1)[1]
+    accepted = client.post("/api/auth/accept-invite", json={"invite_token": invite_token})
+    assert accepted.status_code == 200, accepted.text
+    assert accepted.json()["role"] == "coach"
+
+
+def test_admin_create_invitation_rejects_admin_role(client: TestClient):
+    admin_token, _ = _session("admin")
+    r = client.post("/api/admin/invitations", headers=_bearer(admin_token), json={"role": "admin"})
+    assert r.status_code == 422
+
+
+def test_admin_create_invitation_forbidden_for_non_admin(client: TestClient):
+    athlete_token, _ = _session("athlete")
+    r = client.post(
+        "/api/admin/invitations", headers=_bearer(athlete_token), json={"role": "athlete"}
+    )
+    assert r.status_code == 403
+
+
 # --- Réglages étendus + annonce -----------------------------------------------
 
 

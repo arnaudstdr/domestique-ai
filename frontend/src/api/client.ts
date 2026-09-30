@@ -13,6 +13,7 @@ import type {
   AdminAuditEntry,
   AdminFeedback,
   AdminInvitation,
+  AdminInvitationCreated,
   AdminSession,
   AdminSettings,
   AdminStats,
@@ -719,6 +720,11 @@ export const api = {
     feedback: () => http<AdminFeedback[]>(`/api/admin/feedback`),
     audit: (limit = 100) => http<AdminAuditEntry[]>(`/api/admin/audit?limit=${limit}`),
     invitations: () => http<AdminInvitation[]>(`/api/admin/invitations`),
+    createInvitation: (role: "athlete" | "coach") =>
+      http<AdminInvitationCreated>(`/api/admin/invitations`, {
+        method: "POST",
+        body: JSON.stringify({ role }),
+      }),
     revokeInvitation: (id: number) =>
       http<void>(`/api/admin/invitations/${id}`, { method: "DELETE" }),
     stats: () => http<AdminStats>(`/api/admin/stats`),

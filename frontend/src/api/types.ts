@@ -849,6 +849,11 @@ export interface AdminInvitation {
   accepted_public_id: string | null;
 }
 
+export interface AdminInvitationCreated {
+  invitation: AdminInvitation;
+  invite_url: string;
+}
+
 export interface AdminStats {
   users_by_role: Record<string, number>;
   invitations_by_status: Record<string, number>;

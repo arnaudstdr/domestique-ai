@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
-import { Loader2, ShieldCheck } from "lucide-react";
+import { Copy, Loader2, ShieldCheck } from "lucide-react";
 import { api, ApiError } from "../api/client";
 import AdminUserRow from "../components/AdminUserRow";
+import { copyToClipboard } from "../lib/clipboard";
 import type {
   AdminAuditEntry,
   AdminFeedback,
@@ -49,6 +50,7 @@ const AUDIT_LABELS: Record<string, string> = {
   delete_account: "Suppression de compte",
   feedback_status: "Statut d'un retour",
   settings_update: "Réglages plateforme",
+  invitation_create: "Création d'invitation",
   invitation_revoke: "Révocation d'invitation",
   purge_orphan_spaces: "Nettoyage d'espaces orphelins",
 };
@@ -107,6 +109,9 @@ export default function Admin() {
   const [broadcastDraft, setBroadcastDraft] = useState("");
   const [feedbackFilter, setFeedbackFilter] = useState<FeedbackStatus | "all">("all");
   const [savingFeedbackId, setSavingFeedbackId] = useState<number | null>(null);
+  const [inviteRole, setInviteRole] = useState<"athlete" | "coach">("athlete");
+  const [inviteLink, setInviteLink] = useState<string | null>(null);
+  const [generatingInvite, setGeneratingInvite] = useState(false);
 
   useEffect(() => {
     api.admin.users().then(setUsers).catch((e) => push(`Comptes : ${errMessage(e)}`, "error"));
@@ -173,6 +178,26 @@ export default function Admin() {
     } catch (err) {
       push(`Révocation : ${errMessage(err)}`, "error");
     }
+  }
+
+  async function generateInvite() {
+    setGeneratingInvite(true);
+    try {
+      const created = await api.admin.createInvitation(inviteRole);
+      setInviteLink(`${window.location.origin}${created.invite_url}`);
+      setInvitations((prev) => (prev ? [created.invitation, ...prev] : [created.invitation]));
+      push(`Invitation ${inviteRole} générée`, "success");
+    } catch (err) {
+      push(`Invitation : ${errMessage(err)}`, "error");
+    } finally {
+      setGeneratingInvite(false);
+    }
+  }
+
+  async function copyInvite() {
+    if (!inviteLink) return;
+    const ok = await copyToClipboard(inviteLink);
+    push(ok ? "Lien copié." : "Copie impossible — sélectionne le lien.", ok ? "success" : "error");
   }
 
   async function purgeOrphans() {
@@ -378,6 +403,46 @@ export default function Admin() {
 
       <section className="card space-y-3">
         <h3 className="text-sm font-semibold text-fg">Invitations</h3>
+        <p className="text-xs text-muted">
+          Génère un lien à usage unique (athlète ou coach). Le destinataire crée son compte en
+          l'ouvrant, même si l'inscription publique est désactivée.
+        </p>
+        <div className="flex items-center gap-2">
+          <select
+            value={inviteRole}
+            onChange={(e) => setInviteRole(e.target.value as "athlete" | "coach")}
+            className="input"
+            aria-label="Rôle de l'invitation"
+          >
+            <option value="athlete">Athlète</option>
+            <option value="coach">Coach</option>
+          </select>
+          <button
+            type="button"
+            onClick={generateInvite}
+            disabled={generatingInvite}
+            className="btn-primary shrink-0 px-3 py-2 text-xs disabled:opacity-50"
+          >
+            {generatingInvite ? "Génération…" : "Générer un lien"}
+          </button>
+        </div>
+        {inviteLink && (
+          <div className="space-y-2 rounded-xl border border-accent/30 bg-accent/[0.06] p-3">
+            <p className="label-eyebrow">Lien à partager (usage unique)</p>
+            <div className="flex items-center gap-2">
+              <input className="input flex-1 font-mono text-xs" readOnly value={inviteLink} />
+              <button
+                type="button"
+                onClick={copyInvite}
+                aria-label="Copier le lien"
+                className="btn-ghost flex shrink-0 items-center gap-1.5 px-3 py-2 text-xs"
+              >
+                <Copy className="h-4 w-4" strokeWidth={1.75} aria-hidden="true" />
+                Copier
+              </button>
+            </div>
+          </div>
+        )}
         {invitations === null ? (
           <div className="flex items-center gap-2 text-sm text-muted">
             <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />

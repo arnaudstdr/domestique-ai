@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import datetime as dt
+from typing import Literal
+
 from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from domestique_ai import platform_db
 from domestique_ai.api.deps import require_admin
@@ -22,6 +25,16 @@ class AdminInvitation(BaseModel):
     created_by_public_id: str | None = None
     created_by_email: str | None = None
     accepted_public_id: str | None = None
+
+
+class AdminInvitationCreate(BaseModel):
+    role: Literal["athlete", "coach"]
+    expires_in_days: int | None = Field(default=None, ge=1, le=90)
+
+
+class AdminInvitationCreated(BaseModel):
+    invitation: AdminInvitation
+    invite_url: str
 
 
 def _enrich(inv: dict) -> AdminInvitation:
@@ -46,6 +59,32 @@ def _enrich(inv: dict) -> AdminInvitation:
 def list_invitations() -> list[AdminInvitation]:
     """Toutes les invitations de la plateforme, plus récentes d'abord."""
     return [_enrich(inv) for inv in platform_db.list_invitations(created_by=None)]
+
+
+@router.post(
+    "/invitations", response_model=AdminInvitationCreated, status_code=status.HTTP_201_CREATED
+)
+def create_invitation(
+    body: AdminInvitationCreate,
+    admin: dict = Depends(require_admin),  # noqa: B008
+) -> AdminInvitationCreated:
+    """Génère une invitation (athlète ou coach), lien à usage unique.
+
+    L'acceptation (`/accept-invite`) est exemptée du gate d'inscription : le lien
+    fonctionne même si l'inscription publique est désactivée. Le token clair n'est
+    montré qu'ici.
+    """
+    expires_at: str | None = None
+    if body.expires_in_days:
+        expires_at = (dt.datetime.now(dt.UTC) + dt.timedelta(days=body.expires_in_days)).isoformat()
+    inv, token = platform_db.create_invitation(
+        created_by=admin["id"], role=body.role, expires_at=expires_at
+    )
+    audit(admin, "invitation_create", details={"invitation_id": inv["id"], "role": body.role})
+    return AdminInvitationCreated(
+        invitation=_enrich(inv),
+        invite_url=f"/accept-invite?token={token}",
+    )
 
 
 @router.delete("/invitations/{invitation_id}", status_code=status.HTTP_204_NO_CONTENT)

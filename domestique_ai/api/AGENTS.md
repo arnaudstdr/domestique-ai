@@ -117,8 +117,13 @@ SQLite autorise les trois.
   `POST /users/{id}/logout` (révoque toutes les sessions), `DELETE /users/{id}`
   (compte + espace disque `remove_athlete_space` ; bootstrap refusé). Retours :
   `GET /feedback`, `PATCH /feedback/{id}`. Invitations : `GET /invitations`
-  (toutes provenances, enrichies émetteur/acceptant),   `DELETE
-  /invitations/{id}` (révoque une invitation `pending`). Observabilité :
+  (toutes provenances, enrichies émetteur/acceptant), `POST /invitations`
+  (crée une invitation `athlete`|`coach` émise par l'admin, renvoie le lien à
+  usage unique `/accept-invite?token=…` ; action auditée `invitation_create`),
+  `DELETE /invitations/{id}` (révoque une invitation `pending`). Une invitation
+  émise par l'admin produit un **compte isolé** (émetteur non-coach → pas de lien
+  `coach_athlete`), et son acceptation fonctionne même quand l'inscription
+  publique est désactivée (`/accept-invite` est exempté du gate). Observabilité :
   `GET /stats` (comptes par rôle, invitations/feedback par statut, sessions
   actives, Garmin connectés, espaces athlètes + orphelins, taille de
   `platform.db`) et `GET /status` (version, `scheduler.jobs_snapshot()`,
@@ -135,7 +140,8 @@ SQLite autorise les trois.
   (`platform_db.record_admin_audit`, appelé via `admin/_common.audit`) :
   `role_change`, `reset_2fa`, `unlock_account`, `verify_email`,
   `password_reset`, `logout_all`, `delete_account`, `feedback_status`,
-  `settings_update`. FK `SET NULL` + snapshot `public_id` → l'historique survit à
+  `settings_update`, `invitation_create`, `invitation_revoke`. FK `SET NULL` +
+  snapshot `public_id` → l'historique survit à
   la suppression d'un compte (l'audit de suppression est écrit **avant** le
   DELETE). Jamais de secret dans les détails. Consultable via `GET /audit`
   (`limit` optionnel, plus récent d'abord).
