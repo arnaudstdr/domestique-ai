@@ -101,6 +101,38 @@ def test_admin_change_role_unknown_is_404(client: TestClient):
     assert r.status_code == 404
 
 
+def test_admin_can_reset_2fa(client: TestClient):
+    admin_token, _ = _session("admin")
+    target = pdb.create_user(role="coach", email="target@example.com")
+    pdb.set_totp_secret(target["id"], "SECRET123")
+    pdb.enable_totp(target["id"])
+    assert pdb.get_user_credentials(target["id"])["totp_enabled"] is True
+
+    r = client.post(
+        f"/api/admin/users/{target['public_id']}/reset-2fa",
+        headers=_bearer(admin_token),
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["totp_enabled"] is False
+    assert pdb.get_user_credentials(target["id"])["totp_enabled"] is False
+
+
+def test_reset_2fa_forbidden_for_non_admin(client: TestClient):
+    athlete_token, _ = _session("athlete")
+    target = pdb.create_user(role="coach")
+    r = client.post(
+        f"/api/admin/users/{target['public_id']}/reset-2fa",
+        headers=_bearer(athlete_token),
+    )
+    assert r.status_code == 403
+
+
+def test_reset_2fa_unknown_is_404(client: TestClient):
+    admin_token, _ = _session("admin")
+    r = client.post("/api/admin/users/nope/reset-2fa", headers=_bearer(admin_token))
+    assert r.status_code == 404
+
+
 def test_admin_lists_feedback(client: TestClient):
     admin_token, _ = _session("admin")
     pdb.insert_feedback(category="idea", message="hello", role="athlete")

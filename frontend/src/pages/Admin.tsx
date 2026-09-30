@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Loader2, ShieldCheck } from "lucide-react";
+import { Loader2, RotateCcw, ShieldCheck } from "lucide-react";
 import { api, ApiError } from "../api/client";
 import type { AdminFeedback, AdminSettings, AdminUser } from "../api/types";
 import { useToast } from "../hooks/useToast";
@@ -40,6 +40,29 @@ export default function Admin() {
       push(`Rôle de ${updated.public_id.slice(0, 8)} : ${updated.role}`, "success");
     } catch (err) {
       push(`Changement de rôle : ${errMessage(err)}`, "error");
+    } finally {
+      setSavingId(null);
+    }
+  }
+
+  async function reset2fa(user: AdminUser) {
+    const label = user.email || user.public_id;
+    if (
+      !window.confirm(
+        `Réinitialiser la 2FA de ${label} ?\n\nLe compte devra ré-enrôler un code à la prochaine connexion.`,
+      )
+    ) {
+      return;
+    }
+    setSavingId(user.public_id);
+    try {
+      const updated = await api.admin.reset2fa(user.public_id);
+      setUsers((prev) =>
+        prev ? prev.map((u) => (u.public_id === updated.public_id ? updated : u)) : prev,
+      );
+      push(`2FA réinitialisée pour ${updated.public_id.slice(0, 8)}`, "success");
+    } catch (err) {
+      push(`Réinitialisation 2FA : ${errMessage(err)}`, "error");
     } finally {
       setSavingId(null);
     }
@@ -115,22 +138,39 @@ export default function Admin() {
                     {u.totp_enabled ? " · 2FA" : " · sans-2FA"}
                   </div>
                 </div>
-                {u.is_bootstrap ? (
-                  <span className="shrink-0 text-xs text-muted">{u.role}</span>
-                ) : (
-                  <select
-                    value={u.role}
-                    disabled={savingId === u.public_id}
-                    onChange={(e) => changeRole(u, e.target.value)}
-                    className="input w-auto shrink-0"
-                  >
-                    {ROLES.map((r) => (
-                      <option key={r} value={r}>
-                        {r}
-                      </option>
-                    ))}
-                  </select>
-                )}
+                <div className="flex shrink-0 items-center gap-2">
+                  {u.totp_enabled && (
+                    <button
+                      type="button"
+                      onClick={() => reset2fa(u)}
+                      disabled={savingId === u.public_id}
+                      aria-label="Réinitialiser la 2FA"
+                      title="Réinitialiser la 2FA"
+                      className="grid h-9 w-9 place-items-center rounded-xl text-fg-soft
+                                 border border-border/[0.06] bg-overlay/[0.03]
+                                 hover:text-accent hover:border-accent/40 transition-colors
+                                 disabled:opacity-50"
+                    >
+                      <RotateCcw className="h-4 w-4" strokeWidth={1.75} aria-hidden="true" />
+                    </button>
+                  )}
+                  {u.is_bootstrap ? (
+                    <span className="text-xs text-muted">{u.role}</span>
+                  ) : (
+                    <select
+                      value={u.role}
+                      disabled={savingId === u.public_id}
+                      onChange={(e) => changeRole(u, e.target.value)}
+                      className="input w-auto"
+                    >
+                      {ROLES.map((r) => (
+                        <option key={r} value={r}>
+                          {r}
+                        </option>
+                      ))}
+                    </select>
+                  )}
+                </div>
               </li>
             ))}
           </ul>

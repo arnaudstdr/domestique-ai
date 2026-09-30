@@ -156,10 +156,11 @@ ce sheet (plus de carte de recherche en haut de page).
   `api.auth.deleteAccount` → `clearApiToken` → `/login`.
 - **Admin** — page `/admin` (`pages/Admin.tsx`), lien d'en-tête `ShieldCheck`
   affiché uniquement si `me.role === "admin"` (`AuthedShell`). Sections :
-  réglages plateforme (toggle `signup_enabled`), comptes (liste +
-  changement de rôle via `api.admin.*`, sélecteur désactivé sur le propriétaire
-  bootstrap), retours testeurs cross-tenant. L'admin n'a **aucun** autre écran
-  (pas de roster/impersonation). `withAthlete` exclut `/api/admin/*`.
+  réglages plateforme (toggle `signup_enabled`), comptes (liste, changement de
+  rôle via `api.admin.*`, bouton **réinitialiser la 2FA** sur les comptes
+  protégés, sélecteur désactivé sur le propriétaire bootstrap), retours testeurs
+  cross-tenant. L'admin n'a **aucun** autre écran (pas de roster/impersonation).
+  `withAthlete` exclut `/api/admin/*`.
 
 ## Avatar — redimensionnement client
 

@@ -86,6 +86,23 @@ def update_user_role(public_id: str, body: RoleUpdate) -> AdminUser:
     return _admin_user(updated)
 
 
+@router.post("/users/{public_id}/reset-2fa", response_model=AdminUser)
+def reset_user_2fa(public_id: str) -> AdminUser:
+    """Désactive la 2FA d'un compte (secret + codes de secours purgés).
+
+    Le compte devra ré-enrôler un TOTP à la prochaine connexion (garde
+    middleware). Utile quand un utilisateur a perdu son authenticator.
+    """
+    target = platform_db.get_user_by_public_id(public_id)
+    if target is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Compte introuvable.")
+    platform_db.disable_totp(target["id"])
+    updated = platform_db.get_user_by_public_id(public_id)
+    if updated is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Compte introuvable.")
+    return _admin_user(updated)
+
+
 @router.get("/feedback")
 def list_feedback(limit: int | None = None) -> list[dict[str, Any]]:
     """Liste les retours testeurs (toutes tenants confondus), du plus récent au plus ancien."""

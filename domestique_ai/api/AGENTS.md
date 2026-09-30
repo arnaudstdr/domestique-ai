@@ -103,7 +103,9 @@ SQLite autorise les trois.
   idempotente.
 - **Panneau** — routeur `api/routers/admin.py`, préfixe `/api/admin`, protégé par
   `Depends(require_admin)` (`api/deps.py`) : `GET /users`, `POST
-  /users/{public_id}/role`, `GET /feedback`, `GET|PUT /settings`. L'admin est
+  /users/{public_id}/role`, `POST /users/{public_id}/reset-2fa` (désactive la 2FA
+  d'un compte : secret + codes de secours purgés, ré-enrôlement forcé à la
+  prochaine connexion), `GET /feedback`, `GET|PUT /settings`. L'admin est
   **isolé** : il n'hérite pas des droits coach (`require_coach`/`get_athlete_context`
   inchangés), et son rôle (comme celui du bootstrap) ne peut pas être modifié via
   l'endpoint de rôle (403 sur le compte propriétaire).

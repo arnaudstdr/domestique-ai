@@ -688,6 +688,10 @@ export const api = {
         method: "POST",
         body: JSON.stringify({ role }),
       }),
+    reset2fa: (publicId: string) =>
+      http<AdminUser>(`/api/admin/users/${publicId}/reset-2fa`, {
+        method: "POST",
+      }),
     feedback: () => http<AdminFeedback[]>(`/api/admin/feedback`),
     settings: () => http<AdminSettings>(`/api/admin/settings`),
     updateSettings: (body: AdminSettings) =>
