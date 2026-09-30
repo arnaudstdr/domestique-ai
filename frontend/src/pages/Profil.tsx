@@ -24,7 +24,6 @@ import type {
   Profile,
   WeekdayName,
 } from "../api/types";
-import CalendarSubscribe from "../components/CalendarSubscribe";
 import MemoryPanel from "../components/MemoryPanel";
 import { useToast } from "../hooks/useToast";
 import { useMe, useMeRefresh } from "../hooks/useMe";
@@ -84,7 +83,6 @@ export default function Profil() {
       <ProfileSection />
       <AvailabilitySection />
       <GarminSection />
-      <CalendarSubscribe />
       <MemoryPanel />
       <SecuritySection />
       <AccountSection />

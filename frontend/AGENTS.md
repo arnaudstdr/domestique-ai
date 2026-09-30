@@ -113,8 +113,8 @@ ce sheet (plus de carte de recherche en haut de page).
 - **Mémoire du coach** — `components/MemoryPanel.tsx` (section « Mémoire du
   coach » dans `/profil`, lien depuis la page Coach).
 - **Abonnement calendrier** — `components/CalendarSubscribe.tsx` (page Plan sous
-  les boutons ZIP/.ics, et page Réglages) : URL copiable, boutons Apple
-  (`webcal://`) / Google Calendar et QR code. Masqué en consultation coach.
+  les boutons ZIP/.ics, repliable — fermée par défaut) : URL copiable, boutons
+  Apple (`webcal://`) / Google Calendar et QR code. Masqué en consultation coach.
 - **Profil / avatar** — section « Photo de profil » en tête de `/profil`
   (`Profil.tsx`, `AvatarSection`) ; l'en-tête (`App.tsx`) remplace l'icône
   `UserRound` par la miniature ; `Roster.tsx` affiche l'avatar (ou les initiales)

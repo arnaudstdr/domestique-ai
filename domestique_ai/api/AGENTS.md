@@ -228,9 +228,10 @@ flux.
   [&athlete=<public_id>]` reste supporté pour les abonnements existants. Le flux
   n'exige plus la clé globale : le mode token par athlète fonctionne sans elle.
 - **UI** : la carte `frontend/src/components/CalendarSubscribe.tsx` (page Plan,
-  sous les boutons ZIP/.ics, et page Réglages) affiche l'URL copiable, les
-  boutons Apple (`webcal://`) / Google Calendar et un QR code. Le flux est
-  régénérable depuis l'UI ; masqué en consultation coach (rotation self-only).
+  sous les boutons ZIP/.ics, repliable — fermée par défaut) affiche l'URL
+  copiable, les boutons Apple (`webcal://`) / Google Calendar et un QR code. Le
+  flux est régénérable depuis l'UI ; masqué en consultation coach (rotation
+  self-only).
 - **URL d'abonnement** : `https://<hôte>/api/plan/feed.ics?key=<token>` — à
   ajouter comme « Calendrier d'abonnement » dans Calendrier Apple/Google. Le
   client poll la même URL : la fenêtre évolue après chaque revue hebdo sans
