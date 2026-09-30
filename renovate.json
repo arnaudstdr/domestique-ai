@@ -6,7 +6,6 @@
     ":semanticCommits"
   ],
   "timezone": "Europe/Paris",
-  "schedule": ["before 9am on monday"],
   "prConcurrentLimit": 5,
   "prHourlyLimit": 0,
   "labels": ["dependencies"],
@@ -20,7 +19,7 @@
   },
   "packageRules": [
     {
-      "description": "Regroupe toutes les MAJ non-majeures en un seul lot hebdomadaire",
+      "description": "Regroupe toutes les MAJ non-majeures en un seul lot",
       "matchUpdateTypes": ["minor", "patch", "pin", "digest"],
       "groupName": "dépendances non-majeures"
     },
