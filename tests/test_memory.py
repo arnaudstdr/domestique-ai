@@ -180,6 +180,17 @@ def test_build_memory_block_empty_when_no_memory(tmp_path, monkeypatch):
     assert memory.build_memory_block("q") == ""
 
 
+def test_build_memory_block_includes_level(tmp_path, monkeypatch):
+    """Le niveau de l'athlète est injecté à chaque tour (coaching renforcé)."""
+    import types
+
+    _use_tmp_db(tmp_path, monkeypatch)
+    ctx = types.SimpleNamespace(level="racer", db_path=None)
+    block = memory.build_memory_block("q", ctx=ctx)
+    assert "niveau compétiteur (en activité)" in block
+    assert "MÉMOIRE PERSISTANTE" in block
+
+
 # --------------------------------------------------------------------------- #
 # Purge / finalisation
 # --------------------------------------------------------------------------- #

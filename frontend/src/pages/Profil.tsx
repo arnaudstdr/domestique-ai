@@ -46,6 +46,7 @@ const LEVELS: { value: Profile["level"]; label: string }[] = [
   { value: "intermediate", label: "Intermédiaire" },
   { value: "advanced", label: "Avancé" },
   { value: "ex_competitor", label: "Ancien compétiteur (reprise)" },
+  { value: "racer", label: "Compétiteur (en activité)" },
 ];
 
 const LEVEL_HINTS: Record<Profile["level"], string> = {
@@ -54,6 +55,8 @@ const LEVEL_HINTS: Record<Profile["level"], string> = {
   advanced: "Entraîné régulier : l'intensité peut être soutenue rapidement.",
   ex_competitor:
     "Historique de compétiteur qui reprend : la caisse revient vite, mais le coach reste prudent sur les charges.",
+  racer:
+    "Compétiteur en activité : volume et intensité soutenus, plusieurs séances de qualité par semaine (le coach reste borné par les garde-fous).",
 };
 
 const EMPTY_PROFILE: Profile = {

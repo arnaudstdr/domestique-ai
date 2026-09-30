@@ -8,11 +8,15 @@ from domestique_ai.processing.athlete_state import (
     CEILING_BASE,
     CEILING_FULL,
     CEILING_TEMPO,
+    extra_intervals_for_level,
     format_state_block,
     intensity_ceiling,
     is_deconditioned,
+    level_label,
+    polarization_cap_for_level,
     ramp_weeks_for_level,
     summarize_load_state,
+    tss_cap_multiplier_for_level,
 )
 
 
@@ -100,6 +104,36 @@ def test_advanced_ramp_is_shorter_than_beginner() -> None:
     assert adv[1] == CEILING_FULL
     assert beg[1] != CEILING_FULL
     assert beg[0] == CEILING_BASE
+
+
+def test_racer_ramp_is_one_week_like_advanced() -> None:
+    assert ramp_weeks_for_level("racer") == 1
+    assert intensity_ceiling(0, ctl_current=9.0, level="racer") == CEILING_BASE
+    assert intensity_ceiling(1, ctl_current=9.0, level="racer") == CEILING_FULL
+
+
+# --- leviers « coaching renforcé » ------------------------------------------
+
+
+def test_level_caps_default_to_historic_guardrails() -> None:
+    assert polarization_cap_for_level(None) == 0.25
+    assert polarization_cap_for_level("intermediate") == 0.25
+    assert tss_cap_multiplier_for_level(None) == 1.0
+    assert tss_cap_multiplier_for_level("advanced") == 1.0
+    assert extra_intervals_for_level(None) == 0
+    assert extra_intervals_for_level("ex_competitor") == 0
+
+
+def test_racer_gets_reinforced_levers() -> None:
+    assert polarization_cap_for_level("racer") == 0.40
+    assert tss_cap_multiplier_for_level("racer") == 1.25
+    assert extra_intervals_for_level("racer") == 1
+
+
+def test_level_label_resolves_racer_and_falls_back() -> None:
+    assert level_label("racer") == "compétiteur (en activité)"
+    assert level_label(None) == "—"
+    assert level_label("unknown") == "unknown"
 
 
 # --- format_state_block -----------------------------------------------------

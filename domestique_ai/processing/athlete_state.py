@@ -39,7 +39,19 @@ _LEVEL_RAMP_WEEKS: dict[str, int] = {
     "intermediate": 2,
     "ex_competitor": 2,
     "advanced": 1,
+    "racer": 1,
 }
+
+# Leviers « coaching renforcé » par niveau. Par défaut on applique les garde-fous
+# historiques (polarisation 80/20 → 0.25, plafond de progression CTL +5/sem →
+# ×1.0). Un compétiteur **en activité** tolère plus de densité d'intensité et de
+# volume : plafond Z4-Z5 relevé, plafond TSS majoré et une séance d'intervalles
+# supplémentaire visée sur les semaines à intervalles.
+_DEFAULT_POLARIZATION_CAP = 0.25
+_LEVEL_POLARIZATION_CAP: dict[str, float] = {"racer": 0.40}
+_DEFAULT_TSS_CAP_MULT = 1.0
+_LEVEL_TSS_CAP_MULT: dict[str, float] = {"racer": 1.25}
+_LEVEL_EXTRA_INTERVALS: dict[str, int] = {"racer": 1}
 
 # Seuil de TSB chronique (moyenne 7 j) sous lequel on est en fatigue installée —
 # aligné sur ``overtraining.TSB_CHRONIC_THRESHOLD``.
@@ -118,6 +130,28 @@ def ramp_weeks_for_level(level: str | None) -> int:
     return _LEVEL_RAMP_WEEKS.get(level or "intermediate", 2)
 
 
+def polarization_cap_for_level(level: str | None) -> float:
+    """Part Z4-Z5 maximale du temps actif hebdo selon le niveau (défaut 0.25)."""
+    return _LEVEL_POLARIZATION_CAP.get(level or "", _DEFAULT_POLARIZATION_CAP)
+
+
+def tss_cap_multiplier_for_level(level: str | None) -> float:
+    """Multiplicateur du plafond TSS hebdo selon le niveau (défaut 1.0)."""
+    return _LEVEL_TSS_CAP_MULT.get(level or "", _DEFAULT_TSS_CAP_MULT)
+
+
+def extra_intervals_for_level(level: str | None) -> int:
+    """Séances d'intervalles additionnelles visées par semaine (racer : +1)."""
+    return _LEVEL_EXTRA_INTERVALS.get(level or "", 0)
+
+
+def level_label(level: str | None) -> str:
+    """Libellé FR du niveau pour l'UI/le prompt (fallback : valeur brute ou « — »)."""
+    if not level:
+        return "—"
+    return _LEVEL_LABELS.get(level, level)
+
+
 def intensity_ceiling(
     week_idx: int,
     *,
@@ -160,6 +194,7 @@ _LEVEL_LABELS = {
     "intermediate": "intermédiaire",
     "advanced": "avancé",
     "ex_competitor": "ancien compétiteur qui reprend",
+    "racer": "compétiteur (en activité)",
 }
 
 
@@ -178,11 +213,11 @@ def format_state_block(state: dict[str, Any]) -> str:
     lines: list[str] = ["État réel de l'athlète (données calculées, fiables) :"]
 
     level = profile.get("level")
-    level_label = _LEVEL_LABELS.get(level or "", level or "—")
+    level_label_text = level_label(level)
     weight = profile.get("weight_kg")
     ftp = profile.get("ftp")
     wkg = (float(ftp) / float(weight)) if (ftp and weight) else None
-    profile_parts = [f"niveau {level_label}"]
+    profile_parts = [f"niveau {level_label_text}"]
     if ftp:
         profile_parts.append(f"FTP {_fmt(ftp, nd=0)} W")
     if weight:
@@ -359,9 +394,13 @@ __all__ = [
     "CEILING_FULL",
     "CEILING_TEMPO",
     "build_coach_state",
+    "extra_intervals_for_level",
     "format_state_block",
     "intensity_ceiling",
     "is_deconditioned",
+    "level_label",
+    "polarization_cap_for_level",
     "ramp_weeks_for_level",
     "summarize_load_state",
+    "tss_cap_multiplier_for_level",
 ]

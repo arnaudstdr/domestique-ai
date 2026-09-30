@@ -419,6 +419,17 @@ def test_prompt_includes_state_block_facts():
     assert "Raisonner uniquement sur ces faits" in text
 
 
+def test_prompt_includes_racer_guidance_when_not_in_reprise():
+    text = _prompt(level="racer")
+    assert "compétiteur en activité" in text
+    assert "deux séances Z4-Z5" in text
+
+
+def test_prompt_omits_racer_guidance_in_reprise_and_for_other_levels():
+    assert "compétiteur en activité" not in _prompt(level="racer", ceiling="base")
+    assert "compétiteur en activité" not in _prompt(level="intermediate")
+
+
 def test_context_ceiling_for_reflects_reprise():
     ctx = pg.GenerationContext(
         sessions_per_week=4,

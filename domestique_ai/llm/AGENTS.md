@@ -90,10 +90,18 @@ désormais TSB, readiness médiane, dérive HRV et compliance de la semaine éco
 `coach_state`** (l'agrégat `athlete_state.build_coach_state`) — injectés dans
 `_build_user_prompt` (bloc « État réel ») pour que le LLM **raisonne sur des
 faits**. `ceiling_for(week_idx)` décide du plafond d'intensité de chaque semaine
-(reprise → base/tempo → normal). Le tool LLM `review_week` expose le rapport de
+(reprise → base/tempo → normal). Un `racer` (compétiteur en activité) reçoit en
+outre une consigne de prompt (volume/intensité soutenus, jusqu'à 2 séances Z4-Z5)
+hors reprise (`_level_guidance`). Le tool LLM `review_week` expose le rapport de
 semaine en lecture (le coach explique un ajustement sans inventer de chiffres).
 `compose_upcoming_week` expose la composition d'une seule semaine (réutilisée
 par la revue hebdo).
+
+**Niveau connu du coach conversationnel** : le niveau de l'athlète
+(`beginner|intermediate|advanced|ex_competitor|racer`) est injecté dans le bloc
+de contexte initial (`daily_brief.build_coach_context`, 1ᵉʳ tour de session) **et**
+dans le bloc mémoire (`memory.build_memory_block`, à chaque tour) via
+`athlete_state.level_label`, pour que le coach adapte ton et prudence.
 
 **Fallback** : si la sortie LLM est invalide après 2 tentatives (Ollama injoignable, JSON mal formé, schéma rejeté, workouts vides), la semaine bascule sur le builder déterministe — les autres semaines peuvent rester côté LLM. Le frontend reçoit le `source: "llm" | "fallback"` par semaine.
 

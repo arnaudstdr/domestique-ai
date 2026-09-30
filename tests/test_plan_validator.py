@@ -504,3 +504,68 @@ def test_validator_downgrades_llm_intervals_in_base_week():
     assert "intervals" not in kinds
     assert "tempo" not in kinds  # semaine 0 = base → tempo aussi raboté
     assert any("plafond d'intensité" in a for a in adjustments)
+
+
+# ---------- Coaching renforcé : niveau « compétiteur en activité » -----------
+
+
+def test_racer_tolerates_higher_polarization_share():
+    """Une part Z4-Z5 entre 25 % et 40 % est conservée pour un compétiteur."""
+    plan = [
+        _mk_workout("2026-05-25", kind="intervals", duration_min=60, high_intensity_sec=1800),
+        _mk_workout("2026-05-27", kind="intervals", duration_min=60, high_intensity_sec=1800),
+        _mk_workout("2026-05-29", kind="endurance", duration_min=90),
+    ]
+    out_default, _ = validate_and_correct(plan, ctl_current=80.0, target_event_type="course")
+    out_racer, _ = validate_and_correct(
+        plan, ctl_current=80.0, target_event_type="course", level="racer"
+    )
+    assert sum(1 for w in out_default if w.kind == "intervals") == 1
+    assert sum(1 for w in out_racer if w.kind == "intervals") == 2
+
+
+def test_racer_tss_cap_multiplier_allows_more_volume():
+    """Le plafond TSS majoré (×1.25) évite le rabotage d'un volume modéré."""
+    plan = [
+        _mk_workout("2026-05-25", kind="endurance", duration_min=120),
+        _mk_workout("2026-05-27", kind="endurance", duration_min=60),
+    ]
+    out_default, adj_default = validate_and_correct(plan, ctl_current=0.0)
+    assert any("plafond TSS" in a for a in adj_default)
+    out_racer, adj_racer = validate_and_correct(plan, ctl_current=0.0, level="racer")
+    assert all("plafond TSS" not in a for a in adj_racer)
+    assert sum(w.estimated_tss for w in out_racer) == pytest.approx(165.0, abs=1.0)
+
+
+def test_racer_gets_extra_intervals_session():
+    """Le compétiteur reçoit une 2ᵉ séance d'intervalles sur une semaine de charge."""
+    plan = [
+        _mk_workout("2026-05-25", kind="tempo", duration_min=60),
+        _mk_workout("2026-05-27", kind="endurance", duration_min=90),
+        _mk_workout("2026-05-29", kind="endurance", duration_min=90),
+        _mk_workout("2026-05-31", kind="endurance", duration_min=90),
+    ]
+    out_default, _ = validate_and_correct(
+        plan, ctl_current=60.0, target_event_type="course", total_weeks=4
+    )
+    out_racer, adj_racer = validate_and_correct(
+        plan, ctl_current=60.0, target_event_type="course", total_weeks=4, level="racer"
+    )
+    assert sum(1 for w in out_default if w.kind == "intervals") == 1
+    assert sum(1 for w in out_racer if w.kind == "intervals") == 2
+    assert any("renforcé" in a for a in adj_racer)
+
+
+def test_non_racer_level_unaffected_by_reinforcement():
+    """Un niveau ordinaire ne reçoit ni 2ᵉ intervalles ni plafond majoré."""
+    plan = [
+        _mk_workout("2026-05-25", kind="tempo", duration_min=60),
+        _mk_workout("2026-05-27", kind="endurance", duration_min=90),
+        _mk_workout("2026-05-29", kind="endurance", duration_min=90),
+        _mk_workout("2026-05-31", kind="endurance", duration_min=90),
+    ]
+    out, adj = validate_and_correct(
+        plan, ctl_current=60.0, target_event_type="course", total_weeks=4, level="advanced"
+    )
+    assert sum(1 for w in out if w.kind == "intervals") == 1
+    assert not any("renforcé" in a for a in adj)

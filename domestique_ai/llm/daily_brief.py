@@ -475,10 +475,13 @@ def build_coach_context(today: _dt.date | None = None, *, ctx: AthleteContext | 
     ctx = ctx or context_from_env()
     target = today or _dt.date.today()
     brief = build_daily_brief(today=target, ctx=ctx)
+    from domestique_ai.processing.athlete_state import level_label
+
     lines = [
         "Contexte courant injecté par l'app (pas besoin d'appeler les tools "
         "pour ces chiffres — ils sont issus du même calcul que tes tools) :",
         f"- Date : {brief['date']}",
+        f"- Niveau de l'athlète : {level_label(getattr(ctx, 'level', None))}",
     ]
     if brief.get("tsb") is not None:
         lines.append(f"- TSB : {brief['tsb']:+.1f} ({brief.get('tsb_zone') or '—'})")
@@ -496,6 +499,7 @@ def build_coach_context(today: _dt.date | None = None, *, ctx: AthleteContext | 
     else:
         lines.append("- Alerte saillante : aucune")
     lines.append(
+        "Adapte ta prudence et ton intensité de conseil au niveau de l'athlète. "
         "Pour creuser (CTL, ATL, zones, dernière activité, plan, etc.), "
         "appelle les tools comme d'habitude."
     )

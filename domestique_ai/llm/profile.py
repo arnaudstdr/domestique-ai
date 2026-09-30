@@ -23,8 +23,10 @@ VALID_SEX = {"M", "F"}
 
 # Niveau/expérience de l'athlète — lu par le coach pour modérer la prudence de
 # la reprise (un ancien compétiteur peut reprendre plus vite qu'un débutant,
-# tout en restant borné par les garde-fous de sécurité du plan).
-VALID_LEVELS = {"beginner", "intermediate", "advanced", "ex_competitor"}
+# tout en restant borné par les garde-fous de sécurité du plan) et calibrer le
+# « coaching renforcé » (un compétiteur en activité tolère plus d'intensité et
+# de volume).
+VALID_LEVELS = {"beginner", "intermediate", "advanced", "ex_competitor", "racer"}
 
 
 class ProfileError(ValueError):

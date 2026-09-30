@@ -144,6 +144,24 @@ def _build_system_prompt() -> str:
     )
 
 
+def _level_guidance(level: str | None, ceiling: str) -> str:
+    """Consigne de prompt liée au niveau de l'athlète (coaching renforcé).
+
+    Un compétiteur en activité encaisse plus d'intensité et de volume, dans les
+    bornes de l'objectif et des garde-fous (polarisation, plafonds). En reprise
+    (``ceiling`` != ``full``), la phase de fondation prime et on ne renforce pas.
+    """
+    from domestique_ai.processing.athlete_state import CEILING_FULL
+
+    if level == "racer" and ceiling == CEILING_FULL:
+        return (
+            "Athlète compétiteur en activité : volume et intensité soutenus sont "
+            "adaptés (jusqu'à deux séances Z4-Z5 par semaine), en respectant la "
+            "polarisation et les plafonds. La récupération reste non négociable."
+        )
+    return ""
+
+
 def _build_user_prompt(
     week_index: int,
     total_weeks: int,
@@ -159,6 +177,7 @@ def _build_user_prompt(
     emphasis: str = "",
     state_text: str = "",
     ceiling: str = "full",
+    level: str | None = None,
 ) -> str:
     """Prompt utilisateur : contexte chiffré + contraintes hebdo + intentions."""
     from domestique_ai.processing.athlete_state import CEILING_BASE, CEILING_TEMPO
@@ -193,6 +212,10 @@ def _build_user_prompt(
     else:
         phase = "CHARGE (progression progressive du volume)"
     lines.append(f"Phase : {phase}.")
+
+    guidance = _level_guidance(level, ceiling)
+    if guidance:
+        lines.append(guidance)
 
     if state_text:
         lines.append("")
@@ -272,6 +295,7 @@ async def _generate_week_with_llm(
     emphasis: str = "",
     state_text: str = "",
     ceiling: str = "full",
+    level: str | None = None,
 ) -> list[Workout] | None:
     """Tente une génération LLM avec retry. Retourne ``None`` si échec définitif."""
     system = _build_system_prompt()
@@ -290,6 +314,7 @@ async def _generate_week_with_llm(
         emphasis,
         state_text,
         ceiling,
+        level,
     )
     messages = [
         {"role": "system", "content": system},
@@ -509,6 +534,7 @@ async def _compose_one_week(
                 emphasis=week_emphasis,
                 state_text=state_text,
                 ceiling=ceiling,
+                level=ctx.level,
             )
             if use_llm
             else None

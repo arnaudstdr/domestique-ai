@@ -33,7 +33,12 @@ from typing import Any
 
 from domestique_ai.llm.availability import Availability, DayAvailability
 from domestique_ai.processing.analyzer import HR_ZONE_KEYS
-from domestique_ai.processing.athlete_state import CEILING_BASE, CEILING_TEMPO, intensity_ceiling
+from domestique_ai.processing.athlete_state import (
+    CEILING_BASE,
+    CEILING_TEMPO,
+    intensity_ceiling,
+    tss_cap_multiplier_for_level,
+)
 
 # Indices de jour (0 = lundi … 6 = dimanche). On précise un jour par séance pour
 # que le plan tombe sur des journées cohérentes ; l'utilisateur reste libre de
@@ -273,7 +278,12 @@ def _week_factor(week_idx: int, total_weeks: int, taper_weeks: int) -> tuple[flo
     return 0.85 + 0.125 * cycle_pos, False, False
 
 
-def _ctl_progression_cap(ctl_current: float, weeks_into_plan: int, min_ctl: float = 20.0) -> float:
+def _ctl_progression_cap(
+    ctl_current: float,
+    weeks_into_plan: int,
+    min_ctl: float = 20.0,
+    multiplier: float = 1.0,
+) -> float:
     """Plafond de TSS hebdo cohérent avec une progression CTL bornée à +5/sem.
 
     CTL est une EMA 42 j. À TSB stable, augmenter CTL de Δ par semaine demande
@@ -283,9 +293,12 @@ def _ctl_progression_cap(ctl_current: float, weeks_into_plan: int, min_ctl: floa
     ``min_ctl`` : plancher de forme pour les athlètes à CTL très bas (reprise).
     Relevable via ``DOMESTIQUE_AI_PLAN_MIN_CTL`` pour des semaines plus
     consistantes.
+
+    ``multiplier`` : majoration du plafond pour les niveaux à coaching renforcé
+    (voir ``athlete_state.tss_cap_multiplier_for_level``) — ≥ 1.0.
     """
     target_ctl = max(float(min_ctl), ctl_current) + 5.0 * weeks_into_plan
-    return target_ctl * 7.0
+    return target_ctl * 7.0 * multiplier
 
 
 # ---------------------------------------------------------------------------
@@ -479,7 +492,12 @@ def build_training_plan(
     for week_idx in range(total_weeks):
         factor, is_recovery, is_taper = _week_factor(week_idx, total_weeks, taper_weeks)
         weeks_into_plan = week_idx if not is_taper else max(0, total_weeks - taper_weeks - 1)
-        weekly_tss_cap = _ctl_progression_cap(ctl_current, weeks_into_plan, min_ctl)
+        weekly_tss_cap = _ctl_progression_cap(
+            ctl_current,
+            weeks_into_plan,
+            min_ctl,
+            tss_cap_multiplier_for_level(level),
+        )
         # Semaine d'intervalles ? (profil : chaque semaine ou une semaine sur deux).
         intervals_week = (week_idx % int(flavor["intervals_freq"])) == 0
         # Plafond d'intensité : en reprise, on reconstruit la base avant de

@@ -53,7 +53,7 @@ Alternative déterministe au générateur LLM (`llm/AGENTS.md`). Exposé via `PO
 
 - **Disponibilité** : suppression des séances hors jours dispo, plafonnement des durées au `max_duration_min` du jour.
 - **Repos hebdomadaire** : au plus 6 séances/sem (priorité de coupe : recovery > tempo > intervals > endurance).
-- **Polarisation 80/20** : si la part Z4-Z5 dépasse 25 % du temps actif hebdo, conversion des `intervals` les plus courts en `tempo` jusqu'à respect.
+- **Polarisation 80/20** : si la part Z4-Z5 dépasse 25 % du temps actif hebdo (plafond relevé à 40 % pour un `racer`), conversion des `intervals` les plus courts en `tempo` jusqu'à respect.
 - **Plafond TSS hebdo** : `_ctl_progression_cap(CTL, week_idx)` = `max(20, CTL) + 5 × week_idx) × 7`. Au-dessus, raccourcissement de l'endurance la plus longue (plancher 45 min — comportement best-effort si l'input est extrême).
 
 Chaque correction émet une chaîne descriptive dans `adjustments`, ce qui permet à l'UI d'afficher un badge « ajusté » sur la semaine impactée.
@@ -63,9 +63,10 @@ Il y a en réalité **6 garde-fous** : aux 4 ci-dessus s'ajoutent la **cadence d
 **Reprise graduée (`processing/athlete_state.py`)** — la source de faits du coach. L'intensité n'est plus jamais imposée quand l'athlète est déconditionné :
 
 - `is_deconditioned(ctl, ctl_trend, chronic_tsb, threshold)` : règle composite — `CTL < threshold` (réutilise `DOMESTIQUE_AI_PLAN_MIN_CTL`), **ou** CTL en baisse (7j vs 14j, sortie de coupure), **ou** TSB chronique 7j ≤ −20 (aligné sur `overtraining`).
-- `intensity_ceiling(week_idx, ...)` : plafond d'intensité par semaine de reprise — semaine 0 = `base` (Z1-Z2 seulement), semaines de rampe suivantes = `tempo`, puis `full` (cadence normale) une fois la rampe franchie. Longueur de rampe selon le **niveau** de l'athlète (`beginner` 3, `intermediate`/`ex_competitor` 2, `advanced` 1).
+- `intensity_ceiling(week_idx, ...)` : plafond d'intensité par semaine de reprise — semaine 0 = `base` (Z1-Z2 seulement), semaines de rampe suivantes = `tempo`, puis `full` (cadence normale) une fois la rampe franchie. Longueur de rampe selon le **niveau** de l'athlète (`beginner` 3, `intermediate`/`ex_competitor` 2, `advanced`/`racer` 1).
 - Le **builder** rabote les slots selon le plafond (`plan_builder`), le **validator** ne force plus d'intensité quand `ceiling != full` (`_enforce_intensity_cadence`), et le **prompt LLM** reçoit le bloc `format_state_block` (CTL/ATL/TSB + trajectoire + niveau + compliance + récup) + la consigne de phase pour raisonner sur des faits.
-- Le niveau vient du profil athlète (`Profile.level` : `beginner|intermediate|advanced|ex_competitor`, getter `config.get_level`, champ `AthleteContext.level`) — un `ex_competitor` qui reprend garde une rampe mais revient plus vite à l'intensité qu'un débutant, sans jamais sauter les garde-fous.
+- Le niveau vient du profil athlète (`Profile.level` : `beginner|intermediate|advanced|ex_competitor|racer`, getter `config.get_level`, champ `AthleteContext.level`) — un `ex_competitor` qui reprend garde une rampe mais revient plus vite à l'intensité qu'un débutant, sans jamais sauter les garde-fous.
+- **Coaching renforcé (`racer` = compétiteur en activité)** — leviers dérivés du niveau via `athlete_state` (`polarization_cap_for_level`, `tss_cap_multiplier_for_level`, `extra_intervals_for_level`) : plafond de polarisation relevé (25 % → 40 %), plafond TSS hebdo majoré (×1.25), et une séance d'intervalles supplémentaire visée sur les semaines à intervalles (`_enforce_extra_intervals` dans le validator, convertit des `tempo` si le plafond le permet). Les autres niveaux gardent les garde-fous nus (0.25 / ×1.0 / +0).
 - `build_coach_state(ctx, today, ...)` agrège l'état réel (best-effort, ne lève jamais) pour alimenter le prompt, la revue hebdo et, à terme, le check du matin sur les mêmes faits.
 
 **Périodisation pilotée par le type d'objectif** — `processing/plan_builder._OBJECTIVE_FLAVORS` : `target_event_type` actionne 3 leviers (fenêtre de taper, fréquence des intervalles, surpondération de l'endurance longue) :

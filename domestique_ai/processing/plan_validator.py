@@ -20,8 +20,9 @@ Règles appliquées, dans cet ordre, semaine par semaine :
    intervalles deviennent du tempo. Ce plafond est une ceinture : il s'applique
    même si le LLM a placé du Z4 dans une semaine de fondation.
 4. **Polarisation 80/20** : la part Z4-Z5 ne doit pas dépasser 25 % du temps
-   actif hebdo. Au-dessus, on convertit progressivement les ``intervals`` en
-   ``tempo`` jusqu'à respecter la borne.
+   actif hebdo (plafond relevé à 40 % pour un compétiteur en activité). Au-dessus,
+   on convertit progressivement les ``intervals`` en ``tempo`` jusqu'à respecter
+   la borne.
 5. **Plafond TSS hebdo** : ne pas dépasser le cap ``_ctl_progression_cap`` qui
    borne la progression de CTL à +5 points par semaine. En cas de
    dépassement, on raccourcit l'endurance (la sortie longue garde un plancher
@@ -55,7 +56,10 @@ from domestique_ai.processing.athlete_state import (
     CEILING_BASE,
     CEILING_FULL,
     CEILING_TEMPO,
+    extra_intervals_for_level,
     intensity_ceiling,
+    polarization_cap_for_level,
+    tss_cap_multiplier_for_level,
 )
 from domestique_ai.processing.plan_builder import (
     _BASE_DURATION_MIN,
@@ -198,15 +202,18 @@ def _enforce_polarization(
     week: list[Workout],
     week_idx: int,
     adjustments: list[str],
+    cap: float = _MAX_HIGH_INTENSITY_SHARE,
 ) -> list[Workout]:
-    """Borne la part Z4-Z5 à 25 % du temps actif hebdo.
+    """Borne la part Z4-Z5 à ``cap`` (25 % par défaut) du temps actif hebdo.
 
     Au-dessus, on convertit les ``intervals`` en ``tempo`` un par un (du moins
-    important vers le plus important : on commence par le plus court).
+    important vers le plus important : on commence par le plus court). Le
+    plafond est relevé pour les niveaux à coaching renforcé (compétiteur en
+    activité → 40 %).
     """
     high = sum(_high_intensity_seconds(w) for w in week)
     active = sum(_active_seconds(w) for w in week)
-    if active == 0 or high / active <= _MAX_HIGH_INTENSITY_SHARE:
+    if active == 0 or high / active <= cap:
         return week
 
     # Candidats à convertir : séances Z4-Z5 triées du plus court au plus long.
@@ -225,7 +232,7 @@ def _enforce_polarization(
             adjustments.append(f"{candidate.date} : intervals → tempo (polarisation 80/20)")
             high = sum(_high_intensity_seconds(w) for w in new_week)
             active = sum(_active_seconds(w) for w in new_week)
-            if active == 0 or high / active <= _MAX_HIGH_INTENSITY_SHARE:
+            if active == 0 or high / active <= cap:
                 return new_week
     return new_week
 
@@ -267,9 +274,13 @@ def _enforce_tss_cap(
     ctl_current: float,
     adjustments: list[str],
     min_ctl: float = 20.0,
+    multiplier: float = 1.0,
 ) -> list[Workout]:
-    """Borne le TSS hebdo au plafond de progression CTL (+5 / semaine)."""
-    cap = _ctl_progression_cap(ctl_current, week_idx, min_ctl)
+    """Borne le TSS hebdo au plafond de progression CTL (+5 / semaine).
+
+    ``multiplier`` majore le plafond pour les niveaux à coaching renforcé.
+    """
+    cap = _ctl_progression_cap(ctl_current, week_idx, min_ctl, multiplier)
     total = sum(w.estimated_tss for w in week)
     if total <= cap:
         return week
@@ -310,6 +321,7 @@ def _enforce_intensity_cadence(
     availability: Availability | None,
     adjustments: list[str],
     ceiling: str = CEILING_FULL,
+    multiplier: float = 1.0,
 ) -> list[Workout]:
     """Garantit la cadence d'intensité du type d'objectif, sans dépasser le plafond.
 
@@ -364,7 +376,7 @@ def _enforce_intensity_cadence(
     idx, candidate = candidates[0]
 
     # Taille maximale qui reste dans le plafond (conversion TSS-équivalente).
-    cap = _ctl_progression_cap(ctl_current, week_idx, min_ctl)
+    cap = _ctl_progression_cap(ctl_current, week_idx, min_ctl, multiplier)
     week_tss = sum(w.estimated_tss for w in week)
     room = cap - (week_tss - (candidate.estimated_tss or 0.0))
     max_dur = int(room / max(_TSS_PER_MIN[target_kind], 1e-6))
@@ -378,6 +390,60 @@ def _enforce_intensity_cadence(
         f"{candidate.date} : {candidate.kind} → {target_kind} "
         f"({new_min} min, cadence {int(flavor['intervals_freq'])}/1)"
     )
+    return new_week
+
+
+def _enforce_extra_intervals(
+    week: list[Workout],
+    week_idx: int,
+    ctl_current: float,
+    flavor: dict[str, float],
+    total_weeks: int | None,
+    min_ctl: float,
+    adjustments: list[str],
+    extra: int,
+    multiplier: float = 1.0,
+) -> list[Workout]:
+    """Ajoute ``extra`` séance(s) d'intervalles sur les semaines à intervalles.
+
+    Levier « coaching renforcé » : un compétiteur en activité vise une 2ᵉ séance
+    de qualité. On convertit les ``tempo`` (hors jour long) tant que le plafond
+    TSS — déjà majoré pour ce niveau — le permet. Sans place, la semaine reste
+    inchangée plutôt que d'être déstructurée.
+    """
+    if extra <= 0:
+        return week
+    taper_weeks = int(flavor["taper_weeks"])
+    if total_weeks is not None and week_idx >= total_weeks - taper_weeks:
+        return week
+    if week_idx % 4 == 3:
+        return week  # semaine de récupération du cycle 3:1
+    if len(week) < 3:
+        return week
+    if (week_idx % int(flavor["intervals_freq"])) != 0:
+        return week  # on ne renforce que les semaines déjà orientées intervalles
+
+    target = 1 + extra
+    intervals_count = sum(1 for w in week if w.kind == "intervals")
+    candidates = sorted(
+        [(i, w) for i, w in enumerate(week) if w.kind == "tempo"],
+        key=lambda iw: -iw[1].duration_min,
+    )
+    new_week = list(week)
+    for idx, candidate in candidates:
+        if intervals_count >= target:
+            break
+        cap = _ctl_progression_cap(ctl_current, week_idx, min_ctl, multiplier)
+        week_tss = sum(w.estimated_tss for w in new_week)
+        room = cap - (week_tss - (candidate.estimated_tss or 0.0))
+        max_dur = int(room / max(_TSS_PER_MIN["intervals"], 1e-6))
+        max_dur = min(max_dur, int(_BASE_DURATION_MIN["intervals"]))
+        new_min = max(20, min(candidate.duration_min, max_dur))
+        if new_min < 20:
+            continue
+        new_week[idx] = _rebuild_workout(candidate, "intervals", new_min, week_idx)
+        adjustments.append(f"{candidate.date} : tempo → intervals ({new_min} min, renforcé)")
+        intervals_count += 1
     return new_week
 
 
@@ -409,6 +475,7 @@ def _enforce_long_ride(
     ctl_current: float,
     min_ctl: float,
     adjustments: list[str],
+    multiplier: float = 1.0,
 ) -> list[Workout]:
     """Place la sortie longue (endurance la plus longue, ≥ 90 min) sur le jour dédié.
 
@@ -448,7 +515,7 @@ def _enforce_long_ride(
         if best.duration_min >= _LONG_RIDE_MIN:
             return week
         # Sur le bon jour mais trop courte : rallonger si le plafond le permet.
-        cap = _ctl_progression_cap(ctl_current, week_idx, min_ctl)
+        cap = _ctl_progression_cap(ctl_current, week_idx, min_ctl, multiplier)
         room = cap - sum(w.estimated_tss for w in week)
         extra_min = int(room / max(_TSS_PER_MIN["endurance"], 1e-6))
         new_min = min(_LONG_RIDE_MIN, best.duration_min + max(0, extra_min))
@@ -478,7 +545,7 @@ def _enforce_long_ride(
     # Maintenant sur le jour long : rallonger vers 90 min si le plafond le permet.
     placed = new_week[best_idx]
     if placed.duration_min < _LONG_RIDE_MIN:
-        cap = _ctl_progression_cap(ctl_current, week_idx, min_ctl)
+        cap = _ctl_progression_cap(ctl_current, week_idx, min_ctl, multiplier)
         room = cap - sum(w.estimated_tss for w in new_week)
         extra_min = int(room / max(_TSS_PER_MIN["endurance"], 1e-6))
         new_min = min(_LONG_RIDE_MIN, placed.duration_min + max(0, extra_min))
@@ -527,7 +594,9 @@ def validate_and_correct(
             fournir quand on valide une seule semaine isolée (flux LLM), sinon
             le week_idx repart à 0 et les plafonds de progression ne montent pas.
         level : niveau/expérience de l'athlète (voir ``athlete_state``) —
-            module la longueur de la rampe de reprise.
+            module la longueur de la rampe de reprise **et** les leviers de
+            coaching renforcé (plafond de polarisation, plafond TSS, séance
+            d'intervalles supplémentaire).
         ctl_trend / chronic_tsb : signaux de la règle composite de reprise
             (trajectoire CTL 7j vs 14j, TSB moyen 7 j). Optionnels : sans eux,
             seule la valeur absolue du CTL déclenche la reprise.
@@ -546,6 +615,10 @@ def validate_and_correct(
     by_week = _group_by_week(plan)
     plan_start_iso = plan_start_iso or min(w.date for w in plan)
     flavor = _objective_flavor(target_event_type)
+    # Leviers « coaching renforcé » dérivés du niveau (défaut : garde-fous nus).
+    pol_cap = polarization_cap_for_level(level)
+    tss_mult = tss_cap_multiplier_for_level(level)
+    extra_intervals = extra_intervals_for_level(level)
 
     corrected: list[Workout] = []
     for week_key in sorted(by_week):
@@ -565,8 +638,8 @@ def validate_and_correct(
             continue
         week = _enforce_rest_day(week, adjustments)
         week = _enforce_intensity_ceiling(week, week_idx, ceiling, adjustments)
-        week = _enforce_polarization(week, week_idx, adjustments)
-        week = _enforce_tss_cap(week, week_idx, ctl_current, adjustments, min_ctl)
+        week = _enforce_polarization(week, week_idx, adjustments, pol_cap)
+        week = _enforce_tss_cap(week, week_idx, ctl_current, adjustments, min_ctl, tss_mult)
         week = _enforce_intensity_cadence(
             week,
             week_idx,
@@ -577,9 +650,33 @@ def validate_and_correct(
             availability,
             adjustments,
             ceiling,
+            tss_mult,
         )
+        # Renforcé : une intensité supplémentaire sur les semaines à intervalles,
+        # puis on re-borne la polarisation au plafond du niveau.
+        week = _enforce_extra_intervals(
+            week,
+            week_idx,
+            ctl_current,
+            flavor,
+            total_weeks,
+            min_ctl,
+            adjustments,
+            extra_intervals,
+            tss_mult,
+        )
+        if extra_intervals > 0:
+            week = _enforce_polarization(week, week_idx, adjustments, pol_cap)
         week = _enforce_long_ride(
-            week, week_idx, availability, flavor, total_weeks, ctl_current, min_ctl, adjustments
+            week,
+            week_idx,
+            availability,
+            flavor,
+            total_weeks,
+            ctl_current,
+            min_ctl,
+            adjustments,
+            tss_mult,
         )
         corrected.extend(week)
 

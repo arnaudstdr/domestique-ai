@@ -108,6 +108,14 @@ def test_level_roundtrip(tmp_path, monkeypatch):
     assert loaded.level == "ex_competitor"
 
 
+def test_level_racer_roundtrip(tmp_path, monkeypatch):
+    _patch_path(tmp_path, monkeypatch)
+    save_profile(Profile(ftp=280, level="racer"))
+    loaded = load_profile()
+    assert loaded is not None
+    assert loaded.level == "racer"
+
+
 def test_level_defaults_to_intermediate(tmp_path, monkeypatch):
     _patch_path(tmp_path, monkeypatch, content="ftp: 230\n")
     loaded = load_profile()

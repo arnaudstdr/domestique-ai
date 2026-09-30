@@ -710,10 +710,19 @@ def build_memory_block(
             lines.append(f"- {hit['text'][:_MAX_RAG_CHARS]}")
         sections.append("\n".join(lines))
 
+    from domestique_ai.processing.athlete_state import level_label
+
+    level = getattr(ctx, "level", None)
+    if level:
+        # Le niveau fait partie du contexte durable : injecté à chaque tour pour
+        # que le coach adapte ton/intensité même hors du 1er tour de session.
+        sections.insert(0, f"Profil de l'athlète : niveau {level_label(level)}.")
+
     if not sections:
         return ""
     return (
-        "MÉMOIRE PERSISTANTE (issue de tes échanges passés avec l'athlète).\n"
+        "MÉMOIRE PERSISTANTE (issue de tes échanges passés avec l'athlète) et "
+        "profil courant.\n"
         "Utilise-la pour la continuité, mais ne prétends jamais te souvenir "
         "d'autre chose que de ce qui figure ici ou dans les tools.\n\n" + "\n\n".join(sections)
     )

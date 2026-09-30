@@ -412,6 +412,12 @@ def test_build_coach_context_includes_tsb_and_workout(stable_signals):
     assert "90 min" in ctx
 
 
+def test_build_coach_context_includes_athlete_level(stable_signals):
+    ctx = build_coach_context(today=dt.date(2026, 5, 21))
+    assert "Niveau de l'athlète" in ctx
+    assert "Adapte ta prudence" in ctx
+
+
 def test_build_coach_context_mentions_no_alert_when_clean(stable_signals):
     ctx = build_coach_context(today=dt.date(2026, 5, 21))
     assert "aucune" in ctx.lower()
