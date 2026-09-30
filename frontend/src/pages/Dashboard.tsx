@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { api, ApiError } from "../api/client";
 import type {
+  ActivitySummary,
   FtpProjectionResponse,
   LoadResponse,
   MorningResponse,
@@ -11,6 +12,7 @@ import type {
   RideVolumeResponse,
   WeeklyVolumeResponse,
 } from "../api/types";
+import ActivityCard from "../components/ActivityCard";
 import DailyBriefCard from "../components/DailyBriefCard";
 import LoadCard from "../components/LoadCard";
 import ObjectiveCard from "../components/ObjectiveCard";
@@ -24,6 +26,13 @@ const TODAY_FR = new Intl.DateTimeFormat("fr-FR", {
   day: "numeric",
   month: "long",
 });
+
+function localTodayIso(): string {
+  const now = new Date();
+  const month = String(now.getMonth() + 1).padStart(2, "0");
+  const day = String(now.getDate()).padStart(2, "0");
+  return `${now.getFullYear()}-${month}-${day}`;
+}
 
 function greeting(hour: number): string {
   if (hour < 6) return "Bonne nuit";
@@ -40,6 +49,7 @@ export default function Dashboard() {
   const [morning, setMorning] = useState<MorningResponse | null>(null);
   const [objective, setObjective] = useState<Objective | null>(null);
   const [projection, setProjection] = useState<FtpProjectionResponse | null>(null);
+  const [recentActivities, setRecentActivities] = useState<ActivitySummary[]>([]);
   const [brief, setBrief] = useState<DailyBriefResponse | null>(null);
   const [briefLoading, setBriefLoading] = useState(true);
   const [loading, setLoading] = useState(true);
@@ -51,7 +61,7 @@ export default function Dashboard() {
   async function refresh() {
     setLoading(true);
     try {
-      const [l, o, vol, wk, morn, obj, proj] = await Promise.all([
+      const [l, o, vol, wk, morn, obj, proj, acts] = await Promise.all([
         api.metrics.load(90),
         api.metrics.overtraining(),
         api.metrics.rideVolume(),
@@ -59,6 +69,7 @@ export default function Dashboard() {
         api.morning.get(14),
         api.objective.get(),
         api.metrics.ftpProjection(),
+        api.activities.list(1, 20),
       ]);
       setLoad(l);
       setOt(o);
@@ -67,6 +78,7 @@ export default function Dashboard() {
       setMorning(morn);
       setObjective(obj);
       setProjection(proj);
+      setRecentActivities(acts.items);
     } catch (err) {
       const msg = err instanceof ApiError ? err.message : String(err);
       push(`Erreur de chargement : ${msg}`, "error");
@@ -102,6 +114,15 @@ export default function Dashboard() {
     .filter((a) => a.message !== brief?.primary_alert?.message)
     .map((a) => ({ message: a.message, level: a.level }));
 
+  // Dernière sortie : l'API trie par date décroissante, l'item [0] est la plus
+  // récente. On en déduit aussi le nombre de séances du jour (double séance).
+  const latestActivity = recentActivities[0] ?? null;
+  const todayIso = localTodayIso();
+  const todayCount = recentActivities.filter(
+    (a) => a.date.slice(0, 10) === todayIso,
+  ).length;
+  const activityIsToday = latestActivity?.date.slice(0, 10) === todayIso;
+
   return (
     <div className="stagger space-y-4">
       <div className="px-1">
@@ -118,6 +139,28 @@ export default function Dashboard() {
         secondaryAlerts={secondaryAlerts}
         indicators={ot?.indicators || null}
       />
+
+      {/* Dernière sortie : boucle prévu (brief) → réalisé. */}
+      {latestActivity ? (
+        <div className="space-y-2">
+          <div className="flex items-center justify-between gap-2 px-1">
+            <h3 className="label-eyebrow">
+              {activityIsToday ? "Sortie du jour" : "Dernière sortie"}
+            </h3>
+            {todayCount > 1 && (
+              <span className="pill bg-accent/10 text-accent">
+                {todayCount} séances aujourd'hui
+              </span>
+            )}
+          </div>
+          <ActivityCard activity={latestActivity} />
+        </div>
+      ) : loading ? (
+        <div className="card animate-pulse space-y-3">
+          <div className="h-3 w-24 rounded bg-overlay/10" />
+          <div className="h-16 w-full rounded bg-overlay/10" />
+        </div>
+      ) : null}
 
       {/* Rangée 2 colonnes (empilée sur mobile) : cap + récupération. */}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">

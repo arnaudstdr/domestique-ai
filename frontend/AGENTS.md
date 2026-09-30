@@ -107,6 +107,12 @@ ce sheet (plus de carte de recherche en haut de page).
     projetée (barre de progression), W/kg. État vide → lien vers `/plan`.
   - Les deux cartes utilisent `StatStrip` (`columns="3-responsive"` / `2`) pour
     rester lisibles du mobile au desktop.
+  - **« Dernière sortie »** — juste après le brief (boucle *prévu → réalisé*) :
+    `ActivityCard` réutilisée telle quelle pour la dernière activité
+    (`GET /api/activities?page=1&page_size=20`, tri date desc ; endpoint caché
+    Workbox). Titrée « Sortie du jour » si la plus récente date d'aujourd'hui,
+    sinon « Dernière sortie » ; badge « N séances aujourd'hui » en cas de double
+    séance. La carte est masquée s'il n'y a aucune activité.
 - **Identité partagée** — le nom affiché dans la salutation vient du contexte
   `MeProvider` (`hooks/useMe.tsx`) : un seul appel `/me` partagé, plus de fetch
   par page.
