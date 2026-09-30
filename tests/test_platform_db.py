@@ -601,6 +601,50 @@ def test_admin_audit_record_and_list():
     assert pdb.list_admin_audit(limit=0) == []
 
 
+def test_admin_audit_filters_pagination_and_labels():
+    actor = pdb.create_account("admin", display_name="Admin Test")
+    other = pdb.create_account("admin", email="other@example.com")
+    target = pdb.create_user(role="athlete", email="athlete@example.com")
+    pdb.record_admin_audit(actor, "unlock_account", target)
+    pdb.record_admin_audit(actor, "role_change", target, {"from": "athlete", "to": "coach"})
+    pdb.record_admin_audit(actor, "settings_update", details={"signup_enabled": True})
+    pdb.record_admin_audit(other, "logout_all", target, {"revoked": 2})
+
+    entries = pdb.list_admin_audit()
+    assert [e["action"] for e in entries] == [
+        "logout_all",
+        "settings_update",
+        "role_change",
+        "unlock_account",
+    ]
+    assert entries[2]["actor_label"] == "Admin Test"
+    assert entries[2]["target_label"] == "athlete@example.com"
+    assert entries[0]["actor_label"] == "other@example.com"
+    assert entries[1]["target_label"] is None
+
+    assert [e["action"] for e in pdb.list_admin_audit(actions=["unlock_account"])] == [
+        "unlock_account"
+    ]
+    assert [e["action"] for e in pdb.list_admin_audit(actor_public_id=other["public_id"])] == [
+        "logout_all"
+    ]
+    assert len(pdb.list_admin_audit(q="athlete@exam")) == 3
+    assert len(pdb.list_admin_audit(q="Admin")) == 3
+    assert [e["action"] for e in pdb.list_admin_audit(q=other["public_id"][:8])] == ["logout_all"]
+    assert pdb.list_admin_audit(q="Admin %") == []  # jokers échappés
+
+    page = pdb.list_admin_audit(limit=2, before_id=entries[2]["id"])
+    assert [e["action"] for e in page] == ["unlock_account"]
+
+    assert pdb.list_admin_audit(since=_future()) == []
+    assert len(pdb.list_admin_audit(since=_past())) == 4
+
+    pdb.delete_user(target["id"])
+    after_delete = pdb.list_admin_audit()
+    assert after_delete[2]["target_public_id"] == target["public_id"]
+    assert after_delete[2]["target_label"] is None
+
+
 def test_get_announcement_defaults_and_override():
     assert pdb.get_announcement() == {"maintenance_mode": False, "message": None}
     pdb.set_setting("maintenance_mode", "1")

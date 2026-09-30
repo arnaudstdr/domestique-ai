@@ -11,6 +11,7 @@ import type {
   ActivityUpdate,
   ActivityWeather,
   AdminAuditEntry,
+  AdminAuditQuery,
   AdminFeedback,
   AdminInvitation,
   AdminInvitationCreated,
@@ -718,7 +719,15 @@ export const api = {
     deleteUser: (publicId: string) =>
       http<void>(`/api/admin/users/${publicId}`, { method: "DELETE" }),
     feedback: () => http<AdminFeedback[]>(`/api/admin/feedback`),
-    audit: (limit = 100) => http<AdminAuditEntry[]>(`/api/admin/audit?limit=${limit}`),
+    audit: (params: AdminAuditQuery = {}) => {
+      const qs = new URLSearchParams();
+      if (params.limit != null) qs.set("limit", String(params.limit));
+      if (params.beforeId != null) qs.set("before_id", String(params.beforeId));
+      for (const action of params.actions ?? []) qs.append("action", action);
+      if (params.q) qs.set("q", params.q);
+      if (params.period) qs.set("period", params.period);
+      return http<AdminAuditEntry[]>(`/api/admin/audit?${qs.toString()}`);
+    },
     invitations: () => http<AdminInvitation[]>(`/api/admin/invitations`),
     createInvitation: (role: "athlete" | "coach") =>
       http<AdminInvitationCreated>(`/api/admin/invitations`, {

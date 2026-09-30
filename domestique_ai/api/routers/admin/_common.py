@@ -70,8 +70,10 @@ class RevokedSessions(BaseModel):
 class AdminAuditEntry(BaseModel):
     id: int
     actor_public_id: str | None = None
+    actor_label: str | None = None
     action: str
     target_public_id: str | None = None
+    target_label: str | None = None
     details: Any = None
     created_at: str
 

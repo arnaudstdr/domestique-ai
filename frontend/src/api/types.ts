@@ -831,10 +831,20 @@ export interface AdminSession {
 export interface AdminAuditEntry {
   id: number;
   actor_public_id: string | null;
+  actor_label: string | null;
   action: string;
   target_public_id: string | null;
+  target_label: string | null;
   details: unknown;
   created_at: string;
+}
+
+export interface AdminAuditQuery {
+  limit?: number;
+  beforeId?: number;
+  actions?: string[];
+  q?: string;
+  period?: "24h" | "7d" | "30d" | "all";
 }
 
 export interface AdminInvitation {

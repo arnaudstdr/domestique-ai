@@ -165,10 +165,18 @@ ce sheet (plus de carte de recherche en haut de page).
   `athlète`|`coach` à copier, toutes provenances, révocation des `pending` ;
   le lien est accepté même si `signup_enabled` est faux), retours testeurs
   cross-tenant (filtre par statut + changement de statut
-  `new`/`acknowledged`/`done`/`rejected`), et journal d'audit (dernières actions
-  admin, libellés FR), et un encart **Plateforme** (stats + statut ops :
-  scheduler, sync Garmin, healthcheck, version, fuseau ; compteur d'espaces
-  athlètes orphelins + bouton de purge). Chaque compte est
+  `new`/`acknowledged`/`done`/`rejected` ; onglets `components/FilterTab.tsx`,
+  partagés avec le journal d'audit), et un encart **Plateforme** (stats + statut
+  ops : scheduler, sync Garmin, healthcheck, version, fuseau ; compteur
+  d'espaces athlètes orphelins + bouton de purge). Le **journal d'audit**
+  (`components/AdminAuditLog.tsx`) est une timeline verticale groupée par jour
+  (rail + nœud coloré/icône par famille d'action, « Aujourd'hui » / « Hier » /
+  date, temps relatif avec horodatage absolu en tooltip, sous-titre humanisé
+  par action à partir des `details` + acteur/cible résolus en nom/email,
+  détails JSON repliables) : filtres par famille (Comptes/Sécurité/Invitations/
+  Retours/Plateforme) et période (24 h/7 j/30 j/tout), recherche serveur acteur
+  ou cible, pagination par curseur (« Afficher plus », `before_id`) et bouton
+  refresh. Chaque compte est
   **dépliable**
   (`components/AdminUserRow.tsx`) : fiche (verrouillage, email vérifié, 2FA,
   Garmin, nb d'activités, sessions actives, liens coach↔athlète) + actions

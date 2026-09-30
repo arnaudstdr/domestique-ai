@@ -1,10 +1,11 @@
 import { useEffect, useState } from "react";
 import { Copy, Loader2, ShieldCheck } from "lucide-react";
 import { api, ApiError } from "../api/client";
+import AdminAuditLog from "../components/AdminAuditLog";
 import AdminUserRow from "../components/AdminUserRow";
+import FilterTab from "../components/FilterTab";
 import { copyToClipboard } from "../lib/clipboard";
 import type {
-  AdminAuditEntry,
   AdminFeedback,
   AdminInvitation,
   AdminSettings,
@@ -40,20 +41,6 @@ const INVITATION_STATUS_LABELS: Record<string, string> = {
   expired: "Expirée",
 };
 
-const AUDIT_LABELS: Record<string, string> = {
-  role_change: "Changement de rôle",
-  reset_2fa: "Réinitialisation 2FA",
-  unlock_account: "Déverrouillage de compte",
-  verify_email: "Email vérifié",
-  password_reset: "Lien de reset mot de passe",
-  logout_all: "Déconnexion globale",
-  delete_account: "Suppression de compte",
-  feedback_status: "Statut d'un retour",
-  settings_update: "Réglages plateforme",
-  invitation_create: "Création d'invitation",
-  invitation_revoke: "Révocation d'invitation",
-  purge_orphan_spaces: "Nettoyage d'espaces orphelins",
-};
 const FEEDBACK_LABELS: Record<FeedbackStatus, string> = {
   new: "Nouveau",
   acknowledged: "Pris en compte",
@@ -67,30 +54,6 @@ const FEEDBACK_BADGE: Record<FeedbackStatus, string> = {
   rejected: "bg-red-500/15 text-red-400 border-red-500/30",
 };
 
-function FilterTab({
-  active,
-  label,
-  onClick,
-}: {
-  active: boolean;
-  label: string;
-  onClick: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={`rounded-lg border px-2.5 py-1 text-xs transition-colors ${
-        active
-          ? "border-accent/40 bg-accent/15 text-accent"
-          : "border-border/[0.06] bg-overlay/[0.03] text-fg-soft hover:text-accent"
-      }`}
-    >
-      {label}
-    </button>
-  );
-}
-
 function errMessage(err: unknown): string {
   return err instanceof ApiError ? err.message : String(err);
 }
@@ -100,7 +63,6 @@ export default function Admin() {
   const [users, setUsers] = useState<AdminUser[] | null>(null);
   const [settings, setSettings] = useState<AdminSettings | null>(null);
   const [feedback, setFeedback] = useState<AdminFeedback[] | null>(null);
-  const [audit, setAudit] = useState<AdminAuditEntry[] | null>(null);
   const [invitations, setInvitations] = useState<AdminInvitation[] | null>(null);
   const [stats, setStats] = useState<AdminStats | null>(null);
   const [status, setStatus] = useState<AdminStatus | null>(null);
@@ -126,10 +88,6 @@ export default function Admin() {
       .feedback()
       .then(setFeedback)
       .catch((e) => push(`Retours : ${errMessage(e)}`, "error"));
-    api.admin
-      .audit()
-      .then(setAudit)
-      .catch((e) => push(`Journal : ${errMessage(e)}`, "error"));
     api.admin
       .invitations()
       .then(setInvitations)
@@ -557,34 +515,7 @@ export default function Admin() {
         )}
       </section>
 
-      <section className="card space-y-3">
-        <h3 className="text-sm font-semibold text-fg">Journal d'audit</h3>
-        {audit === null ? (
-          <div className="flex items-center gap-2 text-sm text-muted">
-            <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
-            Chargement…
-          </div>
-        ) : audit.length === 0 ? (
-          <p className="text-sm text-muted">Aucune action enregistrée.</p>
-        ) : (
-          <ul className="divide-y divide-border/[0.06]">
-            {audit.map((e) => (
-              <li key={e.id} className="flex items-start justify-between gap-3 py-2 text-xs">
-                <div className="min-w-0">
-                  <div className="text-fg-soft">{AUDIT_LABELS[e.action] ?? e.action}</div>
-                  <div className="truncate text-muted">
-                    {e.actor_public_id ? `par ${e.actor_public_id.slice(0, 8)}` : "—"}
-                    {e.target_public_id ? ` → ${e.target_public_id.slice(0, 8)}` : ""}
-                  </div>
-                </div>
-                <span className="shrink-0 text-muted">
-                  {new Date(e.created_at).toLocaleString()}
-                </span>
-              </li>
-            ))}
-          </ul>
-        )}
-      </section>
+      <AdminAuditLog />
     </div>
   );
 }

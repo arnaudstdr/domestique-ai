@@ -1907,18 +1907,92 @@ def record_admin_audit(
         conn.close()
 
 
-def list_admin_audit(limit: int | None = None, path: Path | None = None) -> list[dict[str, Any]]:
-    """Liste le journal d'audit, du plus récent au plus ancien."""
+def _like_pattern(value: str) -> str:
+    """Motif ``%value%`` pour LIKE, en échappant les jokers (``ESCAPE '\\'``)."""
+    escaped = value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+    return f"%{escaped}%"
+
+
+def _attach_audit_labels(conn: sqlite3.Connection, rows: list[dict[str, Any]]) -> None:
+    """Résout les snapshots ``public_id`` en nom affiché / email.
+
+    L'historique survit à la suppression d'un compte : un id sans utilisateur
+    correspondant reste sans label (le front retombe sur le ``public_id``).
+    """
+    public_ids = {
+        pid for row in rows for pid in (row["actor_public_id"], row["target_public_id"]) if pid
+    }
+    labels: dict[str, str] = {}
+    if public_ids:
+        marks = ", ".join("?" for _ in public_ids)
+        for user in conn.execute(
+            f"SELECT public_id, display_name, email FROM users WHERE public_id IN ({marks})",
+            tuple(public_ids),
+        ):
+            label = user["display_name"] or user["email"]
+            if label:
+                labels[user["public_id"]] = label
+    for row in rows:
+        actor = row["actor_public_id"]
+        target = row["target_public_id"]
+        row["actor_label"] = labels.get(actor) if actor else None
+        row["target_label"] = labels.get(target) if target else None
+
+
+def list_admin_audit(
+    limit: int | None = None,
+    *,
+    before_id: int | None = None,
+    actions: list[str] | None = None,
+    actor_public_id: str | None = None,
+    since: str | None = None,
+    q: str | None = None,
+    path: Path | None = None,
+) -> list[dict[str, Any]]:
+    """Liste le journal d'audit, du plus récent au plus ancien.
+
+    Filtres optionnels : ``before_id`` (pagination par curseur), ``actions``,
+    ``actor_public_id``, ``since`` (ISO, borne basse incluse) et ``q``
+    (acteur **ou** cible : nom affiché, email ou ``public_id``). Chaque entrée
+    est enrichie d'``actor_label``/``target_label`` (nom affiché ou email
+    résolus).
+    """
+    where: list[str] = []
+    params: list[Any] = []
+    if before_id is not None:
+        where.append("id < ?")
+        params.append(before_id)
+    if actions:
+        where.append(f"action IN ({', '.join('?' for _ in actions)})")
+        params.extend(actions)
+    if actor_public_id:
+        where.append("actor_public_id = ?")
+        params.append(actor_public_id)
+    if since:
+        where.append("created_at >= ?")
+        params.append(since)
+    if q:
+        like = _like_pattern(q)
+        users_sub = (
+            "(SELECT public_id FROM users WHERE display_name LIKE ? ESCAPE '\\' "
+            "OR email LIKE ? ESCAPE '\\')"
+        )
+        where.append(
+            f"(actor_public_id LIKE ? ESCAPE '\\' OR target_public_id LIKE ? ESCAPE '\\' "
+            f"OR actor_public_id IN {users_sub} OR target_public_id IN {users_sub})"
+        )
+        params.extend((like, like, like, like, like, like))
+    sql = "SELECT * FROM admin_audit"
+    if where:
+        sql += " WHERE " + " AND ".join(where)
+    sql += " ORDER BY created_at DESC, id DESC"
+    if limit is not None:
+        sql += " LIMIT ?"
+        params.append(limit)
     conn = _connect(path)
     try:
-        if limit is None:
-            rows = conn.execute(
-                "SELECT * FROM admin_audit ORDER BY created_at DESC, id DESC"
-            ).fetchall()
-        else:
-            rows = conn.execute(
-                "SELECT * FROM admin_audit ORDER BY created_at DESC, id DESC LIMIT ?", (limit,)
-            ).fetchall()
-        return [_admin_audit_dict(r) for r in rows]
+        rows = [_admin_audit_dict(r) for r in conn.execute(sql, params).fetchall()]
+        _attach_audit_labels(conn, rows)
+        return rows
     finally:
         conn.close()

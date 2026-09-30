@@ -143,8 +143,13 @@ SQLite autorise les trois.
   `settings_update`, `invitation_create`, `invitation_revoke`. FK `SET NULL` +
   snapshot `public_id` → l'historique survit à
   la suppression d'un compte (l'audit de suppression est écrit **avant** le
-  DELETE). Jamais de secret dans les détails. Consultable via `GET /audit`
-  (`limit` optionnel, plus récent d'abord).
+  DELETE). Jamais de secret dans les détails. Consultable via `GET /audit` :
+  `limit` (défaut 50, cap 200), pagination par **curseur** `before_id`, filtres
+  `action` (répétable) et `period` (`24h|7d|30d|all`, seuil calculé serveur),
+  recherche `q` (acteur **ou** cible : nom affiché, email ou `public_id`) —
+  plus récent d'abord. Chaque entrée porte `actor_label`/`target_label`
+  (nom/email résolus ; `None` si le compte n'existe plus, le front retombe sur
+  le snapshot `public_id`).
 - **Réglages plateforme** — table `platform_settings` (key/value) de
   `platform.db`, éditée à chaud par l'admin via `GET|PUT /settings` :
   `signup_enabled` (surcharge `DOMESTIQUE_AI_SIGNUP_ENABLED`, résolu par

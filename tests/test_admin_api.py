@@ -356,6 +356,37 @@ def test_admin_audit_endpoint(client: TestClient):
     assert entry["target_public_id"] == target["public_id"]
 
 
+def test_admin_audit_filters_and_pagination(client: TestClient):
+    admin_token, _ = _session("admin")
+    target = pdb.create_user(role="athlete", email="target@example.com")
+    client.post(f"/api/admin/users/{target['public_id']}/unlock", headers=_bearer(admin_token))
+    client.post(
+        f"/api/admin/users/{target['public_id']}/role",
+        headers=_bearer(admin_token),
+        json={"role": "coach"},
+    )
+
+    r = client.get("/api/admin/audit?action=unlock_account", headers=_bearer(admin_token))
+    assert r.status_code == 200, r.text
+    assert [e["action"] for e in r.json()] == ["unlock_account"]
+
+    r = client.get("/api/admin/audit?q=target@example.com", headers=_bearer(admin_token))
+    assert {e["action"] for e in r.json()} == {"unlock_account", "role_change"}
+    assert r.json()[0]["target_label"] == "target@example.com"
+    assert r.json()[0]["actor_label"] is None  # admin sans nom ni email → fallback public_id
+
+    r = client.get("/api/admin/audit?limit=1", headers=_bearer(admin_token))
+    newest = r.json()[0]
+    r = client.get(
+        f"/api/admin/audit?limit=1&before_id={newest['id']}", headers=_bearer(admin_token)
+    )
+    assert r.json()[0]["id"] < newest["id"]
+
+    assert (
+        client.get("/api/admin/audit?period=nope", headers=_bearer(admin_token)).status_code == 422
+    )
+
+
 def test_audit_forbidden_for_non_admin(client: TestClient):
     athlete_token, _ = _session("athlete")
     assert client.get("/api/admin/audit", headers=_bearer(athlete_token)).status_code == 403
