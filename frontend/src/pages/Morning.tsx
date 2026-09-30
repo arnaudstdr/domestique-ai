@@ -26,6 +26,7 @@ import type {
   GoogleHealthStatusResponse,
 } from "../api/types";
 import StatStrip from "../components/StatStrip";
+import ReadinessBadge from "../components/ReadinessBadge";
 import { CHART, axisProps, legendStyle, tooltipStyle } from "../chartTheme";
 import { useToast } from "../hooks/useToast";
 
@@ -431,39 +432,6 @@ export default function Morning() {
         </>
       )}
     </div>
-  );
-}
-
-function ReadinessBadge({ score }: { score: number }) {
-  let label = "Très faible";
-  let tone: "danger" | "warning" | "good" | "accent" = "danger";
-  if (score >= 85) {
-    label = "Pic";
-    tone = "accent";
-  } else if (score >= 70) {
-    label = "Élevé";
-    tone = "good";
-  } else if (score >= 50) {
-    label = "Équilibré";
-    tone = "good";
-  } else if (score >= 30) {
-    label = "Faible";
-    tone = "warning";
-  }
-  return (
-    <span
-      className={`rounded-full px-2 py-0.5 text-xs font-medium ${
-        tone === "danger"
-          ? "bg-red-500/10 text-red-500"
-          : tone === "warning"
-            ? "bg-amber-500/10 text-amber-500"
-            : tone === "accent"
-              ? "bg-accent/10 text-accent"
-              : "bg-emerald-500/10 text-emerald-500"
-      }`}
-    >
-      {label}
-    </span>
   );
 }
 

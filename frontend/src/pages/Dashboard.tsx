@@ -2,7 +2,10 @@ import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { api, ApiError } from "../api/client";
 import type {
+  FtpProjectionResponse,
   LoadResponse,
+  MorningResponse,
+  Objective,
   OvertrainingResponse,
   DailyBriefResponse,
   RideVolumeResponse,
@@ -10,6 +13,8 @@ import type {
 } from "../api/types";
 import DailyBriefCard from "../components/DailyBriefCard";
 import LoadCard from "../components/LoadCard";
+import ObjectiveCard from "../components/ObjectiveCard";
+import RecoveryCard from "../components/RecoveryCard";
 import VolumeCard from "../components/VolumeCard";
 import { useMe } from "../hooks/useMe";
 import { useToast } from "../hooks/useToast";
@@ -32,6 +37,9 @@ export default function Dashboard() {
   const [ot, setOt] = useState<OvertrainingResponse | null>(null);
   const [volume, setVolume] = useState<RideVolumeResponse | null>(null);
   const [weekly, setWeekly] = useState<WeeklyVolumeResponse | null>(null);
+  const [morning, setMorning] = useState<MorningResponse | null>(null);
+  const [objective, setObjective] = useState<Objective | null>(null);
+  const [projection, setProjection] = useState<FtpProjectionResponse | null>(null);
   const [brief, setBrief] = useState<DailyBriefResponse | null>(null);
   const [briefLoading, setBriefLoading] = useState(true);
   const [loading, setLoading] = useState(true);
@@ -43,16 +51,22 @@ export default function Dashboard() {
   async function refresh() {
     setLoading(true);
     try {
-      const [l, o, vol, wk] = await Promise.all([
+      const [l, o, vol, wk, morn, obj, proj] = await Promise.all([
         api.metrics.load(90),
         api.metrics.overtraining(),
         api.metrics.rideVolume(),
         api.metrics.weeklyVolume(12),
+        api.morning.get(14),
+        api.objective.get(),
+        api.metrics.ftpProjection(),
       ]);
       setLoad(l);
       setOt(o);
       setVolume(vol);
       setWeekly(wk);
+      setMorning(morn);
+      setObjective(obj);
+      setProjection(proj);
     } catch (err) {
       const msg = err instanceof ApiError ? err.message : String(err);
       push(`Erreur de chargement : ${msg}`, "error");
@@ -102,7 +116,14 @@ export default function Dashboard() {
         data={brief}
         loading={briefLoading}
         secondaryAlerts={secondaryAlerts}
+        indicators={ot?.indicators || null}
       />
+
+      {/* Rangée 2 colonnes (empilée sur mobile) : cap + récupération. */}
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+        <ObjectiveCard objective={objective} projection={projection} loading={loading} />
+        <RecoveryCard morning={morning} loading={loading} />
+      </div>
 
       <VolumeCard volume={volume} weeks={weekly?.weeks || []} />
 

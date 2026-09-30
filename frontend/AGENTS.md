@@ -91,6 +91,22 @@ ce sheet (plus de carte de recherche en haut de page).
   ligne `coach_tip`, et **surface d'alerte unique** (primaire visible +
   secondaires dépliables — la carte « Signaux d'alerte » séparée a été
   supprimée). Animations gated `prefers-reduced-motion`.
+  - **Enrichissements « premier coup d'œil »** : la barre semaine du hero
+    affiche l'**adhérence** (`week_adherence_pct`) + les statuts
+    fait/partiel/manqué/repos coach (`WeekStatuses`) ; la surface d'alerte, quand
+    elle est active, affiche les **indicateurs overtraining chiffrés**
+    (`indicators` de `GET /api/metrics/overtraining` : TSB chronique, monotonie,
+    strain, saut de volume) — masqués en journée normale.
+  - **`RecoveryCard`** — rangée 2 colonnes (`sm:grid-cols-2`) avec
+    `ObjectiveCard`, empilée sur mobile. Récupération : readiness + bande
+    (`ReadinessBadge`, composant partagé extrait de `pages/Morning.tsx`), HRV et
+    FC repos avec delta % vs baseline 14 j, score/durée de sommeil. Source
+    `GET /api/morning?days=14` (⚠️ endpoint **hors cache Workbox** → skeleton).
+  - **`ObjectiveCard`** — objectif courant (`GET /api/objective`) + projection
+    FTP (`GET /api/metrics/ftp-projection`) : type, **J-x**, FTP cible vs
+    projetée (barre de progression), W/kg. État vide → lien vers `/plan`.
+  - Les deux cartes utilisent `StatStrip` (`columns="3-responsive"` / `2`) pour
+    rester lisibles du mobile au desktop.
 - **Identité partagée** — le nom affiché dans la salutation vient du contexte
   `MeProvider` (`hooks/useMe.tsx`) : un seul appel `/me` partagé, plus de fetch
   par page.

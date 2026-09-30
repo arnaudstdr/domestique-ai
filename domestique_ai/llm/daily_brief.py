@@ -133,11 +133,24 @@ def _collect_sleep_history(
     return points
 
 
-def _collect_week_tss(today: _dt.date, ctx: AthleteContext) -> dict[str, Any]:
-    """TSS planifié vs réalisé de la semaine courante (lundi → dimanche).
+_EMPTY_WEEK: dict[str, Any] = {
+    "week_tss_planned": None,
+    "week_tss_done": None,
+    "week_adherence_pct": None,
+    "week_done": None,
+    "week_partial": None,
+    "week_missed": None,
+    "week_skipped": None,
+}
 
-    Best-effort : ``None`` des deux côtés si aucun plan actif. Réutilise la
-    compliance existante pour rester cohérent avec la revue hebdo.
+
+def _collect_week_tss(today: _dt.date, ctx: AthleteContext) -> dict[str, Any]:
+    """TSS planifié vs réalisé + adhérence de la semaine courante (lundi → dimanche).
+
+    Best-effort : renvoie le dict vide (toutes valeurs ``None``) si aucun plan
+    actif. Réutilise la compliance existante pour rester cohérent avec la revue
+    hebdo. L'adhérence reste ``None`` quand aucune séance n'est planifiée cette
+    semaine (pas de « 0 % » trompeur).
     """
     try:
         from domestique_ai.llm.plan_storage import list_decisions, load_active_plan
@@ -146,7 +159,7 @@ def _collect_week_tss(today: _dt.date, ctx: AthleteContext) -> dict[str, Any]:
 
         plan_meta = load_active_plan(ctx.db_path)
         if plan_meta is None:
-            return {"week_tss_planned": None, "week_tss_done": None}
+            return dict(_EMPTY_WEEK)
         plan_id, workouts = plan_meta
         decisions = list_decisions(plan_id, db_path=ctx.db_path)
         monday = today - _dt.timedelta(days=today.weekday())
@@ -156,13 +169,19 @@ def _collect_week_tss(today: _dt.date, ctx: AthleteContext) -> dict[str, Any]:
             week_start=monday,
             decisions=decisions,
         )
+        planned_sessions = report.get("planned_sessions") or 0
         return {
             "week_tss_planned": report.get("planned_tss"),
             "week_tss_done": report.get("realized_tss"),
+            "week_adherence_pct": (report.get("adherence_pct") if planned_sessions > 0 else None),
+            "week_done": report.get("done"),
+            "week_partial": report.get("partial"),
+            "week_missed": report.get("missed"),
+            "week_skipped": report.get("skipped_by_decision"),
         }
     except Exception:  # noqa: BLE001
         log.debug("Échec week TSS", exc_info=True)
-        return {"week_tss_planned": None, "week_tss_done": None}
+        return dict(_EMPTY_WEEK)
 
 
 def _collect_signals(today: _dt.date, ctx: AthleteContext) -> dict[str, Any]:
@@ -346,6 +365,11 @@ def build_daily_brief(
         "sleep_history": [{"date", "hours"}],
         "week_tss_planned": float | None,
         "week_tss_done": float | None,
+        "week_adherence_pct": float | None,
+        "week_done": int | None,
+        "week_partial": int | None,
+        "week_missed": int | None,
+        "week_skipped": int | None,
         "source": "cache" | "llm" | "fallback",
       }``
 
@@ -399,6 +423,11 @@ def build_daily_brief(
         "sleep_history": signals.get("sleep_history") or [],
         "week_tss_planned": signals.get("week_tss_planned"),
         "week_tss_done": signals.get("week_tss_done"),
+        "week_adherence_pct": signals.get("week_adherence_pct"),
+        "week_done": signals.get("week_done"),
+        "week_partial": signals.get("week_partial"),
+        "week_missed": signals.get("week_missed"),
+        "week_skipped": signals.get("week_skipped"),
         "source": source,
     }
     # Check du matin : décision go / alléger / repos répercutée dans le plan,

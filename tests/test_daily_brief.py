@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import datetime as dt
+from types import SimpleNamespace
 
 import pytest
 
@@ -55,6 +56,11 @@ def stable_signals(monkeypatch):
             ],
             "week_tss_planned": 320.0,
             "week_tss_done": 180.0,
+            "week_adherence_pct": 60.0,
+            "week_done": 3,
+            "week_partial": 1,
+            "week_missed": 1,
+            "week_skipped": 1,
         }
 
     monkeypatch.setattr(daily_brief, "_collect_signals", fake_collect)
@@ -294,6 +300,11 @@ def test_build_daily_brief_exposes_hero_fields(stable_signals):
     assert brief["atl"] == pytest.approx(42.8)
     assert brief["week_tss_planned"] == pytest.approx(320.0)
     assert brief["week_tss_done"] == pytest.approx(180.0)
+    assert brief["week_adherence_pct"] == pytest.approx(60.0)
+    assert brief["week_done"] == 3
+    assert brief["week_partial"] == 1
+    assert brief["week_missed"] == 1
+    assert brief["week_skipped"] == 1
     assert len(brief["sleep_history"]) == 2
     assert brief["sleep_history"][0]["hours"] == pytest.approx(7.5)
 
@@ -314,8 +325,80 @@ def test_build_daily_brief_defaults_when_signals_lack_hero_fields(monkeypatch):
     assert brief["atl"] is None
     assert brief["week_tss_planned"] is None
     assert brief["week_tss_done"] is None
+    assert brief["week_adherence_pct"] is None
+    assert brief["week_done"] is None
+    assert brief["week_skipped"] is None
     assert brief["sleep_history"] == []
     assert brief["coach_tip"]
+
+
+def test_collect_week_tss_maps_compliance(monkeypatch, tmp_path):
+    import domestique_ai.llm.plan_storage as plan_storage
+    import domestique_ai.processing.analyzer as analyzer
+    import domestique_ai.processing.compliance as compliance
+
+    monkeypatch.setattr(plan_storage, "load_active_plan", lambda db_path: (1, []))
+    monkeypatch.setattr(plan_storage, "list_decisions", lambda pid, db_path=None: [])
+    monkeypatch.setattr(analyzer, "fetch_activities_from_db", lambda ctx=None: [])
+    monkeypatch.setattr(
+        compliance,
+        "compute_week_compliance",
+        lambda *a, **k: {
+            "planned_sessions": 4,
+            "adherence_pct": 75.0,
+            "planned_tss": 400.0,
+            "realized_tss": 300.0,
+            "done": 3,
+            "partial": 0,
+            "missed": 1,
+            "skipped_by_decision": 0,
+        },
+    )
+    ctx = SimpleNamespace(db_path=tmp_path / "x.db")
+    out = daily_brief._collect_week_tss(dt.date(2026, 5, 21), ctx)
+    assert out["week_tss_planned"] == pytest.approx(400.0)
+    assert out["week_tss_done"] == pytest.approx(300.0)
+    assert out["week_adherence_pct"] == pytest.approx(75.0)
+    assert out["week_done"] == 3
+    assert out["week_missed"] == 1
+    assert out["week_skipped"] == 0
+
+
+def test_collect_week_tss_no_sessions_has_null_adherence(monkeypatch, tmp_path):
+    import domestique_ai.llm.plan_storage as plan_storage
+    import domestique_ai.processing.analyzer as analyzer
+    import domestique_ai.processing.compliance as compliance
+
+    monkeypatch.setattr(plan_storage, "load_active_plan", lambda db_path: (1, []))
+    monkeypatch.setattr(plan_storage, "list_decisions", lambda pid, db_path=None: [])
+    monkeypatch.setattr(analyzer, "fetch_activities_from_db", lambda ctx=None: [])
+    monkeypatch.setattr(
+        compliance,
+        "compute_week_compliance",
+        lambda *a, **k: {
+            "planned_sessions": 0,
+            "adherence_pct": 0.0,
+            "planned_tss": 0.0,
+            "realized_tss": 0.0,
+            "done": 0,
+            "partial": 0,
+            "missed": 0,
+            "skipped_by_decision": 0,
+        },
+    )
+    ctx = SimpleNamespace(db_path=tmp_path / "x.db")
+    out = daily_brief._collect_week_tss(dt.date(2026, 5, 21), ctx)
+    assert out["week_adherence_pct"] is None
+    assert out["week_done"] == 0
+
+
+def test_collect_week_tss_no_active_plan(monkeypatch, tmp_path):
+    import domestique_ai.llm.plan_storage as plan_storage
+
+    monkeypatch.setattr(plan_storage, "load_active_plan", lambda db_path: None)
+    ctx = SimpleNamespace(db_path=tmp_path / "x.db")
+    out = daily_brief._collect_week_tss(dt.date(2026, 5, 21), ctx)
+    assert out == daily_brief._EMPTY_WEEK
 
 
 # ---------- build_coach_context (palier 2) -----------------------------------

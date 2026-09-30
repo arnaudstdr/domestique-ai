@@ -1,7 +1,11 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import { ChevronDown, CircleAlert, Lightbulb, TriangleAlert } from "lucide-react";
-import type { DailyBriefResponse, DailyBriefWorkout } from "../api/types";
+import type {
+  DailyBriefResponse,
+  DailyBriefWorkout,
+  OvertrainingIndicators,
+} from "../api/types";
 import CoachAvatar from "./CoachAvatar";
 import SleepBars from "./SleepBars";
 import TsbGauge, { zoneColor } from "./TsbGauge";
@@ -17,6 +21,8 @@ interface Props {
   loading: boolean;
   /** Alertes overtraining brutes (message + niveau) fusionnées dans la surface unique. */
   secondaryAlerts?: { message: string; level: "warning" | "danger" }[];
+  /** Indicateurs overtraining chiffrés — affichés uniquement en présence d'alerte. */
+  indicators?: OvertrainingIndicators | null;
 }
 
 // Teinte d'ambiance par zone TSB : un halo diffus en fond de hero qui « colore »
@@ -35,7 +41,12 @@ function alertTone(severity: "warning" | "danger" | undefined): string {
   return "bg-overlay/5 border-border/10 text-muted";
 }
 
-export default function DailyBriefCard({ data, loading, secondaryAlerts = [] }: Props) {
+export default function DailyBriefCard({
+  data,
+  loading,
+  secondaryAlerts = [],
+  indicators = null,
+}: Props) {
   const [expanded, setExpanded] = useState(false);
   const [summaryOpen, setSummaryOpen] = useState(false);
   const [alertsOpen, setAlertsOpen] = useState(false);
@@ -133,7 +144,7 @@ export default function DailyBriefCard({ data, loading, secondaryAlerts = [] }: 
       {expanded && hasDetail && <WorkoutDetail workout={workout} />}
 
       <div className="grid grid-cols-2 gap-4">
-        {/* Charge hebdo : TSS réalisé / planifié. */}
+        {/* Charge hebdo : TSS réalisé / planifié + adhérence du plan. */}
         <div>
           <div className="label-eyebrow text-[10px]">Semaine</div>
           {data.week_tss_planned != null ? (
@@ -156,6 +167,20 @@ export default function DailyBriefCard({ data, loading, secondaryAlerts = [] }: 
                   }}
                 />
               </div>
+              {data.week_adherence_pct != null && (
+                <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[10px] text-muted">
+                  <span className="metric-num text-fg-soft">
+                    {Math.round(data.week_adherence_pct)}%
+                  </span>
+                  <span>adhérence</span>
+                  <WeekStatuses
+                    done={data.week_done}
+                    partial={data.week_partial}
+                    missed={data.week_missed}
+                    skipped={data.week_skipped}
+                  />
+                </div>
+              )}
             </>
           ) : (
             <div className="text-sm text-muted">Aucun plan actif</div>
@@ -170,6 +195,7 @@ export default function DailyBriefCard({ data, loading, secondaryAlerts = [] }: 
       <AlertSurface
         primary={data.primary_alert}
         secondary={secondaryAlerts}
+        indicators={indicators}
         open={alertsOpen}
         onToggle={() => setAlertsOpen((v) => !v)}
         accentColor={zoneHex}
@@ -252,12 +278,20 @@ function TodayBar({ workout, expanded, hasDetail, onToggle }: TodayBarProps) {
 interface AlertSurfaceProps {
   primary: DailyBriefResponse["primary_alert"];
   secondary: { message: string; level: "warning" | "danger" }[];
+  indicators?: OvertrainingIndicators | null;
   open: boolean;
   onToggle: () => void;
   accentColor: string;
 }
 
-function AlertSurface({ primary, secondary, open, onToggle, accentColor }: AlertSurfaceProps) {
+function AlertSurface({
+  primary,
+  secondary,
+  indicators = null,
+  open,
+  onToggle,
+  accentColor,
+}: AlertSurfaceProps) {
   const total = (primary ? 1 : 0) + secondary.length;
   if (total === 0) {
     return (
@@ -269,6 +303,24 @@ function AlertSurface({ primary, secondary, open, onToggle, accentColor }: Alert
 
   const danger = primary?.severity === "danger" || secondary.some((a) => a.level === "danger");
   const primaryTone = alertTone(danger ? "danger" : "warning");
+
+  const chips: { label: string; value: string }[] = [];
+  if (indicators) {
+    if (indicators.chronic_tsb != null) {
+      const v = indicators.chronic_tsb;
+      chips.push({ label: "TSB chron.", value: `${v >= 0 ? "+" : ""}${v.toFixed(1)}` });
+    }
+    if (indicators.monotony != null) {
+      chips.push({ label: "Monotonie", value: indicators.monotony.toFixed(1) });
+    }
+    if (indicators.strain != null) {
+      chips.push({ label: "Strain", value: Math.round(indicators.strain).toString() });
+    }
+    if (indicators.weekly_jump_pct != null) {
+      const v = indicators.weekly_jump_pct;
+      chips.push({ label: "Volume", value: `${v >= 0 ? "+" : ""}${v.toFixed(0)}%` });
+    }
+  }
 
   return (
     <div className={`rounded-lg border p-2 text-xs ${primaryTone}`}>
@@ -303,6 +355,16 @@ function AlertSurface({ primary, secondary, open, onToggle, accentColor }: Alert
         </button>
       </div>
       {primary && <div className="mt-1">{primary.message}</div>}
+      {chips.length > 0 && (
+        <div className="mt-1.5 flex flex-wrap gap-1.5">
+          {chips.map((c) => (
+            <span key={c.label} className="rounded bg-overlay/10 px-1.5 py-0.5 text-[10px]">
+              <span className="opacity-70">{c.label}</span>{" "}
+              <span className="metric-num font-medium">{c.value}</span>
+            </span>
+          ))}
+        </div>
+      )}
       {open && secondary.length > 0 && (
         <ul className="mt-1.5 space-y-1 border-t border-border/10 pt-1.5">
           {secondary.map((a, i) => (
@@ -313,6 +375,43 @@ function AlertSurface({ primary, secondary, open, onToggle, accentColor }: Alert
         </ul>
       )}
     </div>
+  );
+}
+
+const WEEK_STATUS_DOTS = [
+  { key: "done", color: "bg-emerald-500", label: "faites" },
+  { key: "partial", color: "bg-amber-500", label: "partielles" },
+  { key: "missed", color: "bg-red-500", label: "manquées" },
+  { key: "skipped", color: "bg-sky-400", label: "repos coach" },
+] as const;
+
+interface WeekStatusesProps {
+  done: number | null;
+  partial: number | null;
+  missed: number | null;
+  skipped: number | null;
+}
+
+function WeekStatuses({ done, partial, missed, skipped }: WeekStatusesProps) {
+  const values: Record<(typeof WEEK_STATUS_DOTS)[number]["key"], number | null> = {
+    done,
+    partial,
+    missed,
+    skipped,
+  };
+  return (
+    <span className="inline-flex flex-wrap items-center gap-1.5">
+      {WEEK_STATUS_DOTS.map(({ key, color, label }) => {
+        const value = values[key];
+        if (!value) return null;
+        return (
+          <span key={key} className="inline-flex items-center gap-0.5" title={label}>
+            <span className={`h-1.5 w-1.5 rounded-full ${color}`} aria-hidden="true" />
+            <span className="metric-num">{value}</span>
+          </span>
+        );
+      })}
+    </span>
   );
 }
 

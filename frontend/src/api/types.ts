@@ -602,6 +602,11 @@ export interface DailyBriefResponse {
   sleep_history: SleepPoint[];
   week_tss_planned: number | null;
   week_tss_done: number | null;
+  week_adherence_pct: number | null;
+  week_done: number | null;
+  week_partial: number | null;
+  week_missed: number | null;
+  week_skipped: number | null;
   source: "cache" | "llm" | "fallback";
   morning_decision?: string | null;
   morning_reason?: string | null;

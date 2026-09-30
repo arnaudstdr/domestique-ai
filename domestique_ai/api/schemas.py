@@ -771,6 +771,13 @@ class DailyBriefResponse(BaseModel):
     sleep_history: list[SleepPoint] = Field(default_factory=list)
     week_tss_planned: float | None = None
     week_tss_done: float | None = None
+    # Compliance de la semaine courante (adhérence + statuts fait/partiel/
+    # manqué/repos coach), pour enrichir la barre hebdo du hero.
+    week_adherence_pct: float | None = None
+    week_done: int | None = None
+    week_partial: int | None = None
+    week_missed: int | None = None
+    week_skipped: int | None = None
     source: Literal["cache", "llm", "fallback"]
     # Check du matin : décision go / adjust / rest répercutée dans le plan.
     morning_decision: str | None = None
