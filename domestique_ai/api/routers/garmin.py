@@ -76,6 +76,18 @@ def _set_state(key: str, **fields: Any) -> None:
         _sync_state[key] = base
 
 
+def sync_overview() -> dict[str, Any]:
+    """Vue agrégée de l'état des synchros (observabilité admin, sans chemins)."""
+    with _sync_lock:
+        states = list(_sync_state.values())
+    finished = [s.get("finished_at") for s in states if s.get("finished_at")]
+    return {
+        "syncing": sum(1 for s in states if s.get("status") == "syncing"),
+        "errors": sum(1 for s in states if s.get("status") == "error"),
+        "last_finished_at": max(finished) if finished else None,
+    }
+
+
 def _claim_sync(key: str) -> bool:
     with _sync_lock:
         if (_sync_state.get(key) or {}).get("status") == "syncing":

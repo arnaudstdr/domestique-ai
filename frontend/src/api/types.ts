@@ -788,6 +788,13 @@ export interface AdminFeedback {
 
 export interface AdminSettings {
   signup_enabled: boolean;
+  maintenance_mode: boolean;
+  broadcast_message: string | null;
+}
+
+export interface Announcement {
+  maintenance_mode: boolean;
+  message: string | null;
 }
 
 export interface AdminLink {
@@ -834,4 +841,33 @@ export interface AdminInvitation {
   created_by_public_id: string | null;
   created_by_email: string | null;
   accepted_public_id: string | null;
+}
+
+export interface AdminStats {
+  users_by_role: Record<string, number>;
+  invitations_by_status: Record<string, number>;
+  feedback_by_status: Record<string, number>;
+  active_sessions: number;
+  garmin_connected: number;
+  athlete_spaces: number;
+  platform_db_bytes: number;
+}
+
+export interface SchedulerJob {
+  id: string;
+  next_run_time: string | null;
+}
+
+export interface AdminStatus {
+  version: string;
+  scheduler_running: boolean;
+  jobs: SchedulerJob[];
+  healthcheck_configured: boolean;
+  healthcheck_last: { ok: boolean; at: string } | null;
+  garmin_syncing: number;
+  garmin_errors: number;
+  garmin_last_finished_at: string | null;
+  timezone: string;
+  daily_check: string | null;
+  weekly_review: string | null;
 }

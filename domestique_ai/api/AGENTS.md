@@ -117,8 +117,12 @@ SQLite autorise les trois.
   `POST /users/{id}/logout` (révoque toutes les sessions), `DELETE /users/{id}`
   (compte + espace disque `remove_athlete_space` ; bootstrap refusé). Retours :
   `GET /feedback`, `PATCH /feedback/{id}`. Invitations : `GET /invitations`
-  (toutes provenances, enrichies émetteur/acceptant), `DELETE
-  /invitations/{id}` (révoque une invitation `pending`). Réglages :
+  (toutes provenances, enrichies émetteur/acceptant),   `DELETE
+  /invitations/{id}` (révoque une invitation `pending`). Observabilité :
+  `GET /stats` (comptes par rôle, invitations/feedback par statut, sessions
+  actives, Garmin connectés, espaces athlètes, taille de `platform.db`) et
+  `GET /status` (version, `scheduler.jobs_snapshot()`, `garmin.sync_overview()`,
+  dernier `healthcheck.last_ping()`, fuseau/horaires). Réglages :
   `GET|PUT /settings`.
   L'admin est **isolé** : il n'hérite pas des droits coach
   (`require_coach`/`get_athlete_context` inchangés), et son rôle (comme celui du
@@ -133,10 +137,15 @@ SQLite autorise les trois.
   DELETE). Jamais de secret dans les détails. Consultable via `GET /audit`
   (`limit` optionnel, plus récent d'abord).
 - **Réglages plateforme** — table `platform_settings` (key/value) de
-  `platform.db`, éditée à chaud par l'admin. Seul réglage exposé pour l'instant :
-  `signup_enabled`, qui surcharge `DOMESTIQUE_AI_SIGNUP_ENABLED`. La résolution
-  est `platform_db.effective_signup_enabled()` (override DB sinon env),
-  consommée par `/api/auth/config` et `/api/auth/signup`.
+  `platform.db`, éditée à chaud par l'admin via `GET|PUT /settings` :
+  `signup_enabled` (surcharge `DOMESTIQUE_AI_SIGNUP_ENABLED`, résolu par
+  `effective_signup_enabled()`), `maintenance_mode` (bool) et
+  `broadcast_message` (≤ 500 car., `NULL` = pas de bandeau). `PUT` accepte un
+  patch partiel (`exclude_unset`) et journalise les champs modifiés.
+- **Annonce / bandeau** — `GET /api/announcement` (router
+  `api/routers/announcement.py`, authentifié, lisible par **tout** compte) :
+  `{maintenance_mode, message}` depuis `platform_db.get_announcement()`. Non
+  bloquant : l'UI affiche un bandeau (`AnnouncementBanner`) plutôt qu'un gate.
 - **Middleware** — aucune exception ajoutée : `/api/admin/*` exige un Bearer, et
   un admin à mot de passe reste soumis à l'enrôlement 2FA (le bootstrap, lui,
   reste exempté break-glass).

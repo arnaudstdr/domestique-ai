@@ -695,6 +695,22 @@ def effective_signup_enabled(path: Path | None = None) -> bool:
     return override.strip().lower() in {"1", "true", "yes", "on"}
 
 
+def _as_bool(value: str | None) -> bool:
+    return (value or "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def get_announcement(path: Path | None = None) -> dict[str, Any]:
+    """Annonce plateforme : ``{maintenance_mode, message}``.
+
+    Alimente le bandeau diffusé à tous les utilisateurs connectés (non bloquant).
+    """
+    message = (get_setting("broadcast_message", path=path) or "").strip() or None
+    return {
+        "maintenance_mode": _as_bool(get_setting("maintenance_mode", path=path)),
+        "message": message,
+    }
+
+
 # ---------------------------------------------------------------------------
 # Feedback (retours des testeurs — data plateforme, cross-tenant)
 # ---------------------------------------------------------------------------
@@ -927,6 +943,16 @@ def list_sessions(
                 s for s in result if s["revoked_at"] is None and not _is_expired(s["expires_at"])
             ]
         return result
+    finally:
+        conn.close()
+
+
+def count_active_sessions(path: Path | None = None) -> int:
+    """Nombre de sessions actives (non révoquées, non expirées) tous comptes."""
+    conn = _connect(path)
+    try:
+        rows = conn.execute("SELECT expires_at FROM sessions WHERE revoked_at IS NULL").fetchall()
+        return sum(1 for r in rows if not _is_expired(r["expires_at"]))
     finally:
         conn.close()
 

@@ -24,6 +24,9 @@ from domestique_ai.api.routers import (
     admin as admin_router,
 )
 from domestique_ai.api.routers import (
+    announcement as announcement_router,
+)
+from domestique_ai.api.routers import (
     auth as auth_router,
 )
 from domestique_ai.api.routers import (
@@ -359,6 +362,9 @@ app.include_router(feedback_router.router)
 # Panneau d'administration plateforme : data cross-tenant (comptes, retours,
 # réglages), réservé au rôle ``admin`` (non scopé par athlète).
 app.include_router(admin_router.router)
+
+# Annonce plateforme (bandeau) : lisible par tout compte authentifié.
+app.include_router(announcement_router.router)
 
 
 @app.get("/api/health", tags=["meta"])

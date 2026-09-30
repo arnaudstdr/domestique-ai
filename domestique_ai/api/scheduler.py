@@ -517,3 +517,22 @@ def stop_scheduler() -> None:
     _scheduler.shutdown(wait=False)
     _scheduler = None
     log.info("Scheduler arrêté.")
+
+
+def jobs_snapshot() -> dict[str, object]:
+    """État du scheduler pour l'observabilité admin (jobs + prochaines exécutions)."""
+    if _scheduler is None:
+        return {"running": False, "jobs": []}
+    jobs = []
+    for job in _scheduler.get_jobs():
+        next_run = getattr(job, "next_run_time", None)
+        jobs.append(
+            {
+                "id": job.id,
+                "next_run_time": next_run.isoformat() if next_run else None,
+            }
+        )
+    return {
+        "running": bool(getattr(_scheduler, "running", False)),
+        "jobs": sorted(jobs, key=lambda j: str(j["id"])),
+    }

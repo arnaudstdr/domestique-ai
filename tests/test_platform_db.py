@@ -578,6 +578,7 @@ def test_list_sessions_active_only_filters_revoked():
     active = pdb.list_sessions(user["id"])
     assert len(active) == 1
     assert len(pdb.list_sessions(user["id"], active_only=False)) == 2
+    assert pdb.count_active_sessions() == 1
 
 
 def test_list_coaches_for_athlete():
@@ -598,3 +599,12 @@ def test_admin_audit_record_and_list():
     assert entries[0]["target_public_id"] == target["public_id"]
     assert entries[0]["details"] == {"from": "athlete", "to": "coach"}
     assert pdb.list_admin_audit(limit=0) == []
+
+
+def test_get_announcement_defaults_and_override():
+    assert pdb.get_announcement() == {"maintenance_mode": False, "message": None}
+    pdb.set_setting("maintenance_mode", "1")
+    pdb.set_setting("broadcast_message", "  Bonjour  ")
+    assert pdb.get_announcement() == {"maintenance_mode": True, "message": "Bonjour"}
+    pdb.set_setting("broadcast_message", "   ")
+    assert pdb.get_announcement()["message"] is None

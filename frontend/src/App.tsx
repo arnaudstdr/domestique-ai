@@ -1,6 +1,7 @@
 import { Link, Navigate, Route, Routes, useNavigate } from "react-router-dom";
 import { Eye, MessageSquare, ShieldCheck, UserRound, Users, X } from "lucide-react";
 import BottomNav from "./components/BottomNav";
+import AnnouncementBanner from "./components/AnnouncementBanner";
 import EmailVerificationBanner from "./components/EmailVerificationBanner";
 import Dashboard from "./pages/Dashboard";
 import Activities from "./pages/Activities";
@@ -155,6 +156,7 @@ function AuthedShell() {
         </div>
       </header>
       <EmailVerificationBanner />
+      <AnnouncementBanner />
       <main className="mx-auto max-w-3xl px-4 pt-4 pb-24">
         <Routes>
           <Route path="/" element={<Dashboard />} />

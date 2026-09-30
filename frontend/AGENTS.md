@@ -156,17 +156,22 @@ ce sheet (plus de carte de recherche en haut de page).
   `api.auth.deleteAccount` → `clearApiToken` → `/login`.
 - **Admin** — page `/admin` (`pages/Admin.tsx`), lien d'en-tête `ShieldCheck`
   affiché uniquement si `me.role === "admin"` (`AuthedShell`). Sections :
-  réglages plateforme (toggle `signup_enabled`), comptes, invitations (toutes
+  réglages plateforme (toggle `signup_enabled`, toggle `maintenance_mode`,
+  message diffusé), comptes, invitations (toutes
   provenances, révocation des `pending`), retours testeurs
   cross-tenant (filtre par statut + changement de statut
   `new`/`acknowledged`/`done`/`rejected`), et journal d'audit (dernières actions
-  admin, libellés FR). Chaque compte est **dépliable**
+  admin, libellés FR), et un encart **Plateforme** (stats + statut ops :
+  scheduler, sync Garmin, healthcheck, version, fuseau). Chaque compte est
+  **dépliable**
   (`components/AdminUserRow.tsx`) : fiche (verrouillage, email vérifié, 2FA,
   Garmin, nb d'activités, sessions actives, liens coach↔athlète) + actions
   (changer le rôle, réinitialiser la 2FA, déverrouiller, vérifier l'email,
   envoyer un reset mot de passe, déconnecter partout, supprimer — ce dernier
   confirmé par saisie de l'email). L'admin n'a **aucun** autre écran (pas de
-  roster/impersonation). `withAthlete` exclut `/api/admin/*`.
+  roster/impersonation). `withAthlete` exclut `/api/admin/*`. Le réglage
+  maintenance/message alimente `components/AnnouncementBanner.tsx` (monté dans
+  `AuthedShell`, bandeau non bloquant pour tous).
 
 ## Avatar — redimensionnement client
 

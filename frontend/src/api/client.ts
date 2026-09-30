@@ -10,13 +10,16 @@ import type {
   ActivitySummary,
   ActivityUpdate,
   ActivityWeather,
-  AdminFeedback,
-  AdminSettings,
-  AdminUser,
   AdminAuditEntry,
+  AdminFeedback,
   AdminInvitation,
   AdminSession,
+  AdminSettings,
+  AdminStats,
+  AdminStatus,
+  AdminUser,
   AdminUserDetail,
+  Announcement,
   AthleteSummary,
   Availability,
   CoachMemoryFact,
@@ -718,17 +721,23 @@ export const api = {
     invitations: () => http<AdminInvitation[]>(`/api/admin/invitations`),
     revokeInvitation: (id: number) =>
       http<void>(`/api/admin/invitations/${id}`, { method: "DELETE" }),
+    stats: () => http<AdminStats>(`/api/admin/stats`),
+    status: () => http<AdminStatus>(`/api/admin/status`),
     setFeedbackStatus: (id: number, status: FeedbackStatus) =>
       http<AdminFeedback>(`/api/admin/feedback/${id}`, {
         method: "PATCH",
         body: JSON.stringify({ status }),
       }),
     settings: () => http<AdminSettings>(`/api/admin/settings`),
-    updateSettings: (body: AdminSettings) =>
+    updateSettings: (body: Partial<AdminSettings>) =>
       http<AdminSettings>(`/api/admin/settings`, {
         method: "PUT",
         body: JSON.stringify(body),
       }),
+  },
+  // Annonce plateforme (bandeau) — lisible par tout compte authentifié.
+  announcement: {
+    get: () => http<Announcement>(`/api/announcement`),
   },
 };
 

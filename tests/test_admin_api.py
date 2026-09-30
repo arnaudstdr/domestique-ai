@@ -17,6 +17,7 @@ from fastapi.testclient import TestClient
 from domestique_ai import platform_db as pdb
 from domestique_ai.api.auth import BearerAuthMiddleware
 from domestique_ai.api.routers import admin as admin_router
+from domestique_ai.api.routers import announcement as announcement_router
 from domestique_ai.api.routers import auth as auth_router
 
 _LEGACY = "legacy-admin-token"
@@ -27,6 +28,7 @@ def _make_app() -> FastAPI:
     app.add_middleware(BearerAuthMiddleware, token=_LEGACY)
     app.include_router(auth_router.router)
     app.include_router(admin_router.router)
+    app.include_router(announcement_router.router)
     return app
 
 
@@ -389,3 +391,81 @@ def test_admin_revoke_unknown_invitation_is_404(client: TestClient):
 def test_invitations_forbidden_for_non_admin(client: TestClient):
     athlete_token, _ = _session("athlete")
     assert client.get("/api/admin/invitations", headers=_bearer(athlete_token)).status_code == 403
+
+
+# --- Réglages étendus + annonce -----------------------------------------------
+
+
+def test_admin_settings_announcement(client: TestClient):
+    admin_token, _ = _session("admin")
+    r = client.put(
+        "/api/admin/settings",
+        headers=_bearer(admin_token),
+        json={"maintenance_mode": True, "broadcast_message": "  Maintenance prévue  "},
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["maintenance_mode"] is True
+    assert body["broadcast_message"] == "Maintenance prévue"
+
+    # Le message vide retire le bandeau.
+    r2 = client.put(
+        "/api/admin/settings", headers=_bearer(admin_token), json={"broadcast_message": "   "}
+    )
+    assert r2.json()["broadcast_message"] is None
+
+
+def test_admin_settings_rejects_long_message(client: TestClient):
+    admin_token, _ = _session("admin")
+    r = client.put(
+        "/api/admin/settings",
+        headers=_bearer(admin_token),
+        json={"broadcast_message": "x" * 501},
+    )
+    assert r.status_code == 422
+
+
+def test_announcement_readable_by_any_account(client: TestClient):
+    admin_token, _ = _session("admin")
+    athlete_token, _ = _session("athlete")
+    client.put(
+        "/api/admin/settings",
+        headers=_bearer(admin_token),
+        json={"maintenance_mode": True, "broadcast_message": "Info"},
+    )
+
+    for token in (admin_token, athlete_token):
+        r = client.get("/api/announcement", headers=_bearer(token))
+        assert r.status_code == 200, r.text
+        assert r.json() == {"maintenance_mode": True, "message": "Info"}
+
+
+# --- Stats & statut ops -------------------------------------------------------
+
+
+def test_admin_stats(client: TestClient):
+    admin_token, _ = _session("admin")
+    _session("athlete")
+    r = client.get("/api/admin/stats", headers=_bearer(admin_token))
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["users_by_role"].get("admin", 0) >= 1
+    assert body["users_by_role"].get("athlete", 0) >= 1
+    assert isinstance(body["active_sessions"], int)
+    assert body["platform_db_bytes"] > 0
+
+
+def test_admin_status(client: TestClient):
+    admin_token, _ = _session("admin")
+    r = client.get("/api/admin/status", headers=_bearer(admin_token))
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert isinstance(body["version"], str) and body["version"]
+    assert isinstance(body["scheduler_running"], bool)
+    assert isinstance(body["jobs"], list)
+
+
+def test_stats_and_status_forbidden_for_non_admin(client: TestClient):
+    athlete_token, _ = _session("athlete")
+    assert client.get("/api/admin/stats", headers=_bearer(athlete_token)).status_code == 403
+    assert client.get("/api/admin/status", headers=_bearer(athlete_token)).status_code == 403
