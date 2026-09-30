@@ -156,7 +156,8 @@ ce sheet (plus de carte de recherche en haut de page).
   `api.auth.deleteAccount` → `clearApiToken` → `/login`.
 - **Admin** — page `/admin` (`pages/Admin.tsx`), lien d'en-tête `ShieldCheck`
   affiché uniquement si `me.role === "admin"` (`AuthedShell`). Sections :
-  réglages plateforme (toggle `signup_enabled`), comptes, retours testeurs
+  réglages plateforme (toggle `signup_enabled`), comptes, invitations (toutes
+  provenances, révocation des `pending`), retours testeurs
   cross-tenant (filtre par statut + changement de statut
   `new`/`acknowledged`/`done`/`rejected`), et journal d'audit (dernières actions
   admin, libellés FR). Chaque compte est **dépliable**

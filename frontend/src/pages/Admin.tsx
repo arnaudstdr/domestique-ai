@@ -5,6 +5,7 @@ import AdminUserRow from "../components/AdminUserRow";
 import type {
   AdminAuditEntry,
   AdminFeedback,
+  AdminInvitation,
   AdminSettings,
   AdminUser,
   FeedbackStatus,
@@ -12,6 +13,13 @@ import type {
 import { useToast } from "../hooks/useToast";
 
 const FEEDBACK_STATUSES: FeedbackStatus[] = ["new", "acknowledged", "done", "rejected"];
+
+const INVITATION_STATUS_LABELS: Record<string, string> = {
+  pending: "En attente",
+  accepted: "Acceptée",
+  revoked: "Révoquée",
+  expired: "Expirée",
+};
 
 const AUDIT_LABELS: Record<string, string> = {
   role_change: "Changement de rôle",
@@ -23,6 +31,7 @@ const AUDIT_LABELS: Record<string, string> = {
   delete_account: "Suppression de compte",
   feedback_status: "Statut d'un retour",
   settings_update: "Réglages plateforme",
+  invitation_revoke: "Révocation d'invitation",
 };
 const FEEDBACK_LABELS: Record<FeedbackStatus, string> = {
   new: "Nouveau",
@@ -71,6 +80,7 @@ export default function Admin() {
   const [settings, setSettings] = useState<AdminSettings | null>(null);
   const [feedback, setFeedback] = useState<AdminFeedback[] | null>(null);
   const [audit, setAudit] = useState<AdminAuditEntry[] | null>(null);
+  const [invitations, setInvitations] = useState<AdminInvitation[] | null>(null);
   const [savingSettings, setSavingSettings] = useState(false);
   const [feedbackFilter, setFeedbackFilter] = useState<FeedbackStatus | "all">("all");
   const [savingFeedbackId, setSavingFeedbackId] = useState<number | null>(null);
@@ -89,6 +99,10 @@ export default function Admin() {
       .audit()
       .then(setAudit)
       .catch((e) => push(`Journal : ${errMessage(e)}`, "error"));
+    api.admin
+      .invitations()
+      .then(setInvitations)
+      .catch((e) => push(`Invitations : ${errMessage(e)}`, "error"));
   }, [push]);
 
   function updateUser(updated: AdminUser) {
@@ -111,6 +125,19 @@ export default function Admin() {
       push(`Statut du retour : ${errMessage(err)}`, "error");
     } finally {
       setSavingFeedbackId(null);
+    }
+  }
+
+  async function revokeInvitation(inv: AdminInvitation) {
+    if (!window.confirm(`Révoquer l'invitation #${inv.id} ?`)) return;
+    try {
+      await api.admin.revokeInvitation(inv.id);
+      setInvitations((prev) =>
+        prev ? prev.map((x) => (x.id === inv.id ? { ...x, status: "revoked" } : x)) : prev,
+      );
+      push(`Invitation #${inv.id} révoquée`, "success");
+    } catch (err) {
+      push(`Révocation : ${errMessage(err)}`, "error");
     }
   }
 
@@ -176,6 +203,44 @@ export default function Admin() {
           <ul className="divide-y divide-border/[0.06]">
             {users.map((u) => (
               <AdminUserRow key={u.public_id} user={u} onUpdated={updateUser} onDeleted={removeUser} />
+            ))}
+          </ul>
+        )}
+      </section>
+
+      <section className="card space-y-3">
+        <h3 className="text-sm font-semibold text-fg">Invitations</h3>
+        {invitations === null ? (
+          <div className="flex items-center gap-2 text-sm text-muted">
+            <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+            Chargement…
+          </div>
+        ) : invitations.length === 0 ? (
+          <p className="text-sm text-muted">Aucune invitation.</p>
+        ) : (
+          <ul className="divide-y divide-border/[0.06]">
+            {invitations.map((inv) => (
+              <li key={inv.id} className="flex items-center justify-between gap-3 py-2 text-xs">
+                <div className="min-w-0">
+                  <div className="text-fg-soft">
+                    #{inv.id} · {inv.role} ·{" "}
+                    {INVITATION_STATUS_LABELS[inv.status] ?? inv.status}
+                  </div>
+                  <div className="truncate text-muted">
+                    {inv.created_by_email || inv.created_by_public_id?.slice(0, 8) || "—"}
+                    {inv.created_at ? ` · ${new Date(inv.created_at).toLocaleDateString()}` : ""}
+                  </div>
+                </div>
+                {inv.status === "pending" && (
+                  <button
+                    type="button"
+                    onClick={() => revokeInvitation(inv)}
+                    className="shrink-0 rounded-lg border border-red-500/30 bg-red-500/[0.06] px-2.5 py-1 text-red-400 hover:border-red-500/50"
+                  >
+                    Révoquer
+                  </button>
+                )}
+              </li>
             ))}
           </ul>
         )}

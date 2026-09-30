@@ -14,6 +14,7 @@ import type {
   AdminSettings,
   AdminUser,
   AdminAuditEntry,
+  AdminInvitation,
   AdminSession,
   AdminUserDetail,
   AthleteSummary,
@@ -714,6 +715,9 @@ export const api = {
       http<void>(`/api/admin/users/${publicId}`, { method: "DELETE" }),
     feedback: () => http<AdminFeedback[]>(`/api/admin/feedback`),
     audit: (limit = 100) => http<AdminAuditEntry[]>(`/api/admin/audit?limit=${limit}`),
+    invitations: () => http<AdminInvitation[]>(`/api/admin/invitations`),
+    revokeInvitation: (id: number) =>
+      http<void>(`/api/admin/invitations/${id}`, { method: "DELETE" }),
     setFeedbackStatus: (id: number, status: FeedbackStatus) =>
       http<AdminFeedback>(`/api/admin/feedback/${id}`, {
         method: "PATCH",

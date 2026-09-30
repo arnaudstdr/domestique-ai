@@ -116,7 +116,10 @@ SQLite autorise les trois.
   email — 400 sans email), `GET /users/{id}/sessions` (sans `token_hash`),
   `POST /users/{id}/logout` (révoque toutes les sessions), `DELETE /users/{id}`
   (compte + espace disque `remove_athlete_space` ; bootstrap refusé). Retours :
-  `GET /feedback`, `PATCH /feedback/{id}`. Réglages : `GET|PUT /settings`.
+  `GET /feedback`, `PATCH /feedback/{id}`. Invitations : `GET /invitations`
+  (toutes provenances, enrichies émetteur/acceptant), `DELETE
+  /invitations/{id}` (révoque une invitation `pending`). Réglages :
+  `GET|PUT /settings`.
   L'admin est **isolé** : il n'hérite pas des droits coach
   (`require_coach`/`get_athlete_context` inchangés), et son rôle (comme celui du
   bootstrap) ne peut pas être modifié via l'endpoint de rôle (403).

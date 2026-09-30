@@ -823,3 +823,15 @@ export interface AdminAuditEntry {
   details: unknown;
   created_at: string;
 }
+
+export interface AdminInvitation {
+  id: number;
+  role: string;
+  status: string;
+  created_at: string | null;
+  expires_at: string | null;
+  accepted_at: string | null;
+  created_by_public_id: string | null;
+  created_by_email: string | null;
+  accepted_public_id: string | null;
+}

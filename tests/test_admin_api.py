@@ -357,3 +357,35 @@ def test_admin_audit_endpoint(client: TestClient):
 def test_audit_forbidden_for_non_admin(client: TestClient):
     athlete_token, _ = _session("athlete")
     assert client.get("/api/admin/audit", headers=_bearer(athlete_token)).status_code == 403
+
+
+# --- Invitations plateforme ---------------------------------------------------
+
+
+def test_admin_lists_and_revokes_invitations(client: TestClient):
+    admin_token, _ = _session("admin")
+    coach = pdb.create_user(role="coach", email="coach@example.com")
+    inv, _token = pdb.create_invitation(created_by=coach["id"], role="athlete")
+
+    r = client.get("/api/admin/invitations", headers=_bearer(admin_token))
+    assert r.status_code == 200, r.text
+    row = next(i for i in r.json() if i["id"] == inv["id"])
+    assert row["role"] == "athlete" and row["status"] == "pending"
+    assert row["created_by_email"] == "coach@example.com"
+
+    d = client.delete(f"/api/admin/invitations/{inv['id']}", headers=_bearer(admin_token))
+    assert d.status_code == 204
+    assert pdb.list_invitations(created_by=None)[0]["status"] == "revoked"
+
+
+def test_admin_revoke_unknown_invitation_is_404(client: TestClient):
+    admin_token, _ = _session("admin")
+    assert (
+        client.delete("/api/admin/invitations/999999", headers=_bearer(admin_token)).status_code
+        == 404
+    )
+
+
+def test_invitations_forbidden_for_non_admin(client: TestClient):
+    athlete_token, _ = _session("athlete")
+    assert client.get("/api/admin/invitations", headers=_bearer(athlete_token)).status_code == 403
