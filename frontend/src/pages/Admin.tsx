@@ -2,10 +2,28 @@ import { useEffect, useState } from "react";
 import { Loader2, ShieldCheck } from "lucide-react";
 import { api, ApiError } from "../api/client";
 import AdminUserRow from "../components/AdminUserRow";
-import type { AdminFeedback, AdminSettings, AdminUser, FeedbackStatus } from "../api/types";
+import type {
+  AdminAuditEntry,
+  AdminFeedback,
+  AdminSettings,
+  AdminUser,
+  FeedbackStatus,
+} from "../api/types";
 import { useToast } from "../hooks/useToast";
 
 const FEEDBACK_STATUSES: FeedbackStatus[] = ["new", "acknowledged", "done", "rejected"];
+
+const AUDIT_LABELS: Record<string, string> = {
+  role_change: "Changement de rôle",
+  reset_2fa: "Réinitialisation 2FA",
+  unlock_account: "Déverrouillage de compte",
+  verify_email: "Email vérifié",
+  password_reset: "Lien de reset mot de passe",
+  logout_all: "Déconnexion globale",
+  delete_account: "Suppression de compte",
+  feedback_status: "Statut d'un retour",
+  settings_update: "Réglages plateforme",
+};
 const FEEDBACK_LABELS: Record<FeedbackStatus, string> = {
   new: "Nouveau",
   acknowledged: "Pris en compte",
@@ -52,6 +70,7 @@ export default function Admin() {
   const [users, setUsers] = useState<AdminUser[] | null>(null);
   const [settings, setSettings] = useState<AdminSettings | null>(null);
   const [feedback, setFeedback] = useState<AdminFeedback[] | null>(null);
+  const [audit, setAudit] = useState<AdminAuditEntry[] | null>(null);
   const [savingSettings, setSavingSettings] = useState(false);
   const [feedbackFilter, setFeedbackFilter] = useState<FeedbackStatus | "all">("all");
   const [savingFeedbackId, setSavingFeedbackId] = useState<number | null>(null);
@@ -66,6 +85,10 @@ export default function Admin() {
       .feedback()
       .then(setFeedback)
       .catch((e) => push(`Retours : ${errMessage(e)}`, "error"));
+    api.admin
+      .audit()
+      .then(setAudit)
+      .catch((e) => push(`Journal : ${errMessage(e)}`, "error"));
   }, [push]);
 
   function updateUser(updated: AdminUser) {
@@ -233,6 +256,35 @@ export default function Admin() {
               );
             })()}
           </>
+        )}
+      </section>
+
+      <section className="card space-y-3">
+        <h3 className="text-sm font-semibold text-fg">Journal d'audit</h3>
+        {audit === null ? (
+          <div className="flex items-center gap-2 text-sm text-muted">
+            <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+            Chargement…
+          </div>
+        ) : audit.length === 0 ? (
+          <p className="text-sm text-muted">Aucune action enregistrée.</p>
+        ) : (
+          <ul className="divide-y divide-border/[0.06]">
+            {audit.map((e) => (
+              <li key={e.id} className="flex items-start justify-between gap-3 py-2 text-xs">
+                <div className="min-w-0">
+                  <div className="text-fg-soft">{AUDIT_LABELS[e.action] ?? e.action}</div>
+                  <div className="truncate text-muted">
+                    {e.actor_public_id ? `par ${e.actor_public_id.slice(0, 8)}` : "—"}
+                    {e.target_public_id ? ` → ${e.target_public_id.slice(0, 8)}` : ""}
+                  </div>
+                </div>
+                <span className="shrink-0 text-muted">
+                  {new Date(e.created_at).toLocaleString()}
+                </span>
+              </li>
+            ))}
+          </ul>
         )}
       </section>
     </div>

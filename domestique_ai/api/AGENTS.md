@@ -127,7 +127,8 @@ SQLite autorise les trois.
   `password_reset`, `logout_all`, `delete_account`, `feedback_status`,
   `settings_update`. FK `SET NULL` + snapshot `public_id` → l'historique survit à
   la suppression d'un compte (l'audit de suppression est écrit **avant** le
-  DELETE). Jamais de secret dans les détails.
+  DELETE). Jamais de secret dans les détails. Consultable via `GET /audit`
+  (`limit` optionnel, plus récent d'abord).
 - **Réglages plateforme** — table `platform_settings` (key/value) de
   `platform.db`, éditée à chaud par l'admin. Seul réglage exposé pour l'instant :
   `signup_enabled`, qui surcharge `DOMESTIQUE_AI_SIGNUP_ENABLED`. La résolution

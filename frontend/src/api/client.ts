@@ -13,6 +13,7 @@ import type {
   AdminFeedback,
   AdminSettings,
   AdminUser,
+  AdminAuditEntry,
   AdminSession,
   AdminUserDetail,
   AthleteSummary,
@@ -712,6 +713,7 @@ export const api = {
     deleteUser: (publicId: string) =>
       http<void>(`/api/admin/users/${publicId}`, { method: "DELETE" }),
     feedback: () => http<AdminFeedback[]>(`/api/admin/feedback`),
+    audit: (limit = 100) => http<AdminAuditEntry[]>(`/api/admin/audit?limit=${limit}`),
     setFeedbackStatus: (id: number, status: FeedbackStatus) =>
       http<AdminFeedback>(`/api/admin/feedback/${id}`, {
         method: "PATCH",

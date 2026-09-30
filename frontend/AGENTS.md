@@ -158,7 +158,8 @@ ce sheet (plus de carte de recherche en haut de page).
   affiché uniquement si `me.role === "admin"` (`AuthedShell`). Sections :
   réglages plateforme (toggle `signup_enabled`), comptes, retours testeurs
   cross-tenant (filtre par statut + changement de statut
-  `new`/`acknowledged`/`done`/`rejected`). Chaque compte est **dépliable**
+  `new`/`acknowledged`/`done`/`rejected`), et journal d'audit (dernières actions
+  admin, libellés FR). Chaque compte est **dépliable**
   (`components/AdminUserRow.tsx`) : fiche (verrouillage, email vérifié, 2FA,
   Garmin, nb d'activités, sessions actives, liens coach↔athlète) + actions
   (changer le rôle, réinitialiser la 2FA, déverrouiller, vérifier l'email,

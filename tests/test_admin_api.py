@@ -337,3 +337,23 @@ def test_admin_actions_are_audited(client: TestClient):
         for e in entries
     )
     assert all(e["actor_public_id"] == admin_pid for e in entries)
+
+
+def test_admin_audit_endpoint(client: TestClient):
+    admin_token, admin_pid = _session("admin")
+    target = pdb.create_user(role="athlete")
+    client.post(
+        f"/api/admin/users/{target['public_id']}/unlock",
+        headers=_bearer(admin_token),
+    )
+    r = client.get("/api/admin/audit?limit=10", headers=_bearer(admin_token))
+    assert r.status_code == 200, r.text
+    entry = r.json()[0]
+    assert entry["action"] == "unlock_account"
+    assert entry["actor_public_id"] == admin_pid
+    assert entry["target_public_id"] == target["public_id"]
+
+
+def test_audit_forbidden_for_non_admin(client: TestClient):
+    athlete_token, _ = _session("athlete")
+    assert client.get("/api/admin/audit", headers=_bearer(athlete_token)).status_code == 403

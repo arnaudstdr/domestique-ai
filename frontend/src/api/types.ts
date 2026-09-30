@@ -814,3 +814,12 @@ export interface AdminSession {
   revoked_at: string | null;
   last_used_at: string | null;
 }
+
+export interface AdminAuditEntry {
+  id: number;
+  actor_public_id: string | null;
+  action: string;
+  target_public_id: string | null;
+  details: unknown;
+  created_at: string;
+}
