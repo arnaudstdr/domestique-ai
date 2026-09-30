@@ -850,6 +850,7 @@ export interface AdminStats {
   active_sessions: number;
   garmin_connected: number;
   athlete_spaces: number;
+  orphan_athlete_spaces: number;
   platform_db_bytes: number;
 }
 

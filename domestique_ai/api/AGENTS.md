@@ -120,10 +120,13 @@ SQLite autorise les trois.
   (toutes provenances, enrichies émetteur/acceptant),   `DELETE
   /invitations/{id}` (révoque une invitation `pending`). Observabilité :
   `GET /stats` (comptes par rôle, invitations/feedback par statut, sessions
-  actives, Garmin connectés, espaces athlètes, taille de `platform.db`) et
-  `GET /status` (version, `scheduler.jobs_snapshot()`, `garmin.sync_overview()`,
-  dernier `healthcheck.last_ping()`, fuseau/horaires). Réglages :
-  `GET|PUT /settings`.
+  actives, Garmin connectés, espaces athlètes + orphelins, taille de
+  `platform.db`) et `GET /status` (version, `scheduler.jobs_snapshot()`,
+  `garmin.sync_overview()`, dernier `healthcheck.last_ping()`,
+  fuseau/horaires). Maintenance : `POST /athlete-spaces/purge-orphans` supprime
+  les dossiers `data/athletes/<id>` sans compte correspondant
+  (`orphan_athlete_space_ids` + `remove_athlete_space`, action auditée
+  `purge_orphan_spaces`). Réglages : `GET|PUT /settings`.
   L'admin est **isolé** : il n'hérite pas des droits coach
   (`require_coach`/`get_athlete_context` inchangés), et son rôle (comme celui du
   bootstrap) ne peut pas être modifié via l'endpoint de rôle (403).

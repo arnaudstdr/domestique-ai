@@ -5,14 +5,20 @@ from __future__ import annotations
 from collections import Counter
 from typing import Any
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 
 from domestique_ai import __version__, platform_db
 from domestique_ai.api import scheduler as scheduler_module
+from domestique_ai.api.deps import require_admin
+from domestique_ai.api.routers.admin._common import audit
 from domestique_ai.api.routers.garmin import sync_overview
+from domestique_ai.athlete_context import (
+    athlete_space_dirs,
+    orphan_athlete_space_ids,
+    remove_athlete_space,
+)
 from domestique_ai.config import (
-    get_athletes_root,
     get_daily_check_time,
     get_platform_db_path,
     get_scheduler_timezone,
@@ -31,7 +37,12 @@ class AdminStats(BaseModel):
     active_sessions: int
     garmin_connected: int
     athlete_spaces: int
+    orphan_athlete_spaces: int
     platform_db_bytes: int
+
+
+class PurgeResult(BaseModel):
+    removed: int
 
 
 class SchedulerJob(BaseModel):
@@ -61,8 +72,7 @@ def _counts(values: list[str | None]) -> dict[str, int]:
 def get_stats() -> AdminStats:
     """Statistiques agrégées de la plateforme."""
     users = platform_db.list_users()
-    root = get_athletes_root()
-    athlete_spaces = sum(1 for p in root.iterdir() if p.is_dir()) if root.exists() else 0
+    known = {u["public_id"] for u in users}
     platform_db_path = get_platform_db_path()
     return AdminStats(
         users_by_role=_counts([u.get("role") for u in users]),
@@ -72,9 +82,27 @@ def get_stats() -> AdminStats:
         feedback_by_status=_counts([f.get("status") for f in platform_db.list_feedback()]),
         active_sessions=platform_db.count_active_sessions(),
         garmin_connected=sum(1 for u in users if u.get("has_garmin_credentials")),
-        athlete_spaces=athlete_spaces,
+        athlete_spaces=len(athlete_space_dirs()),
+        orphan_athlete_spaces=len(orphan_athlete_space_ids(known)),
         platform_db_bytes=platform_db_path.stat().st_size if platform_db_path.exists() else 0,
     )
+
+
+@router.post("/athlete-spaces/purge-orphans", response_model=PurgeResult)
+def purge_orphan_athlete_spaces(
+    admin: dict = Depends(require_admin),  # noqa: B008
+) -> PurgeResult:
+    """Supprime les dossiers ``data/athletes/<id>`` sans compte correspondant."""
+    known = {u["public_id"] for u in platform_db.list_users()}
+    orphans = orphan_athlete_space_ids(known)
+    for public_id in orphans:
+        remove_athlete_space(public_id)
+    audit(
+        admin,
+        "purge_orphan_spaces",
+        details={"removed": len(orphans), "ids": orphans[:100]},
+    )
+    return PurgeResult(removed=len(orphans))
 
 
 @router.get("/status", response_model=AdminStatus)

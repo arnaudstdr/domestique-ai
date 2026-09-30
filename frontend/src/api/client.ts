@@ -723,6 +723,8 @@ export const api = {
       http<void>(`/api/admin/invitations/${id}`, { method: "DELETE" }),
     stats: () => http<AdminStats>(`/api/admin/stats`),
     status: () => http<AdminStatus>(`/api/admin/status`),
+    purgeOrphanSpaces: () =>
+      http<{ removed: number }>(`/api/admin/athlete-spaces/purge-orphans`, { method: "POST" }),
     setFeedbackStatus: (id: number, status: FeedbackStatus) =>
       http<AdminFeedback>(`/api/admin/feedback/${id}`, {
         method: "PATCH",

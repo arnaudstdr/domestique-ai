@@ -20,11 +20,12 @@ function formatBytes(n: number): string {
   return `${(n / (1024 * 1024)).toFixed(1)} Mo`;
 }
 
-function Stat({ label, value }: { label: string; value: string | number }) {
+function Stat({ label, value, sub }: { label: string; value: string | number; sub?: string }) {
   return (
     <div className="rounded-xl border border-border/[0.06] bg-overlay/[0.02] px-3 py-2">
       <div className="text-lg font-semibold text-fg">{value}</div>
       <div className="text-[11px] text-muted">{label}</div>
+      {sub && <div className="text-[11px] text-amber-400">{sub}</div>}
     </div>
   );
 }
@@ -49,6 +50,7 @@ const AUDIT_LABELS: Record<string, string> = {
   feedback_status: "Statut d'un retour",
   settings_update: "Réglages plateforme",
   invitation_revoke: "Révocation d'invitation",
+  purge_orphan_spaces: "Nettoyage d'espaces orphelins",
 };
 const FEEDBACK_LABELS: Record<FeedbackStatus, string> = {
   new: "Nouveau",
@@ -101,6 +103,7 @@ export default function Admin() {
   const [stats, setStats] = useState<AdminStats | null>(null);
   const [status, setStatus] = useState<AdminStatus | null>(null);
   const [savingSettings, setSavingSettings] = useState(false);
+  const [purging, setPurging] = useState(false);
   const [broadcastDraft, setBroadcastDraft] = useState("");
   const [feedbackFilter, setFeedbackFilter] = useState<FeedbackStatus | "all">("all");
   const [savingFeedbackId, setSavingFeedbackId] = useState<number | null>(null);
@@ -172,6 +175,27 @@ export default function Admin() {
     }
   }
 
+  async function purgeOrphans() {
+    const n = stats?.orphan_athlete_spaces ?? 0;
+    if (
+      !window.confirm(
+        `Supprimer ${n} dossier(s) athlète orphelin(s) (sans compte correspondant) ?\n\nIls ne sont jamais lus par l'app.`,
+      )
+    ) {
+      return;
+    }
+    setPurging(true);
+    try {
+      const { removed } = await api.admin.purgeOrphanSpaces();
+      push(`${removed} dossier(s) orphelin(s) supprimé(s)`, "success");
+      setStats(await api.admin.stats());
+    } catch (err) {
+      push(`Nettoyage : ${errMessage(err)}`, "error");
+    } finally {
+      setPurging(false);
+    }
+  }
+
   async function saveSettings(patch: Partial<AdminSettings>) {
     setSavingSettings(true);
     try {
@@ -211,8 +235,26 @@ export default function Admin() {
               <Stat label="Comptes" value={Object.values(stats.users_by_role).reduce((a, b) => a + b, 0)} />
               <Stat label="Sessions actives" value={stats.active_sessions} />
               <Stat label="Garmin connectés" value={stats.garmin_connected} />
-              <Stat label="Espaces athlètes" value={stats.athlete_spaces} />
+              <Stat
+                label="Espaces athlètes"
+                value={stats.athlete_spaces}
+                sub={
+                  stats.orphan_athlete_spaces > 0
+                    ? `dont ${stats.orphan_athlete_spaces} orphelins`
+                    : undefined
+                }
+              />
             </div>
+            {stats.orphan_athlete_spaces > 0 && (
+              <button
+                type="button"
+                onClick={purgeOrphans}
+                disabled={purging}
+                className="rounded-lg border border-amber-500/30 bg-amber-500/[0.06] px-2.5 py-1.5 text-xs text-amber-400 hover:border-amber-500/50 disabled:opacity-50"
+              >
+                Nettoyer les {stats.orphan_athlete_spaces} dossiers orphelins
+              </button>
+            )}
             <div className="flex flex-wrap gap-3 text-xs text-muted">
               {Object.entries(stats.users_by_role).map(([role, n]) => (
                 <span key={role}>

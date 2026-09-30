@@ -138,6 +138,23 @@ def context_for_athlete(user: dict) -> AthleteContext:
     )
 
 
+def athlete_space_dirs() -> list[Path]:
+    """Dossiers présents sous ``get_athletes_root()`` (un par athlète), triés."""
+    root = get_athletes_root()
+    if not root.exists():
+        return []
+    return sorted((p for p in root.iterdir() if p.is_dir()), key=lambda p: p.name)
+
+
+def orphan_athlete_space_ids(known_public_ids: set[str]) -> list[str]:
+    """``public_id`` des dossiers athlètes sans compte correspondant en base.
+
+    Dossiers résiduels (comptes supprimés, anciens runs de tests) : jamais lus
+    par l'app, mais consomment du disque. Purgés via le panneau admin.
+    """
+    return [p.name for p in athlete_space_dirs() if p.name not in known_public_ids]
+
+
 def remove_athlete_space(public_id: str) -> None:
     """Supprime l'espace de données disque d'un athlète (best-effort).
 

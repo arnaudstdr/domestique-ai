@@ -469,3 +469,25 @@ def test_stats_and_status_forbidden_for_non_admin(client: TestClient):
     athlete_token, _ = _session("athlete")
     assert client.get("/api/admin/stats", headers=_bearer(athlete_token)).status_code == 403
     assert client.get("/api/admin/status", headers=_bearer(athlete_token)).status_code == 403
+
+
+def test_admin_purges_orphan_athlete_spaces(client: TestClient):
+    from domestique_ai.config import get_athletes_root
+
+    admin_token, _ = _session("admin")
+    root = get_athletes_root()
+    orphan = root / "deadbeefdeadbeefdeadbeefdeadbeef"
+    orphan.mkdir(parents=True, exist_ok=True)
+    (orphan / "strava_activities.db").write_text("")
+    known = pdb.create_user(role="athlete")
+    (root / known["public_id"]).mkdir(parents=True, exist_ok=True)
+
+    stats = client.get("/api/admin/stats", headers=_bearer(admin_token)).json()
+    assert stats["orphan_athlete_spaces"] == 1
+
+    r = client.post("/api/admin/athlete-spaces/purge-orphans", headers=_bearer(admin_token))
+    assert r.status_code == 200, r.text
+    assert r.json()["removed"] == 1
+    assert not orphan.exists()
+    assert (root / known["public_id"]).exists()
+    assert any(e["action"] == "purge_orphan_spaces" for e in pdb.list_admin_audit())

@@ -162,7 +162,8 @@ ce sheet (plus de carte de recherche en haut de page).
   cross-tenant (filtre par statut + changement de statut
   `new`/`acknowledged`/`done`/`rejected`), et journal d'audit (dernières actions
   admin, libellés FR), et un encart **Plateforme** (stats + statut ops :
-  scheduler, sync Garmin, healthcheck, version, fuseau). Chaque compte est
+  scheduler, sync Garmin, healthcheck, version, fuseau ; compteur d'espaces
+  athlètes orphelins + bouton de purge). Chaque compte est
   **dépliable**
   (`components/AdminUserRow.tsx`) : fiche (verrouillage, email vérifié, 2FA,
   Garmin, nb d'activités, sessions actives, liens coach↔athlète) + actions
