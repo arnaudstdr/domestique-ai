@@ -18,7 +18,7 @@ Couches voisines : `ingestion/AGENTS.md`, `llm/AGENTS.md`, `api/AGENTS.md`.
 
 Conséquences pratiques :
 
-- Modifier le profil HR (`STRAVA_HR_REST`/`STRAVA_HR_MAX`) **ne recalcule pas** automatiquement les scores. C'est `recalculate_training_loads()` (endpoint `POST /api/metrics/recalculate`, bouton « Recalculer » du dashboard) qui rejoue tout.
+- Modifier le profil HR (`STRAVA_HR_REST`/`STRAVA_HR_MAX`) ou FTP (`STRAVA_FTP`) **ne recalcule pas** les scores en direct, mais `PUT /api/profile` planifie automatiquement `recalculate_training_loads()` en tâche de fond dès que l'un de ces champs (ou `sex`/`lthr_pct`) change. L'endpoint `POST /api/metrics/recalculate` reste disponible pour rejouer tout manuellement (scripts/tests).
 - CTL/ATL/TSB sont des EMA (constantes 42j / 7j) calculées sur la grille de **toutes les dates** entre la première et la dernière activité (les jours sans activité comptent comme TSS=0). Voir `calculate_ctl_atl_tsb()`.
 
 ## Zones HR (temps par zone)

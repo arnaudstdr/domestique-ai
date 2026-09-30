@@ -1,6 +1,5 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { RefreshCcw, RefreshCw } from "lucide-react";
 import { api, ApiError } from "../api/client";
 import type {
   LoadResponse,
@@ -14,7 +13,6 @@ import LoadCard from "../components/LoadCard";
 import VolumeCard from "../components/VolumeCard";
 import { useMe } from "../hooks/useMe";
 import { useToast } from "../hooks/useToast";
-import { useViewing } from "../hooks/useViewing";
 
 const TODAY_FR = new Intl.DateTimeFormat("fr-FR", {
   weekday: "long",
@@ -37,9 +35,7 @@ export default function Dashboard() {
   const [brief, setBrief] = useState<DailyBriefResponse | null>(null);
   const [briefLoading, setBriefLoading] = useState(true);
   const [loading, setLoading] = useState(true);
-  const viewing = useViewing();
   const me = useMe();
-  const [busy, setBusy] = useState<string | null>(null);
   const { push } = useToast();
 
   const firstName = me?.display_name?.split(" ")[0] || me?.email?.split("@")[0] || null;
@@ -86,24 +82,6 @@ export default function Dashboard() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  async function triggerAction(
-    label: string,
-    fn: () => Promise<unknown>,
-    successHint?: (result: unknown) => string,
-  ) {
-    setBusy(label);
-    try {
-      const result = await fn();
-      push(successHint ? successHint(result) : `${label} : OK`, "success");
-      await refresh();
-    } catch (err) {
-      const msg = err instanceof ApiError ? err.message : String(err);
-      push(`${label} : ${msg}`, "error");
-    } finally {
-      setBusy(null);
-    }
-  }
-
   // Les alertes overtraining remontent dans la surface unique du brief —
   // celles non déjà portées par l'alerte primaire sont affichées en dépliable.
   const secondaryAlerts = (ot?.alerts || [])
@@ -138,53 +116,6 @@ export default function Dashboard() {
           Voir les tendances longues →
         </Link>
       </div>
-
-      {!viewing && (
-      <div className="card space-y-3">
-        <h3 className="label-eyebrow">Actions</h3>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-          <button
-            className="btn-primary"
-            disabled={busy !== null}
-            onClick={() =>
-              triggerAction(
-                "Sync Garmin",
-                () => api.garmin.sync(),
-                () => "Sync Garmin lancée en arrière-plan…",
-              )
-            }
-          >
-            {busy === "Sync Garmin" ? (
-              "…"
-            ) : (
-              <span className="inline-flex items-center justify-center gap-2">
-                <RefreshCw className="h-4 w-4" strokeWidth={1.75} aria-hidden="true" />
-                Sync Garmin
-              </span>
-            )}
-          </button>
-          <button
-            className="btn-ghost"
-            disabled={busy !== null}
-            onClick={() =>
-              triggerAction(
-                "Recalculer charge",
-                () => api.metrics.recalculate(),
-                (r) => {
-                  const updated = (r as { updated?: number }).updated ?? 0;
-                  return `Recalcul : ${updated} ligne(s) mises à jour`;
-                },
-              )
-            }
-          >
-            <span className="inline-flex items-center justify-center gap-2">
-              <RefreshCcw className="h-4 w-4" strokeWidth={1.75} aria-hidden="true" />
-              Recalculer
-            </span>
-          </button>
-        </div>
-      </div>
-      )}
 
       {loading && <p className="text-center text-sm text-muted">Chargement…</p>}
     </div>

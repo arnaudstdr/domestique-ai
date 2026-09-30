@@ -87,8 +87,8 @@ def test_put_profile_rejects_invalid_sex(client: TestClient) -> None:
     assert r.status_code == 422
 
 
-def test_put_profile_no_recalc_when_only_ftp_changes(client: TestClient) -> None:
-    """Modifier uniquement la FTP ne doit pas déclencher le recalcul hr-TSS."""
+def test_put_profile_triggers_recalc_when_only_ftp_changes(client: TestClient) -> None:
+    """Modifier uniquement la FTP doit déclencher le recalcul (TSS puissance)."""
     # 1ère écriture : pose la baseline (HR/sex/lthr aux valeurs par défaut).
     client.put(
         "/api/profile",
@@ -101,7 +101,7 @@ def test_put_profile_no_recalc_when_only_ftp_changes(client: TestClient) -> None
             json={"ftp": 290, "sex": "M", "lthr_pct": 0.88},
         )
     assert r.status_code == 200
-    assert not mock_recalc.called
+    assert mock_recalc.called
 
 
 def test_put_profile_triggers_recalc_when_hr_changes(client: TestClient) -> None:

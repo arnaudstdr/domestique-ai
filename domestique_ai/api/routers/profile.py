@@ -34,23 +34,24 @@ def _to_schema(model: ProfileModel) -> ProfileSchema:
     )
 
 
-def _hr_relevant_fields_changed(previous: ProfileModel | None, new: ProfileSchema) -> bool:
-    """Vrai si l'un des paramètres qui influencent le hr-TSS a changé.
+def _load_relevant_fields_changed(previous: ProfileModel | None, new: ProfileSchema) -> bool:
+    """Vrai si l'un des paramètres qui influencent la charge a changé.
 
-    hr_rest, hr_max, sex et lthr_pct entrent dans le calcul de
-    ``compute_training_load`` quand on est en mode hr-TSS. Une modif de ces
-    champs invalide les valeurs persistées en base.
+    hr_rest, hr_max, sex et lthr_pct entrent dans le calcul du hr-TSS, ftp dans
+    celui du TSS puissance. Une modif de ces champs invalide les valeurs
+    persistées en base.
     """
     if previous is None:
-        # Aucun profil avant : si on en pose un avec des valeurs HR, on recalcule.
+        # Aucun profil avant : si on en pose un avec des valeurs HR/FTP, on recalcule.
         return (
-            any(v is not None for v in (new.hr_rest, new.hr_max))
+            any(v is not None for v in (new.hr_rest, new.hr_max, new.ftp))
             or new.lthr_pct != 0.88
             or new.sex != "M"
         )
     return (
         previous.hr_rest != new.hr_rest
         or previous.hr_max != new.hr_max
+        or previous.ftp != new.ftp
         or previous.sex != new.sex
         or previous.lthr_pct != new.lthr_pct
     )
@@ -73,7 +74,7 @@ def put_profile(
     background_tasks: BackgroundTasks,
     ctx: AthleteContext = Depends(get_athlete_context),  # noqa: B008
 ) -> ProfileSchema:
-    """Remplace le profil. Si HR/sexe/%LTHR a changé, recalcule la charge en tâche de fond."""
+    """Remplace le profil. Si HR/sexe/%LTHR/FTP a changé, recalcule la charge en tâche de fond."""
     previous = load_profile(ctx.profile_path)
     try:
         save_profile(
@@ -97,8 +98,8 @@ def put_profile(
     # no-op sémantique pour les athlètes dont le profil est lu hors cache).
     invalidate_profile_cache()
 
-    if _hr_relevant_fields_changed(previous, payload):
-        log.info("Profil HR modifié — recalcul training_load lancé en arrière-plan.")
+    if _load_relevant_fields_changed(previous, payload):
+        log.info("Profil HR/FTP modifié — recalcul training_load lancé en arrière-plan.")
         background_tasks.add_task(recalculate_training_loads, ctx=ctx)
 
     return payload
