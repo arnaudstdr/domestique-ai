@@ -72,7 +72,11 @@ les **30 derniers messages** (`GET /api/coach/messages`, `PAGE_SIZE = 30`), puis
 remonte par **scroll infini** (`IntersectionObserver` en haut → `?before=<id>`,
 position de scroll préservée ; sentinelle basse `?after=<id>` pour le cas
 « saut recherche »). L'envoi poste `session_id: null` : le serveur rattache le
-message à la session interne courante (rotation invisible après inactivité). La
+message à la session interne courante (rotation invisible après inactivité). Un
+**disclaimer LLM partagé** (`components/LlmDisclaimer.tsx` — « Le coach est une
+IA : il peut faire des erreurs… ») est affiché en tête de la barre de saisie
+fixe du coach, sous la description quand le mode « Coach IA » est sélectionné
+sur `pages/Plan.tsx`, et en note sous le brief quotidien du Dashboard. La
 recherche (`GET /api/coach/search?q=`) se fait dans un **bottom sheet**
 (`components/CoachSearchSheet.tsx`) ouvert par le **bouton flottant** en bas à
 droite au-dessus de la barre de saisie : champ en **live + debounce 300 ms**

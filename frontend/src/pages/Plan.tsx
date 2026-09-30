@@ -29,6 +29,7 @@ import type {
 } from "../api/types";
 import ObjectiveForm from "../components/ObjectiveForm";
 import CalendarSubscribe from "../components/CalendarSubscribe";
+import LlmDisclaimer from "../components/LlmDisclaimer";
 import PlanCalendar from "../components/PlanCalendar";
 import { useToast } from "../hooks/useToast";
 import { useViewing } from "../hooks/useViewing";
@@ -506,6 +507,7 @@ export default function Plan() {
             ? "Cycle 3:1 déterministe + taper. Sortie rapide, structure prédictible."
             : "Le coach LLM compose chaque semaine, garde-fous physiologiques appliqués automatiquement. Plus lent (quelques secondes par semaine)."}
         </p>
+        {mode === "llm" && <LlmDisclaimer />}
         <div className="grid grid-cols-2 gap-3">
           <label className="block">
             <span className="text-xs text-muted">Séances / semaine</span>

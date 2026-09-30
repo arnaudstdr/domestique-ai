@@ -5,6 +5,7 @@ import { api, ApiError, streamCoachChat } from "../api/client";
 import type { CoachMessage } from "../api/types";
 import ChatBubble from "../components/ChatBubble";
 import CoachSearchSheet from "../components/CoachSearchSheet";
+import LlmDisclaimer from "../components/LlmDisclaimer";
 import { useToast } from "../hooks/useToast";
 
 const PAGE_SIZE = 30;
@@ -385,6 +386,7 @@ export default function Coach() {
             <Search className="h-5 w-5" strokeWidth={2} aria-hidden="true" />
           </button>
         </div>
+        <LlmDisclaimer className="mx-auto max-w-3xl px-4 pt-3" />
         <div className="mx-auto max-w-3xl px-4 py-3 flex items-end gap-2">
           <textarea
             ref={textareaRef}

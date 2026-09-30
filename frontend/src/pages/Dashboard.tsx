@@ -14,6 +14,7 @@ import type {
 } from "../api/types";
 import ActivityCard from "../components/ActivityCard";
 import DailyBriefCard from "../components/DailyBriefCard";
+import LlmDisclaimer from "../components/LlmDisclaimer";
 import LoadCard from "../components/LoadCard";
 import ObjectiveCard from "../components/ObjectiveCard";
 import RecoveryCard from "../components/RecoveryCard";
@@ -139,6 +140,7 @@ export default function Dashboard() {
         secondaryAlerts={secondaryAlerts}
         indicators={ot?.indicators || null}
       />
+      <LlmDisclaimer className="px-1" />
 
       {/* Dernière sortie : boucle prévu (brief) → réalisé. */}
       {latestActivity ? (
