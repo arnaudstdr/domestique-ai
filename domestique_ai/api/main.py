@@ -21,6 +21,9 @@ from domestique_ai.api.routers import (
     activities as activities_router,
 )
 from domestique_ai.api.routers import (
+    admin as admin_router,
+)
+from domestique_ai.api.routers import (
     auth as auth_router,
 )
 from domestique_ai.api.routers import (
@@ -352,6 +355,10 @@ app.include_router(prescriptions_router.router)
 # Retours testeurs : data plateforme (platform.db), accessible à tout compte
 # authentifié — non scopé par athlète.
 app.include_router(feedback_router.router)
+
+# Panneau d'administration plateforme : data cross-tenant (comptes, retours,
+# réglages), réservé au rôle ``admin`` (non scopé par athlète).
+app.include_router(admin_router.router)
 
 
 @app.get("/api/health", tags=["meta"])

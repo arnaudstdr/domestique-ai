@@ -26,9 +26,16 @@ from domestique_ai.config import (
     get_platform_db_path,
     get_session_secret,
     get_session_ttl_days,
+    get_signup_enabled,
 )
 
+# Rôles créables par les flux self-service (inscription, invitation).
 VALID_ROLES = ("coach", "athlete")
+# Rôle d'administration de la plateforme : jamais auto-attribuable, uniquement
+# promu hors-ligne (CLI ``auth_cli set-role``).
+ADMIN_ROLE = "admin"
+# Ensemble complet des rôles persistables (contrôle du CHECK ``users.role``).
+ALL_ROLES = (*VALID_ROLES, ADMIN_ROLE)
 
 # Nombre d'échecs de login consécutifs avant verrouillage temporaire du compte.
 MAX_FAILED_ATTEMPTS = 5
@@ -81,6 +88,106 @@ def _ensure_column(conn: sqlite3.Connection, table: str, column: str, ddl: str) 
         conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {ddl}")
 
 
+# Schéma cible de ``users`` (CHECK élargi à ``admin``). Sert à la reconstruction
+# de la table pour les bases créées avant l'ajout du rôle admin (SQLite ne sait
+# pas modifier un CHECK par ``ALTER``).
+_USERS_COLUMNS = (
+    "id",
+    "public_id",
+    "role",
+    "display_name",
+    "is_bootstrap",
+    "created_at",
+    "email",
+    "password_hash",
+    "totp_secret",
+    "totp_enabled",
+    "password_changed_at",
+    "failed_attempts",
+    "locked_until",
+    "avatar",
+    "garmin_email",
+    "garmin_password",
+    "feed_token",
+    "email_verified",
+    "coach_invite_code",
+)
+_USERS_SCHEMA = """
+    CREATE TABLE users (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        public_id TEXT NOT NULL UNIQUE,
+        role TEXT NOT NULL CHECK (role IN ('coach', 'athlete', 'admin')),
+        display_name TEXT,
+        is_bootstrap INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL,
+        email TEXT,
+        password_hash TEXT,
+        totp_secret TEXT,
+        totp_enabled INTEGER NOT NULL DEFAULT 0,
+        password_changed_at TEXT,
+        failed_attempts INTEGER NOT NULL DEFAULT 0,
+        locked_until TEXT,
+        avatar TEXT,
+        garmin_email TEXT,
+        garmin_password TEXT,
+        feed_token TEXT,
+        email_verified INTEGER NOT NULL DEFAULT 0,
+        coach_invite_code TEXT
+    )
+"""
+
+
+def _migrate_users_role_check(db_path: Path) -> None:
+    """Élargit le CHECK de ``users.role`` à ``admin`` (procédure 12-étapes SQLite).
+
+    SQLite ne sait pas modifier une contrainte ``CHECK`` par ``ALTER`` : il faut
+    reconstruire la table. FK désactivées le temps de l'opération (hors
+    transaction), copie en préservant les ``id``, puis recréation des index.
+    Idempotent : ne fait rien si la table n'existe pas encore ou si le CHECK
+    autorise déjà ``admin``.
+    """
+    conn = sqlite3.connect(db_path, isolation_level=None)
+    conn.row_factory = sqlite3.Row
+    try:
+        row = conn.execute(
+            "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'users'"
+        ).fetchone()
+        if row is None or not row["sql"] or ADMIN_ROLE in row["sql"]:
+            return
+        existing = {r["name"] for r in conn.execute("PRAGMA table_info(users)")}
+        cols = [c for c in _USERS_COLUMNS if c in existing]
+        quoted = ", ".join(cols)
+        conn.execute("PRAGMA foreign_keys = OFF")
+        try:
+            conn.execute(_USERS_SCHEMA.replace("CREATE TABLE users", "CREATE TABLE users_new", 1))
+            conn.execute(f"INSERT INTO users_new ({quoted}) SELECT {quoted} FROM users")
+            conn.execute("DROP TABLE users")
+            conn.execute("ALTER TABLE users_new RENAME TO users")
+            conn.execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS idx_users_public_id ON users(public_id)"
+            )
+            conn.execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS idx_users_bootstrap "
+                "ON users(is_bootstrap) WHERE is_bootstrap = 1"
+            )
+            conn.execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS idx_users_feed_token "
+                "ON users(feed_token) WHERE feed_token IS NOT NULL"
+            )
+            conn.execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS idx_users_coach_invite_code "
+                "ON users(coach_invite_code) WHERE coach_invite_code IS NOT NULL"
+            )
+            conn.execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email "
+                "ON users(email) WHERE email IS NOT NULL"
+            )
+        finally:
+            conn.execute("PRAGMA foreign_keys = ON")
+    finally:
+        conn.close()
+
+
 def _hash_token(plaintext: str) -> str:
     """HMAC-SHA256 du token (pepper = secret applicatif). Hex."""
     return hmac.new(get_session_secret(), plaintext.encode("utf-8"), hashlib.sha256).hexdigest()
@@ -94,13 +201,16 @@ def init_platform_db(path: Path | None = None) -> None:
     """Crée les tables de la DB plateforme. Idempotent."""
     db_path = Path(path) if path else get_platform_db_path()
     db_path.parent.mkdir(parents=True, exist_ok=True)
+    # Bases existantes : élargit le CHECK de ``users.role`` à ``admin`` avant
+    # tout accès (no-op sur une base neuve ou déjà migrée).
+    _migrate_users_role_check(db_path)
     conn = _connect(db_path)
     try:
         conn.execute("""
             CREATE TABLE IF NOT EXISTS users (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 public_id TEXT NOT NULL UNIQUE,
-                role TEXT NOT NULL CHECK (role IN ('coach', 'athlete')),
+                role TEXT NOT NULL CHECK (role IN ('coach', 'athlete', 'admin')),
                 display_name TEXT,
                 is_bootstrap INTEGER NOT NULL DEFAULT 0,
                 created_at TEXT NOT NULL,
@@ -274,6 +384,15 @@ def init_platform_db(path: Path | None = None) -> None:
             )
         """)
         conn.execute("CREATE INDEX IF NOT EXISTS idx_feedback_created ON feedback(created_at DESC)")
+        # Réglages plateforme éditables à chaud par un admin (key/value). Sert
+        # d'override runtime à certaines variables d'env (ex. ``signup_enabled``).
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS platform_settings (
+                key TEXT PRIMARY KEY,
+                value TEXT,
+                updated_at TEXT NOT NULL
+            )
+        """)
         conn.commit()
     finally:
         conn.close()
@@ -347,14 +466,61 @@ def create_user(
     password_hash: str | None = None,
     email_verified: bool = True,
 ) -> dict[str, Any]:
-    """Crée un utilisateur. ``email``/``password_hash`` optionnels (inscription).
+    """Crée un utilisateur self-service (rôles ``VALID_ROLES`` uniquement).
 
-    ``email_verified`` vaut ``True`` par défaut pour les usages historiques
-    (comptes bootstrap/invités = lien de confiance) ; l'inscription publique
-    passe explicitement ``False``.
+    ``email``/``password_hash`` optionnels (inscription). ``admin`` est refusé ici
+    exprès : il se crée hors-ligne via ``create_account`` (CLI).
     """
     if role not in VALID_ROLES:
         raise ValueError(f"role invalide: {role!r}")
+    return _insert_user(
+        role,
+        display_name=display_name,
+        is_bootstrap=is_bootstrap,
+        path=path,
+        email=email,
+        password_hash=password_hash,
+        email_verified=email_verified,
+    )
+
+
+def create_account(
+    role: str,
+    *,
+    display_name: str | None = None,
+    email: str | None = None,
+    password_hash: str | None = None,
+    path: Path | None = None,
+    email_verified: bool = True,
+) -> dict[str, Any]:
+    """Crée un compte pour n'importe quel rôle de ``ALL_ROLES`` (dont ``admin``).
+
+    Réservé aux usages **hors-ligne** (CLI ``auth_cli create-user``) : les flux
+    self-service (inscription, invitation) passent par ``create_user``, borné à
+    ``VALID_ROLES``.
+    """
+    if role not in ALL_ROLES:
+        raise ValueError(f"role invalide: {role!r}")
+    return _insert_user(
+        role,
+        display_name=display_name,
+        is_bootstrap=False,
+        path=path,
+        email=email,
+        password_hash=password_hash,
+        email_verified=email_verified,
+    )
+
+
+def _insert_user(
+    role: str,
+    display_name: str | None,
+    is_bootstrap: bool,
+    path: Path | None,
+    email: str | None,
+    password_hash: str | None,
+    email_verified: bool,
+) -> dict[str, Any]:
     conn = _connect(path)
     try:
         public_id = uuid.uuid4().hex
@@ -430,6 +596,80 @@ def list_users(role: str | None = None, path: Path | None = None) -> list[dict[s
         return [_user_dict(r) for r in rows]
     finally:
         conn.close()
+
+
+def set_user_role(public_id: str, role: str, path: Path | None = None) -> dict[str, Any] | None:
+    """Change le rôle d'un utilisateur (attribution de ``admin`` incluse).
+
+    Seul chemin d'attribution de ``admin`` : la création self-service
+    (``create_user``/``create_invitation``) reste bornée à ``VALID_ROLES``.
+    Renvoie l'utilisateur mis à jour, ou ``None`` s'il n'existe pas.
+    """
+    if role not in ALL_ROLES:
+        raise ValueError(f"role invalide: {role!r}")
+    conn = _connect(path)
+    try:
+        cur = conn.execute("UPDATE users SET role = ? WHERE public_id = ?", (role, public_id))
+        conn.commit()
+        if cur.rowcount == 0:
+            return None
+        row = conn.execute("SELECT * FROM users WHERE public_id = ?", (public_id,)).fetchone()
+        return _user_dict(row)
+    finally:
+        conn.close()
+
+
+# ---------------------------------------------------------------------------
+# Réglages plateforme (key/value, override runtime des variables d'env)
+# ---------------------------------------------------------------------------
+
+
+def get_setting(key: str, default: str | None = None, path: Path | None = None) -> str | None:
+    """Renvoie la valeur d'un réglage plateforme, ou ``default`` si absent."""
+    conn = _connect(path)
+    try:
+        row = conn.execute("SELECT value FROM platform_settings WHERE key = ?", (key,)).fetchone()
+        return row["value"] if row is not None else default
+    finally:
+        conn.close()
+
+
+def set_setting(key: str, value: str | None, path: Path | None = None) -> None:
+    """Pose/écrase un réglage plateforme (upsert)."""
+    conn = _connect(path)
+    try:
+        conn.execute(
+            "INSERT INTO platform_settings (key, value, updated_at) VALUES (?, ?, ?) "
+            "ON CONFLICT(key) DO UPDATE SET value = excluded.value, "
+            "updated_at = excluded.updated_at",
+            (key, value, _now()),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def list_settings(path: Path | None = None) -> dict[str, str | None]:
+    """Renvoie tous les réglages plateforme sous forme ``{key: value}``."""
+    conn = _connect(path)
+    try:
+        rows = conn.execute("SELECT key, value FROM platform_settings ORDER BY key").fetchall()
+        return {r["key"]: r["value"] for r in rows}
+    finally:
+        conn.close()
+
+
+def effective_signup_enabled(path: Path | None = None) -> bool:
+    """Inscription publique : override DB, sinon variable d'env.
+
+    Permet à un admin d'activer/désactiver l'inscription à chaud ;
+    ``DOMESTIQUE_AI_SIGNUP_ENABLED`` reste le défaut quand aucun override n'est
+    posé.
+    """
+    override = get_setting("signup_enabled", path=path)
+    if override is None:
+        return get_signup_enabled()
+    return override.strip().lower() in {"1", "true", "yes", "on"}
 
 
 # ---------------------------------------------------------------------------

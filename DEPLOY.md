@@ -100,11 +100,50 @@ email + mot de passe et activent la 2FA eux-mêmes. Les sessions historiques
 (déjà connectées) ne sont pas déconnectées — elles définissent leurs identifiants
 à la prochaine connexion.
 
+### 3.1 bis — Compte administrateur (optionnel)
+
+Le rôle `admin` est **isolé** : il ne donne accès qu'au panneau
+`/admin` (comptes, retours testeurs cross-tenant, réglages plateforme) et **pas**
+aux droits coach (roster, consultation d'athlètes). Il n'est **jamais**
+attribuable depuis l'UI (ni `/signup`, ni invitation) : il se crée/se promeut
+uniquement en CLI, hors-ligne.
+
+Créer un **compte admin dédié** (à part des comptes coach/athlète — il n'a pas
+d'espace de données athlète) :
+
+```bash
+cd ~/domestique-ai
+
+# 1) Crée le compte (email + mot de passe, saisie sans écho)
+docker compose exec app python -m domestique_ai.auth_cli create-user \
+    --role admin --email admin@exemple.com
+
+# 2) Active la 2FA (obligatoire pour tout compte à mot de passe)
+docker compose exec app python -m domestique_ai.auth_cli \
+    --user <public_id_affiché> enroll-totp
+```
+
+Se connecter ensuite normalement (email + mot de passe + code TOTP) : une icône
+bouclier apparaît dans l'en-tête et ouvre `/admin`.
+
+Variante — **promouvoir un compte existant** (ex. ton coach bootstrap) :
+
+```bash
+docker compose exec app python -m domestique_ai.auth_cli set-role admin \
+    --user <public_id_complet>      # list-users pour l'obtenir
+```
+
+Pour redescendre un compte : `set-role coach --user <public_id>`. Le compte
+propriétaire (bootstrap) ne peut pas être modifié depuis le panneau admin.
+
 ### 3.2 — Mettre à jour un déploiement existant (coach + athlète déjà présents)
 
 Si le RPi tourne déjà avec des données (DB activités du coach et d'un athlète),
-la montée de version est **additive** : seules des colonnes sont ajoutées à
-`data/platform.db`. Les DB d'activités — `data/strava_activities.db` (coach) et
+la montée de version est **sans perte** : des colonnes sont ajoutées à
+`data/platform.db`, et l'ajout du rôle `admin` élargit une contrainte `CHECK` de
+la table `users` (SQLite ne sait pas la modifier sur place → la table est
+reconstruite une fois, lignes et sessions préservées, migration idempotente). Les
+DB d'activités — `data/strava_activities.db` (coach) et
 `data/athletes/<public_id>/strava_activities.db` (athlète) — ne sont **pas
 touchées**.
 
@@ -140,7 +179,8 @@ docker compose exec app python -m domestique_ai.auth_cli \
     --user <public_id_complet> enroll-totp
 ```
 
-> Ordre important : l'option `--user` se place **avant** la sous-commande.
+> `--user` est accepté **avant ou après** la sous-commande
+> (`--user <id> enroll-totp` ou `enroll-totp --user <id>`).
 
 Variante self-service (sans CLI pour l'athlète) : le coach ouvre le **Roster →
 « Reconnexion »** et transmet le lien à l'athlète ; celui-ci l'ouvre, va dans

@@ -37,6 +37,18 @@ def require_coach(request: Request) -> dict[str, Any]:
     return user
 
 
+def require_admin(request: Request) -> dict[str, Any]:
+    """Exige un utilisateur de rôle admin (403 sinon).
+
+    L'admin ne voit que le panneau ``/api/admin/*`` : il n'hérite pas des
+    droits coach (roster, impersonation).
+    """
+    user = get_current_user(request)
+    if user.get("role") != "admin":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin role required")
+    return user
+
+
 def get_athlete_context(request: Request) -> AthleteContext:
     """Contexte de données de l'athlète ciblé par la requête.
 

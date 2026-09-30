@@ -66,3 +66,53 @@ def test_reset_2fa_disables() -> None:
 def test_unknown_user_exits() -> None:
     with pytest.raises(SystemExit):
         auth_cli.main(["--user", "does-not-exist", "enroll-totp"])
+
+
+def test_set_role_promotes_to_admin() -> None:
+    user = pdb.create_user(role="athlete")
+    auth_cli.main(["--user", user["public_id"], "set-role", "admin"])
+    assert pdb.get_user_by_public_id(user["public_id"])["role"] == "admin"
+
+
+def test_create_user_admin_hors_ligne() -> None:
+    auth_cli.main(
+        [
+            "create-user",
+            "--role",
+            "admin",
+            "--email",
+            "admin@example.com",
+            "--password",
+            "adminsecret1",
+        ]
+    )
+    admin = pdb.get_user_by_email("admin@example.com")
+    assert admin is not None and admin["role"] == "admin"
+
+
+def test_create_user_duplicate_email_exits() -> None:
+    pdb.create_account("athlete", email="taken@example.com", password_hash="h")
+    with pytest.raises(SystemExit):
+        auth_cli.main(
+            [
+                "create-user",
+                "--role",
+                "admin",
+                "--email",
+                "taken@example.com",
+                "--password",
+                "adminsecret1",
+            ]
+        )
+
+
+def test_set_role_unknown_user_exits() -> None:
+    with pytest.raises(SystemExit):
+        auth_cli.main(["--user", "does-not-exist", "set-role", "admin"])
+
+
+def test_user_option_accepted_after_subcommand() -> None:
+    """``--user`` fonctionne aussi bien avant qu'après la sous-commande."""
+    user = pdb.create_account("athlete")
+    auth_cli.main(["enroll-totp", "--user", user["public_id"]])
+    assert pdb.get_user_credentials(user["id"])["totp_enabled"] is True

@@ -10,6 +10,9 @@ import type {
   ActivitySummary,
   ActivityUpdate,
   ActivityWeather,
+  AdminFeedback,
+  AdminSettings,
+  AdminUser,
   AthleteSummary,
   Availability,
   CoachMemoryFact,
@@ -155,7 +158,12 @@ function withAthlete(path: string): string {
   const viewing = getViewingAthlete();
   // /api/auth/* vise le compte courant ; /api/roster/* porte déjà le public_id
   // cible dans son path — ni l'un ni l'autre ne prend le param ?athlete=.
-  if (!viewing || path.startsWith("/api/auth/") || path.startsWith("/api/roster/")) {
+  if (
+    !viewing ||
+    path.startsWith("/api/auth/") ||
+    path.startsWith("/api/roster/") ||
+    path.startsWith("/api/admin/")
+  ) {
     return path;
   }
   const sep = path.includes("?") ? "&" : "?";
@@ -669,6 +677,23 @@ export const api = {
       http<FeedbackCreated>(`/api/feedback`, {
         method: "POST",
         body: JSON.stringify(payload),
+      }),
+  },
+  // Panneau d'administration plateforme (rôle `admin` uniquement) — data
+  // cross-tenant : comptes, retours, réglages. L'admin ne voit rien d'autre.
+  admin: {
+    users: () => http<AdminUser[]>(`/api/admin/users`),
+    setRole: (publicId: string, role: string) =>
+      http<AdminUser>(`/api/admin/users/${publicId}/role`, {
+        method: "POST",
+        body: JSON.stringify({ role }),
+      }),
+    feedback: () => http<AdminFeedback[]>(`/api/admin/feedback`),
+    settings: () => http<AdminSettings>(`/api/admin/settings`),
+    updateSettings: (body: AdminSettings) =>
+      http<AdminSettings>(`/api/admin/settings`, {
+        method: "PUT",
+        body: JSON.stringify(body),
       }),
   },
 };

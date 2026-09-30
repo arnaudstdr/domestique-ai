@@ -22,7 +22,6 @@ from domestique_ai.athlete_context import context_for_athlete, remove_athlete_sp
 from domestique_ai.config import (
     get_email_verification_ttl_hours,
     get_password_reset_ttl_minutes,
-    get_signup_enabled,
 )
 from domestique_ai.ingestion.db import init_db
 from domestique_ai.platform_db import (
@@ -38,6 +37,7 @@ from domestique_ai.platform_db import (
     create_user,
     delete_user,
     disable_totp,
+    effective_signup_enabled,
     enable_totp,
     get_or_create_coach_invite_code,
     get_user_by_coach_invite_code,
@@ -546,7 +546,7 @@ def _require_password_policy(password: str) -> None:
 @router.get("/config", response_model=AuthConfigResponse)
 def auth_config() -> AuthConfigResponse:
     """Expose les capacités d'auth publiques (ex. inscription ouverte ou non)."""
-    return AuthConfigResponse(signup_enabled=get_signup_enabled())
+    return AuthConfigResponse(signup_enabled=effective_signup_enabled())
 
 
 @router.post("/signup", response_model=SignupResponse)
@@ -557,7 +557,7 @@ def signup(body: SignupRequest, request: Request) -> SignupResponse:
     lien d'invitation réutilisable. Le compte est créé non vérifié (email de
     confirmation envoyé, non bloquant).
     """
-    if not get_signup_enabled():
+    if not effective_signup_enabled():
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="L'inscription publique est désactivée.",

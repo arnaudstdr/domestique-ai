@@ -31,11 +31,8 @@ if [ -f docker-compose.override.yml ]; then
   echo ">> Override dev local détecté (docker-compose.override.yml)."
 fi
 
-echo ">> Build de l'image (--no-cache)..."
-"${COMPOSE[@]}" "${COMPOSE_FILES[@]}" build --no-cache
-
 echo ">> Démarrage de la stack en arrière-plan..."
-"${COMPOSE[@]}" "${COMPOSE_FILES[@]}" up -d
+"${COMPOSE[@]}" "${COMPOSE_FILES[@]}" up -d --build
 
 echo ">> Résolution du conteneur du service '${APP_SERVICE}'..."
 APP_CONTAINER="$("${COMPOSE[@]}" "${COMPOSE_FILES[@]}" ps -q "${APP_SERVICE}")"

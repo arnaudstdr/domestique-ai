@@ -140,10 +140,12 @@ so a crash on the Pi notifies *you*.
 
 ### 🔐 Real auth you actually control
 Email + password (Argon2id) with **mandatory TOTP two-factor** and one-time
-recovery codes. Opaque, HMAC-hashed sessions per account, `coach` / `athlete`
-roles, and strict per-athlete data isolation (one SQLite file each). A coach
-onboards athletes with a one-time invite link; everyone manages their own
-credentials and 2FA. The upgrade is an **additive migration** — existing
+recovery codes. Opaque, HMAC-hashed sessions per account, `coach` / `athlete` /
+`admin` roles, and strict per-athlete data isolation (one SQLite file each). A
+coach onboards athletes with a one-time invite link; everyone manages their own
+credentials and 2FA. An isolated `admin` role (promoted offline via
+`auth_cli set-role`) unlocks a platform panel — accounts, cross-tenant feedback
+and hot-editable settings. The upgrade is an **additive migration** — existing
 databases, athletes and sessions keep working.
 
 </td>
@@ -309,6 +311,11 @@ a separate `data/platform.db` (accounts, sessions, invites, recovery codes).
 - **Coach → athlete flow**: the coach generates a one-time invite link; the athlete
   sets email + password and enrols 2FA themselves. A coach can read an athlete's data
   (read-only) but never touches their credentials.
+- **Admin (isolated)**: an `admin` role — created or promoted offline only
+  (`auth_cli create-user --role admin …` for a dedicated account, or
+  `auth_cli set-role admin --user <public_id>`; never self-service) — unlocks a
+  platform panel (`/api/admin/*`): list/manage accounts, read cross-tenant feedback,
+  toggle `signup_enabled` at runtime. It grants nothing else (no coach rights).
 - **No lockout**: the legacy `DOMESTIQUE_AI_API_TOKEN` stays valid as a break-glass,
   a local CLI (`auth_cli`) can set credentials or reset 2FA from the Pi, and
   pre-existing sessions are grandfathered so a deploy never disconnects everyone at

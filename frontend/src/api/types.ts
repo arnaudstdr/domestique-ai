@@ -751,3 +751,39 @@ export interface FeedbackCreated {
   id: number;
   created_at: string;
 }
+
+// ---- Admin (panneau plateforme, rôle admin uniquement) ----------------------
+
+export type AdminRole = "coach" | "athlete" | "admin";
+
+export interface AdminUser {
+  public_id: string;
+  role: string;
+  display_name: string | null;
+  email: string | null;
+  email_verified: boolean;
+  totp_enabled: boolean;
+  has_password: boolean;
+  is_bootstrap: boolean;
+  created_at: string | null;
+  garmin_email: string | null;
+  has_garmin_credentials: boolean;
+}
+
+export interface AdminFeedback {
+  id: number;
+  public_id: string | null;
+  role: string | null;
+  author_email: string | null;
+  category: string;
+  message: string;
+  page: string | null;
+  app_version: string | null;
+  user_agent: string | null;
+  created_at: string;
+  status: string;
+}
+
+export interface AdminSettings {
+  signup_enabled: boolean;
+}

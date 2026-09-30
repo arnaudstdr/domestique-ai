@@ -1,5 +1,5 @@
 import { Link, Navigate, Route, Routes, useNavigate } from "react-router-dom";
-import { Eye, MessageSquare, UserRound, Users, X } from "lucide-react";
+import { Eye, MessageSquare, ShieldCheck, UserRound, Users, X } from "lucide-react";
 import BottomNav from "./components/BottomNav";
 import EmailVerificationBanner from "./components/EmailVerificationBanner";
 import Dashboard from "./pages/Dashboard";
@@ -21,6 +21,7 @@ import ResetPassword from "./pages/ResetPassword";
 import Roster from "./pages/Roster";
 import Prescribe from "./pages/Prescribe";
 import Feedback from "./pages/Feedback";
+import Admin from "./pages/Admin";
 import { clearViewingAthlete } from "./api/client";
 import { MeProvider, useMe } from "./hooks/useMe";
 import { useViewing } from "./hooks/useViewing";
@@ -70,6 +71,7 @@ function AuthedShell() {
   const me = useMe();
   const viewing = useViewing();
   const isCoach = me?.role === "coach";
+  const isAdmin = me?.role === "admin";
 
   return (
     <div className="min-h-screen bg-surface text-fg">
@@ -92,6 +94,18 @@ function AuthedShell() {
             </span>
           </h1>
           <div className="flex items-center gap-2">
+            {isAdmin && !viewing && (
+              <Link
+                to="/admin"
+                aria-label="Administration"
+                title="Administration — comptes, retours, réglages"
+                className="grid h-9 w-9 place-items-center rounded-xl text-fg-soft
+                           border border-border/[0.06] bg-overlay/[0.03]
+                           hover:text-accent hover:border-accent/40 transition-colors"
+              >
+                <ShieldCheck className="h-5 w-5" strokeWidth={1.75} aria-hidden="true" />
+              </Link>
+            )}
             {isCoach && !viewing && (
               <Link
                 to="/roster"
@@ -155,6 +169,7 @@ function AuthedShell() {
           <Route path="/roster" element={<Roster />} />
           <Route path="/prescrire" element={<Prescribe />} />
           <Route path="/feedback" element={<Feedback />} />
+          <Route path="/admin" element={<Admin />} />
         </Routes>
       </main>
       <BottomNav viewing={!!viewing} />

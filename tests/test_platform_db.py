@@ -440,3 +440,102 @@ def test_revoke_all_sessions():
     assert pdb.revoke_all_sessions(user["id"]) == 2
     assert pdb.resolve_session_token(t1) is None
     assert pdb.resolve_session_token(t2) is None
+
+
+# ---- Rôle admin (isolé) et réglages plateforme ------------------------------
+
+
+def test_admin_role_is_not_self_service():
+    """``admin`` est dans ``ALL_ROLES`` mais reste hors des flux self-service."""
+    assert pdb.ADMIN_ROLE in pdb.ALL_ROLES
+    assert pdb.ADMIN_ROLE not in pdb.VALID_ROLES
+    with pytest.raises(ValueError):
+        pdb.create_user(role="admin")
+    with pytest.raises(ValueError):
+        pdb.create_invitation(created_by=None, role="admin")
+
+
+def test_set_user_role_promotes_and_demotes():
+    user = pdb.create_user(role="athlete")
+    promoted = pdb.set_user_role(user["public_id"], "admin")
+    assert promoted["role"] == "admin"
+    assert pdb.get_user_by_public_id(user["public_id"])["role"] == "admin"
+    assert pdb.set_user_role(user["public_id"], "coach")["role"] == "coach"
+
+
+def test_create_account_allows_admin_hors_ligne():
+    """``create_account`` (CLI) accepte ``admin``, contrairement à ``create_user``."""
+    admin = pdb.create_account("admin", email="admin@x.io", password_hash="h")
+    assert admin["role"] == "admin"
+    assert admin["is_bootstrap"] is False
+    assert pdb.get_user_by_email("admin@x.io")["public_id"] == admin["public_id"]
+    with pytest.raises(ValueError):
+        pdb.create_account("superhero")
+
+
+def test_set_user_role_unknown_or_invalid():
+    assert pdb.set_user_role("nope", "admin") is None
+    user = pdb.create_user(role="athlete")
+    with pytest.raises(ValueError):
+        pdb.set_user_role(user["public_id"], "superhero")
+
+
+def test_migration_widens_role_check_and_preserves_data(tmp_path):
+    """Une base à l'ancien CHECK (coach/athlete) est élargie à ``admin``."""
+    import sqlite3
+
+    old_path = tmp_path / "old_platform.db"
+    conn = sqlite3.connect(old_path)
+    conn.executescript("""
+        CREATE TABLE users (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            public_id TEXT NOT NULL UNIQUE,
+            role TEXT NOT NULL CHECK (role IN ('coach', 'athlete')),
+            display_name TEXT,
+            is_bootstrap INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL
+        );
+        CREATE TABLE sessions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            token_hash TEXT NOT NULL UNIQUE,
+            created_at TEXT NOT NULL,
+            expires_at TEXT,
+            revoked_at TEXT,
+            last_used_at TEXT
+        );
+        INSERT INTO users (public_id, role, display_name, created_at)
+            VALUES ('legacy-athlete', 'athlete', 'Bob', '2026-01-01T00:00:00+00:00');
+        INSERT INTO sessions (user_id, token_hash, created_at)
+            VALUES (1, 'tok', '2026-01-01T00:00:00+00:00');
+    """)
+    conn.commit()
+    conn.close()
+
+    pdb.init_platform_db(old_path)
+    pdb.init_platform_db(old_path)  # idempotent
+
+    # Données et FK préservées.
+    user = pdb.get_user_by_public_id("legacy-athlete", path=old_path)
+    assert user is not None and user["display_name"] == "Bob"
+    sessions = sqlite3.connect(old_path).execute("SELECT COUNT(*) FROM sessions").fetchone()[0]
+    assert sessions == 1
+
+    # Le CHECK accepte désormais ``admin``.
+    promoted = pdb.set_user_role("legacy-athlete", "admin", path=old_path)
+    assert promoted["role"] == "admin"
+
+
+def test_platform_settings_override_env(monkeypatch):
+    monkeypatch.delenv("DOMESTIQUE_AI_SIGNUP_ENABLED", raising=False)
+    # Sans override : on retombe sur l'env (défaut False).
+    assert pdb.effective_signup_enabled() is False
+    pdb.set_setting("signup_enabled", "1")
+
+    assert pdb.get_setting("signup_enabled") == "1"
+    assert pdb.list_settings()["signup_enabled"] == "1"
+    assert pdb.effective_signup_enabled() is True
+
+    pdb.set_setting("signup_enabled", "0")
+    assert pdb.effective_signup_enabled() is False
+    assert pdb.get_setting("missing", default="x") == "x"

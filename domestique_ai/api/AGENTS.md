@@ -80,10 +80,45 @@ l'avatar). Data **plateforme** (cross-tenant), non scopée par athlète.
   **best-effort** (try/except dans le handler, jamais bloquant). Aucune adresse
   configurée → pas d'envoi, le retour reste persisté. Envoi inline (pas de job
   scheduler).
-- **Consultation** — email uniquement pour l'instant ; `list_feedback()`
-  permettrait d'ajouter plus tard une page coach / export CSV (pattern
-  `plan.py`).
-- Tests : `tests/test_feedback_api.py`.
+- **Consultation** — email pour les notifications ; la page admin
+  (`GET /api/admin/feedback`, cf. « Rôles & administration ») liste les retours
+  cross-tenant. Un export CSV (pattern `plan.py`) reste possible plus tard.
+- Tests : `tests/test_feedback_api.py`, `tests/test_admin_api.py`.
+
+## Rôles & administration
+
+Trois rôles au niveau API : `coach`, `athlete` (créables en self-service par
+inscription/invitation — `VALID_ROLES`) et `admin` (jamais auto-attribuable —
+`ALL_ROLES`). Le rôle est porté par `users.role` (`platform_db.py`) ; le CHECK
+SQLite autorise les trois.
+
+- **Création / attribution d'`admin`** — uniquement hors-ligne (jamais via
+  l'UI) : `auth_cli create-user --role admin --email …` crée un compte admin à
+  part (helper `platform_db.create_account`, qui accepte `ALL_ROLES` là où
+  `create_user` est borné à `VALID_ROLES`), et `auth_cli set-role admin --user
+  <public_id>` promeut un compte existant (`set_user_role`). Ni
+  `POST /api/auth/signup` ni les invitations n'acceptent `admin`. La migration
+  `_migrate_users_role_check()` reconstruit la table `users` (SQLite ne sait pas
+  ALTER un CHECK) au premier `init_platform_db` sur une base existante ;
+  idempotente.
+- **Panneau** — routeur `api/routers/admin.py`, préfixe `/api/admin`, protégé par
+  `Depends(require_admin)` (`api/deps.py`) : `GET /users`, `POST
+  /users/{public_id}/role`, `GET /feedback`, `GET|PUT /settings`. L'admin est
+  **isolé** : il n'hérite pas des droits coach (`require_coach`/`get_athlete_context`
+  inchangés), et son rôle (comme celui du bootstrap) ne peut pas être modifié via
+  l'endpoint de rôle (403 sur le compte propriétaire).
+- **Réglages plateforme** — table `platform_settings` (key/value) de
+  `platform.db`, éditée à chaud par l'admin. Seul réglage exposé pour l'instant :
+  `signup_enabled`, qui surcharge `DOMESTIQUE_AI_SIGNUP_ENABLED`. La résolution
+  est `platform_db.effective_signup_enabled()` (override DB sinon env),
+  consommée par `/api/auth/config` et `/api/auth/signup`.
+- **Middleware** — aucune exception ajoutée : `/api/admin/*` exige un Bearer, et
+  un admin à mot de passe reste soumis à l'enrôlement 2FA (le bootstrap, lui,
+  reste exempté break-glass).
+- **UI** — page `/admin` (`frontend/src/pages/Admin.tsx`), lien d'en-tête
+  `ShieldCheck` visible seulement si `me.role === "admin"`.
+- Tests : `tests/test_admin_api.py`, `tests/test_platform_db.py` (rôle + réglages
+  + migration), `tests/test_auth_cli.py` (`set-role`).
 
 ## Heartbeat Healthchecks.io (dead man's switch)
 
