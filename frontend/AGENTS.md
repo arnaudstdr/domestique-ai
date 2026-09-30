@@ -131,7 +131,7 @@ ce sheet (plus de carte de recherche en haut de page).
   `ingestion/AGENTS.md`) : ne pas « aligner » le front sur le nom UI.
 - **Tendances** — page `/tendances` (agrégats `GET /api/metrics/trends` +
   projection FTP).
-- **Feedback** — page `/feedback` (bouton `MessageSquare` dans l'en-tête, à côté
+- **Feedback** — page `/feedback` (bouton `Megaphone` dans l'en-tête, à côté
   de l'avatar ; masqué en consultation coach) → `POST /api/feedback`. Select
   catégorie + textarea ; `page` = pathname courant, `app_version` =
   `__APP_VERSION__` (injectée par `define` dans `vite.config.ts`). Endpoint hors

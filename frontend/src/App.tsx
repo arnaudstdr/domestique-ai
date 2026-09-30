@@ -1,5 +1,5 @@
 import { Link, Navigate, Route, Routes, useNavigate } from "react-router-dom";
-import { Eye, MessageSquare, ShieldCheck, UserRound, Users, X } from "lucide-react";
+import { Eye, Megaphone, ShieldCheck, UserRound, Users, X } from "lucide-react";
 import BottomNav from "./components/BottomNav";
 import AnnouncementBanner from "./components/AnnouncementBanner";
 import EmailVerificationBanner from "./components/EmailVerificationBanner";
@@ -128,7 +128,7 @@ function AuthedShell() {
                            border border-border/[0.06] bg-overlay/[0.03]
                            hover:text-accent hover:border-accent/40 transition-colors"
               >
-                <MessageSquare className="h-5 w-5" strokeWidth={1.75} aria-hidden="true" />
+                <Megaphone className="h-5 w-5" strokeWidth={1.75} aria-hidden="true" />
               </Link>
             )}
             {!viewing && (
