@@ -105,7 +105,10 @@ L'UI est une **PWA FastAPI + React** (Streamlit a été retiré) :
 - `domestique_ai/api/` : FastAPI, un routeur par domaine (metrics, activities,
   morning, objective, garmin, coach, plan). Pydantic v2 pour la sérialisation.
 - `frontend/` : React 18 + Vite + TypeScript + Tailwind + recharts + react-leaflet.
-  Service worker manuel dans `public/sw.js` (NetworkFirst sur `/api/`).
+  Service worker **généré par `vite-plugin-pwa`** (Workbox `generateSW`,
+  `registerType: "autoUpdate"`) ; cache runtime limité à `/api/metrics` et
+  `/api/activities` (NetworkFirst), tout le reste réseau seul. Détail :
+  `frontend/AGENTS.md`.
 - Le port runtime est **8501**. En dev, Vite écoute sur 5173 et proxy `/api`
   vers `http://localhost:8501`.
 - Le coach LLM streame via **SSE** (`/api/coach/chat`) — `run_turn_stream()`

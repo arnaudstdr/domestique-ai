@@ -117,7 +117,8 @@ model fails, a deterministic builder takes over — week by week.
 <td width="50%" valign="top">
 
 ### 📲 Installable PWA
-React 18 + Vite + Tailwind, offline-aware service worker (NetworkFirst on `/api/`).
+React 18 + Vite + Tailwind, PWA with a build-generated service worker (Workbox
+via `vite-plugin-pwa`, NetworkFirst on selected `/api/` routes).
 Interactive GPS maps (react-leaflet), live charts (recharts), `.ZIP` (FIT) / `.ICS`
 export, and a **webcal subscription feed** that lands every session in Apple /
 Google Calendar and updates itself after each weekly review.
@@ -157,7 +158,7 @@ databases, athletes and sessions keep working.
 |---|---|---|
 | **Backend** | FastAPI · Pydantic v2 · APScheduler · `sse-starlette` | Async, typed, one router per domain (13 of them) |
 | **Security** | Argon2id · TOTP (`pyotp`) + recovery codes · HMAC-hashed opaque sessions | Per-account login, mandatory 2FA, coach/athlete roles |
-| **Frontend** | React 18 · Vite · TypeScript · Tailwind · recharts · react-leaflet | Installable PWA, manual service worker |
+| **Frontend** | React 18 · Vite · TypeScript · Tailwind · recharts · react-leaflet | Installable PWA, build-generated service worker (`vite-plugin-pwa`) |
 | **LLM** | Ollama (local) · agentic tool-calling loop | Privacy, zero API cost, no hallucinated metrics |
 | **Data** | SQLite (single source of truth) | Idempotent on external activity ids, soft migrations |
 | **Integrations** | Garmin Connect · Google Health · Pushover · Healthchecks.io · Sentry | Real third-party APIs, real failure handling |
