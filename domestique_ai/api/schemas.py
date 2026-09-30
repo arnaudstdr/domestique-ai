@@ -280,6 +280,8 @@ class SimilarActivityMatch(BaseModel):
     elevation_m: float
     distance_km: float
     training_load: float | None = None
+    start_distance_m: float | None = None
+    track_distance_m: float | None = None
     duration_delta_pct: float | None = None
     tss_delta_pct: float | None = None
     power_delta_pct: float | None = None
@@ -293,12 +295,16 @@ class SimilarActivitiesReference(BaseModel):
     duration_sec: int | None = None
     training_load: float | None = None
     sport_bucket: Literal["indoor", "outdoor", "other"]
+    has_gps: bool = False
+    has_track: bool = False
 
 
 class SimilarActivitiesCriteria(BaseModel):
     distance_tolerance_pct: float
     elevation_tolerance_pct: float
     sport_bucket: Literal["indoor", "outdoor", "other"]
+    start_proximity_m: float | None = None
+    track_tolerance_m: float | None = None
 
 
 class SimilarActivitiesResponse(BaseModel):

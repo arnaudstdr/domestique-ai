@@ -78,6 +78,8 @@ export interface SimilarActivityMatch {
   elevation_m: number;
   distance_km: number;
   training_load: number | null;
+  start_distance_m: number | null;
+  track_distance_m: number | null;
   duration_delta_pct: number | null;
   tss_delta_pct: number | null;
   power_delta_pct: number | null;
@@ -91,12 +93,16 @@ export interface SimilarActivitiesReference {
   duration_sec: number | null;
   training_load: number | null;
   sport_bucket: SportBucket;
+  has_gps: boolean;
+  has_track: boolean;
 }
 
 export interface SimilarActivitiesCriteria {
   distance_tolerance_pct: number;
   elevation_tolerance_pct: number;
   sport_bucket: SportBucket;
+  start_proximity_m: number | null;
+  track_tolerance_m: number | null;
 }
 
 export interface SimilarActivitiesResponse {

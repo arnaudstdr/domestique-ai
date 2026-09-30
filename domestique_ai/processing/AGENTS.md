@@ -114,21 +114,26 @@ historique orpheline `weight_history` n'est plus utilisée.
 
 ## Comparateur d'activités (`processing/similar.py`)
 
-`GET /api/activities/{external_id}/similar` retourne les activités passées au profil similaire. Heuristique simple, sans appel API distante ni GPS de départ.
+`GET /api/activities/{external_id}/similar` retourne les activités passées au profil similaire. Heuristique simple, sans appel API distante.
 
-**Signature** : `(sport_bucket, distance, elevation_gain)`.
+**Critères dans l'ordre** (tous les critères GPS sont « si disponible » : un hard filter n'est appliqué que quand la donnée existe des deux côtés, sinon on retombe sur distance + dénivelé) :
 
 - `sport_bucket` : `outdoor` (Ride, GravelRide, MountainBikeRide, EBikeRide), `indoor` (VirtualRide), ou `other`. On ne compare jamais une sortie route à un home trainer.
 - Distance à ±5 % près en relatif.
 - Dénivelé à ±10 % près en relatif.
 - Plancher distance 5 km / dénivelé 50 m pour éviter les divisions absurdes sur les très courtes activités.
+- **Départ** (`start_lat`/`start_lng`) : distance Haversine ≤ 500 m (`_START_PROXIMITY_M`).
+- **Tracé** (`map_polyline`) : Fréchet discret ≤ 500 m (`_TRACK_TOLERANCE_M`), tracés rééchantillonnés à 64 points (`_TRACK_RESAMPLE_POINTS`) pour un coût `O(n²)` borné.
 
 Pré-filtre SQL sur l'index `idx_activities_distance_elev` (créé à la 1re requête) pour borner le scan, puis filtrage fin Python. Sur la DB courante (~quelques milliers de lignes), latence < 200 ms.
 
-Retour : `{available, reference, matches: [{external_id, date, duration_sec, training_load, tss_delta_pct, power_delta_pct, ...}], criteria}`. Les `*_delta_pct` sont calculés relativement à la référence (positif = candidate plus grand).
+Retour : `{available, reference: {..., has_gps, has_track}, matches: [{external_id, date, duration_sec, training_load, start_distance_m, track_distance_m, tss_delta_pct, power_delta_pct, ...}], criteria}`. Les `*_delta_pct` sont calculés relativement à la référence (positif = candidate plus grand) ; `start_distance_m`/`track_distance_m` valent `None` quand la donnée manque d'un côté.
+
+Les helpers géo (`haversine_m`, `decode_polyline`, `resample_polyline`, `discrete_frechet_m`) vivent dans `processing/geo.py` (purs, sans dépendance) et sont testés dans `tests/test_geo.py`.
+
+⚠️ **Couverture GPS** : `map_polyline` n'est persistée que pour les activités **avec HR** (l'appel détails Garmin est conditionné à la HR) — les sorties sans HR et les activités manuelles/Strava legacy n'ont pas de tracé et passent donc le filtre tracé. `start_lat`/`start_lng` sont plus larges (payload liste Garmin + TCX).
 
 **Exposition coach LLM** : tool `find_similar_activities(external_id, limit=10)`, déclaré dans `tools.py`. Permet au coach de répondre à « ce col, je l'ai monté combien de fois ? » sans inventer de chiffres.
 
-**Tests** : 16 tests dans `tests/test_similar_activities.py` couvrent tolérances, exclusion indoor/outdoor, delta_pct, tri, limit, plancher distance.
+**Tests** : `tests/test_similar_activities.py` couvre tolérances, exclusion indoor/outdoor, delta_pct, tri, limit, plancher distance, cast de durée REAL, et les filtres départ/tracé (même départ+tracé → matche ; départ ou tracé éloigné → exclu ; candidat/référence sans GPS → fallback).
 
-Si l'usage révèle des faux positifs (deux profils différents au même bucket), on ajoutera `start_lat` / `start_lng` à `activities` (migration douce + backfill depuis les détails Garmin) pour affiner via Haversine.

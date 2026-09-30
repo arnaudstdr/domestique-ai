@@ -633,7 +633,7 @@ def save_garmin_activity(
                 None,
                 garmin_id,
                 activity.get("date"),
-                activity.get("duration"),
+                int(activity["duration"]) if activity.get("duration") is not None else None,
                 activity.get("avg_heart_rate"),
                 activity.get("max_heart_rate"),
                 activity.get("avg_power"),

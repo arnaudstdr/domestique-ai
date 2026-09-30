@@ -129,6 +129,17 @@ def init_db(db_path: Path | None = None, *, ctx: AthleteContext | None = None) -
         # (typeKey "road_biking" non mappé → fallback "RoadBiking"). Idempotent,
         # no-op une fois la base corrigée — pas de flag sync_meta nécessaire.
         conn.execute("UPDATE activities SET sport_type = 'Ride' WHERE sport_type = 'RoadBiking'")
+        # Normalisation de `duration` : les lignes Garmin héritées stockent la
+        # valeur brute du payload (REAL, ex. 5340.309), ce qui casse les lectures
+        # typées en secondes entières. Le prédicat `typeof` rend l'UPDATE no-op
+        # une fois la base corrigée — pas de flag sync_meta nécessaire. Le garde
+        # sur l'existence de la colonne couvre les bases legacy très anciennes.
+        activity_cols = {row[1] for row in conn.execute("PRAGMA table_info(activities)")}
+        if "duration" in activity_cols:
+            conn.execute(
+                "UPDATE activities SET duration = CAST(duration AS INTEGER) "
+                "WHERE duration IS NOT NULL AND typeof(duration) != 'integer'"
+            )
         conn.execute("""
             CREATE TABLE IF NOT EXISTS conversations (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
