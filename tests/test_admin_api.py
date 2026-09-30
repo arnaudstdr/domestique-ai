@@ -141,6 +141,53 @@ def test_admin_lists_feedback(client: TestClient):
     assert any(f["message"] == "hello" for f in r.json())
 
 
+def test_admin_can_change_feedback_status(client: TestClient):
+    admin_token, _ = _session("admin")
+    entry = pdb.insert_feedback(category="idea", message="hi")
+    assert entry["status"] == "new"
+    for status in ("acknowledged", "done", "rejected", "new"):
+        r = client.patch(
+            f"/api/admin/feedback/{entry['id']}",
+            headers=_bearer(admin_token),
+            json={"status": status},
+        )
+        assert r.status_code == 200, r.text
+        assert r.json()["status"] == status
+    assert pdb.list_feedback()[0]["status"] == "new"
+
+
+def test_feedback_status_forbidden_for_non_admin(client: TestClient):
+    athlete_token, _ = _session("athlete")
+    entry = pdb.insert_feedback(category="bug", message="x")
+    r = client.patch(
+        f"/api/admin/feedback/{entry['id']}",
+        headers=_bearer(athlete_token),
+        json={"status": "done"},
+    )
+    assert r.status_code == 403
+
+
+def test_feedback_status_unknown_is_404(client: TestClient):
+    admin_token, _ = _session("admin")
+    r = client.patch(
+        "/api/admin/feedback/999999",
+        headers=_bearer(admin_token),
+        json={"status": "done"},
+    )
+    assert r.status_code == 404
+
+
+def test_feedback_status_invalid_is_422(client: TestClient):
+    admin_token, _ = _session("admin")
+    entry = pdb.insert_feedback(category="idea", message="x")
+    r = client.patch(
+        f"/api/admin/feedback/{entry['id']}",
+        headers=_bearer(admin_token),
+        json={"status": "nope"},
+    )
+    assert r.status_code == 422
+
+
 def test_admin_signup_setting_controls_signup(client: TestClient, monkeypatch):
     monkeypatch.delenv("DOMESTIQUE_AI_SIGNUP_ENABLED", raising=False)
     admin_token, _ = _session("admin")

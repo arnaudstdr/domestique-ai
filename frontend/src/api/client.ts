@@ -22,6 +22,7 @@ import type {
   DailyBriefResponse,
   FeedbackCreated,
   FeedbackPayload,
+  FeedbackStatus,
   FtpProjectionResponse,
   GoogleHealthAuthResponse,
   GoogleHealthStatusResponse,
@@ -693,6 +694,11 @@ export const api = {
         method: "POST",
       }),
     feedback: () => http<AdminFeedback[]>(`/api/admin/feedback`),
+    setFeedbackStatus: (id: number, status: FeedbackStatus) =>
+      http<AdminFeedback>(`/api/admin/feedback/${id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ status }),
+      }),
     settings: () => http<AdminSettings>(`/api/admin/settings`),
     updateSettings: (body: AdminSettings) =>
       http<AdminSettings>(`/api/admin/settings`, {

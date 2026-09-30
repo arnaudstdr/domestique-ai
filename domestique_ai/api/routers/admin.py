@@ -47,6 +47,10 @@ class SettingsUpdate(BaseModel):
     signup_enabled: bool | None = None
 
 
+class FeedbackStatusUpdate(BaseModel):
+    status: Literal["new", "acknowledged", "done", "rejected"]
+
+
 def _admin_user(user: dict[str, Any]) -> AdminUser:
     return AdminUser(
         public_id=user["public_id"],
@@ -107,6 +111,15 @@ def reset_user_2fa(public_id: str) -> AdminUser:
 def list_feedback(limit: int | None = None) -> list[dict[str, Any]]:
     """Liste les retours testeurs (toutes tenants confondus), du plus récent au plus ancien."""
     return platform_db.list_feedback(limit=limit)
+
+
+@router.patch("/feedback/{feedback_id}")
+def update_feedback_status(feedback_id: int, body: FeedbackStatusUpdate) -> dict[str, Any]:
+    """Change le statut de traitement d'un retour (``new``/``acknowledged``/``done``/``rejected``)."""
+    updated = platform_db.set_feedback_status(feedback_id, body.status)
+    if updated is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Retour introuvable.")
+    return updated
 
 
 @router.get("/settings", response_model=AdminSettings)

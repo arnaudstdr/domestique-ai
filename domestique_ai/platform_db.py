@@ -37,6 +37,10 @@ ADMIN_ROLE = "admin"
 # Ensemble complet des rôles persistables (contrôle du CHECK ``users.role``).
 ALL_ROLES = (*VALID_ROLES, ADMIN_ROLE)
 
+# Statuts de traitement d'un retour testeur (colonne ``feedback.status``).
+# Pas de ``CHECK`` en DB : la validation est faite côté Python.
+FEEDBACK_STATUSES = ("new", "acknowledged", "done", "rejected")
+
 # Nombre d'échecs de login consécutifs avant verrouillage temporaire du compte.
 MAX_FAILED_ATTEMPTS = 5
 # Durée du verrouillage après dépassement du seuil (minutes).
@@ -731,6 +735,28 @@ def list_feedback(limit: int | None = None, path: Path | None = None) -> list[di
                 "SELECT * FROM feedback ORDER BY created_at DESC, id DESC LIMIT ?", (limit,)
             ).fetchall()
         return [_feedback_dict(r) for r in rows]
+    finally:
+        conn.close()
+
+
+def set_feedback_status(
+    feedback_id: int, status: str, path: Path | None = None
+) -> dict[str, Any] | None:
+    """Change le statut de traitement d'un retour. ``None`` si introuvable.
+
+    Statuts valides : ``FEEDBACK_STATUSES``. La colonne n'a pas de ``CHECK`` en DB
+    (pas de migration), la validation est faite ici.
+    """
+    if status not in FEEDBACK_STATUSES:
+        raise ValueError(f"status invalide: {status!r}")
+    conn = _connect(path)
+    try:
+        cur = conn.execute("UPDATE feedback SET status = ? WHERE id = ?", (status, feedback_id))
+        conn.commit()
+        if cur.rowcount == 0:
+            return None
+        row = conn.execute("SELECT * FROM feedback WHERE id = ?", (feedback_id,)).fetchone()
+        return _feedback_dict(row)
     finally:
         conn.close()
 

@@ -756,6 +756,8 @@ export interface FeedbackCreated {
 
 export type AdminRole = "coach" | "athlete" | "admin";
 
+export type FeedbackStatus = "new" | "acknowledged" | "done" | "rejected";
+
 export interface AdminUser {
   public_id: string;
   role: string;
@@ -781,7 +783,7 @@ export interface AdminFeedback {
   app_version: string | null;
   user_agent: string | null;
   created_at: string;
-  status: string;
+  status: FeedbackStatus;
 }
 
 export interface AdminSettings {

@@ -526,6 +526,17 @@ def test_migration_widens_role_check_and_preserves_data(tmp_path):
     assert promoted["role"] == "admin"
 
 
+def test_set_feedback_status_validates_and_updates():
+    entry = pdb.insert_feedback(category="idea", message="hi")
+    assert entry["status"] == "new"
+    updated = pdb.set_feedback_status(entry["id"], "acknowledged")
+    assert updated is not None and updated["status"] == "acknowledged"
+    assert pdb.list_feedback()[0]["status"] == "acknowledged"
+    assert pdb.set_feedback_status(999999, "done") is None
+    with pytest.raises(ValueError):
+        pdb.set_feedback_status(entry["id"], "bogus")
+
+
 def test_platform_settings_override_env(monkeypatch):
     monkeypatch.delenv("DOMESTIQUE_AI_SIGNUP_ENABLED", raising=False)
     # Sans override : on retombe sur l'env (défaut False).

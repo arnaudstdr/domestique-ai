@@ -80,9 +80,13 @@ l'avatar). Data **plateforme** (cross-tenant), non scopée par athlète.
   **best-effort** (try/except dans le handler, jamais bloquant). Aucune adresse
   configurée → pas d'envoi, le retour reste persisté. Envoi inline (pas de job
   scheduler).
-- **Consultation** — email pour les notifications ; la page admin
+- **Consultation & traitement** — la page admin
   (`GET /api/admin/feedback`, cf. « Rôles & administration ») liste les retours
-  cross-tenant. Un export CSV (pattern `plan.py`) reste possible plus tard.
+  cross-tenant et permet de changer leur statut via
+  `PATCH /api/admin/feedback/{id}` : `status ∈ {new, acknowledged, done,
+  rejected}` (`platform_db.FEEDBACK_STATUSES`, validé en Python — la colonne
+  `feedback.status` n'a pas de `CHECK`). Un export CSV (pattern `plan.py`) reste
+  possible plus tard.
 - Tests : `tests/test_feedback_api.py`, `tests/test_admin_api.py`.
 
 ## Rôles & administration
@@ -105,7 +109,8 @@ SQLite autorise les trois.
   `Depends(require_admin)` (`api/deps.py`) : `GET /users`, `POST
   /users/{public_id}/role`, `POST /users/{public_id}/reset-2fa` (désactive la 2FA
   d'un compte : secret + codes de secours purgés, ré-enrôlement forcé à la
-  prochaine connexion), `GET /feedback`, `GET|PUT /settings`. L'admin est
+  prochaine connexion), `GET /feedback`, `PATCH /feedback/{id}` (statut de
+  traitement), `GET|PUT /settings`. L'admin est
   **isolé** : il n'hérite pas des droits coach (`require_coach`/`get_athlete_context`
   inchangés), et son rôle (comme celui du bootstrap) ne peut pas être modifié via
   l'endpoint de rôle (403 sur le compte propriétaire).

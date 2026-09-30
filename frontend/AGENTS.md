@@ -159,8 +159,9 @@ ce sheet (plus de carte de recherche en haut de page).
   réglages plateforme (toggle `signup_enabled`), comptes (liste, changement de
   rôle via `api.admin.*`, bouton **réinitialiser la 2FA** sur les comptes
   protégés, sélecteur désactivé sur le propriétaire bootstrap), retours testeurs
-  cross-tenant. L'admin n'a **aucun** autre écran (pas de roster/impersonation).
-  `withAthlete` exclut `/api/admin/*`.
+  cross-tenant (filtre par statut + changement de statut
+  `new`/`acknowledged`/`done`/`rejected`). L'admin n'a **aucun** autre écran
+  (pas de roster/impersonation). `withAthlete` exclut `/api/admin/*`.
 
 ## Avatar — redimensionnement client
 
