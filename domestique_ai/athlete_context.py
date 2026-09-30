@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import logging
 import shutil
+import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -154,3 +155,24 @@ def remove_athlete_space(public_id: str) -> None:
             shutil.rmtree(target_dir, ignore_errors=True)
     except OSError:  # noqa: BLE001 — best-effort
         logger.warning("Suppression du dossier athlète %s échouée.", target_dir, exc_info=True)
+
+
+def activity_stats_for_user(user: dict) -> tuple[int, str | None]:
+    """``(nombre d'activités, date de la plus récente)`` pour un utilisateur.
+
+    Best-effort : ``(0, None)`` si la base activités n'existe pas encore ou
+    n'est pas lisible. Utilisé par le panneau admin (fiche compte).
+    """
+    ctx = context_for_athlete(user)
+    if not ctx.db_path.exists():
+        return (0, None)
+    try:
+        conn = sqlite3.connect(ctx.db_path)
+        try:
+            row = conn.execute("SELECT COUNT(*), MAX(date) FROM activities").fetchone()
+            return (int(row[0] or 0), row[1])
+        finally:
+            conn.close()
+    except sqlite3.Error:  # noqa: BLE001 — best-effort
+        logger.debug("Stats activités indisponibles pour %s.", user.get("public_id"), exc_info=True)
+        return (0, None)

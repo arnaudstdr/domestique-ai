@@ -212,3 +212,128 @@ def test_admin_signup_setting_controls_signup(client: TestClient, monkeypatch):
         json={"email": "new@example.com", "password": "Sup3rSecret!x", "role": "athlete"},
     )
     assert ok.status_code == 200, ok.text
+
+
+# --- Fiche compte + actions ---------------------------------------------------
+
+
+def test_admin_user_detail_includes_security_and_links(client: TestClient):
+    admin_token, _ = _session("admin")
+    coach = pdb.create_user(role="coach", email="coach@example.com")
+    athlete = pdb.create_user(role="athlete", email="ath@example.com")
+    pdb.link_coach_athlete(coach["id"], athlete["id"])
+
+    r = client.get(f"/api/admin/users/{athlete['public_id']}", headers=_bearer(admin_token))
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["role"] == "athlete"
+    assert body["locked"] is False
+    assert body["n_activities"] == 0
+    assert body["last_activity_date"] is None
+    assert [c["public_id"] for c in body["coaches"]] == [coach["public_id"]]
+    assert body["athletes_count"] == 0
+    # Jamais de secret dans la fiche.
+    assert "password_hash" not in body and "totp_secret" not in body
+
+
+def test_admin_user_detail_unknown_is_404(client: TestClient):
+    admin_token, _ = _session("admin")
+    assert client.get("/api/admin/users/nope", headers=_bearer(admin_token)).status_code == 404
+
+
+def test_admin_can_unlock_account(client: TestClient):
+    admin_token, _ = _session("admin")
+    target = pdb.create_user(role="coach", email="lock@example.com")
+    for _ in range(pdb.MAX_FAILED_ATTEMPTS):
+        pdb.record_failed_login(target["id"])
+    assert pdb.user_is_locked(pdb.get_user_credentials(target["id"])["locked_until"]) is True
+
+    r = client.post(f"/api/admin/users/{target['public_id']}/unlock", headers=_bearer(admin_token))
+    assert r.status_code == 200, r.text
+    assert r.json()["locked"] is False
+    assert pdb.get_user_credentials(target["id"])["failed_attempts"] == 0
+
+
+def test_admin_can_verify_email(client: TestClient):
+    admin_token, _ = _session("admin")
+    target = pdb.create_user(role="athlete", email="v@example.com", email_verified=False)
+    assert pdb.get_user_by_public_id(target["public_id"])["email_verified"] is False
+
+    r = client.post(
+        f"/api/admin/users/{target['public_id']}/verify-email", headers=_bearer(admin_token)
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["email_verified"] is True
+
+
+def test_admin_password_reset_requires_email(client: TestClient):
+    admin_token, _ = _session("admin")
+    target = pdb.create_user(role="athlete")  # pas d'email
+    r = client.post(
+        f"/api/admin/users/{target['public_id']}/password-reset", headers=_bearer(admin_token)
+    )
+    assert r.status_code == 400
+
+
+def test_admin_password_reset_sends_link(client: TestClient):
+    admin_token, _ = _session("admin")
+    target = pdb.create_user(role="athlete", email="reset@example.com", password_hash="h")
+    r = client.post(
+        f"/api/admin/users/{target['public_id']}/password-reset", headers=_bearer(admin_token)
+    )
+    assert r.status_code == 200, r.text
+    # Sans SMTP configuré, l'envoi est best-effort : la clé existe mais vaut False.
+    assert r.json()["sent"] is False
+    # Le compte existe toujours (aucune suppression surprise).
+    assert pdb.get_user_by_email("reset@example.com") is not None
+
+
+def test_admin_sessions_and_logout(client: TestClient):
+    admin_token, _ = _session("admin")
+    target = pdb.create_user(role="athlete")
+    pdb.create_session(target["id"])
+    pdb.create_session(target["id"])
+
+    r = client.get(f"/api/admin/users/{target['public_id']}/sessions", headers=_bearer(admin_token))
+    assert r.status_code == 200, r.text
+    assert len(r.json()) == 2
+    assert "token_hash" not in r.json()[0]
+
+    out = client.post(
+        f"/api/admin/users/{target['public_id']}/logout", headers=_bearer(admin_token)
+    )
+    assert out.status_code == 200 and out.json()["revoked"] == 2
+    assert (
+        client.get(
+            f"/api/admin/users/{target['public_id']}/sessions", headers=_bearer(admin_token)
+        ).json()
+        == []
+    )
+
+
+def test_admin_can_delete_user_but_not_bootstrap(client: TestClient):
+    admin_token, _ = _session("admin")
+    target = pdb.create_user(role="athlete", email="gone@example.com")
+    r = client.delete(f"/api/admin/users/{target['public_id']}", headers=_bearer(admin_token))
+    assert r.status_code == 204
+    assert pdb.get_user_by_public_id(target["public_id"]) is None
+
+    bootstrap = pdb.get_or_create_bootstrap_coach()
+    b = client.delete(f"/api/admin/users/{bootstrap['public_id']}", headers=_bearer(admin_token))
+    assert b.status_code == 403
+
+
+def test_admin_actions_are_audited(client: TestClient):
+    admin_token, admin_pid = _session("admin")
+    target = pdb.create_user(role="athlete")
+    client.post(
+        f"/api/admin/users/{target['public_id']}/role",
+        headers=_bearer(admin_token),
+        json={"role": "coach"},
+    )
+    entries = pdb.list_admin_audit()
+    assert any(
+        e["action"] == "role_change" and e["target_public_id"] == target["public_id"]
+        for e in entries
+    )
+    assert all(e["actor_public_id"] == admin_pid for e in entries)

@@ -550,3 +550,51 @@ def test_platform_settings_override_env(monkeypatch):
     pdb.set_setting("signup_enabled", "0")
     assert pdb.effective_signup_enabled() is False
     assert pdb.get_setting("missing", default="x") == "x"
+
+
+# ---- Gestion compte admin : sécurité, sessions, liens, audit ----------------
+
+
+def test_get_user_security_state_hides_secrets():
+    user = pdb.create_user(role="athlete")
+    pdb.set_totp_secret(user["id"], "SECRET")
+    pdb.enable_totp(user["id"])
+    state = pdb.get_user_security_state(user["id"])
+    assert state["totp_enabled"] is True
+    assert state["has_password"] is False
+    assert state["failed_attempts"] == 0
+    assert "password_hash" not in state and "totp_secret" not in state
+    assert pdb.get_user_security_state(999999) is None
+
+
+def test_list_sessions_active_only_filters_revoked():
+    user = pdb.create_user(role="athlete")
+    _s1, t1 = pdb.create_session(user["id"])
+    _s2, t2 = pdb.create_session(user["id"])
+    assert len(pdb.list_sessions(user["id"])) == 2
+    assert "token_hash" not in pdb.list_sessions(user["id"])[0]
+
+    pdb.revoke_session(t1)
+    active = pdb.list_sessions(user["id"])
+    assert len(active) == 1
+    assert len(pdb.list_sessions(user["id"], active_only=False)) == 2
+
+
+def test_list_coaches_for_athlete():
+    coach = pdb.create_user(role="coach")
+    athlete = pdb.create_user(role="athlete")
+    pdb.link_coach_athlete(coach["id"], athlete["id"])
+    coaches = pdb.list_coaches_for_athlete(athlete["id"])
+    assert [c["public_id"] for c in coaches] == [coach["public_id"]]
+
+
+def test_admin_audit_record_and_list():
+    actor = pdb.create_account("admin")
+    target = pdb.create_user(role="athlete")
+    pdb.record_admin_audit(actor, "role_change", target, {"from": "athlete", "to": "coach"})
+    entries = pdb.list_admin_audit()
+    assert len(entries) == 1
+    assert entries[0]["actor_public_id"] == actor["public_id"]
+    assert entries[0]["target_public_id"] == target["public_id"]
+    assert entries[0]["details"] == {"from": "athlete", "to": "coach"}
+    assert pdb.list_admin_audit(limit=0) == []

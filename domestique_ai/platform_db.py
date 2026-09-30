@@ -16,6 +16,7 @@ from __future__ import annotations
 import datetime as dt
 import hashlib
 import hmac
+import json
 import secrets
 import sqlite3
 import uuid
@@ -397,6 +398,24 @@ def init_platform_db(path: Path | None = None) -> None:
                 updated_at TEXT NOT NULL
             )
         """)
+        # Journal d'audit des actions d'administration (traçabilité). Les FK sont
+        # ``SET NULL`` + snapshot du ``public_id`` pour que l'historique survive à
+        # la suppression d'un compte.
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS admin_audit (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                actor_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+                actor_public_id TEXT,
+                action TEXT NOT NULL,
+                target_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+                target_public_id TEXT,
+                details TEXT,
+                created_at TEXT NOT NULL
+            )
+        """)
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_admin_audit_created ON admin_audit(created_at DESC)"
+        )
         conn.commit()
     finally:
         conn.close()
@@ -808,6 +827,33 @@ def get_user_credentials(user_id: int, path: Path | None = None) -> dict[str, An
         conn.close()
 
 
+def get_user_security_state(user_id: int, path: Path | None = None) -> dict[str, Any] | None:
+    """État de sécurité d'un compte **sans secret** (pour l'API admin).
+
+    Renvoie ``failed_attempts``, ``locked_until``, ``password_changed_at``, et
+    les booléens ``has_password`` / ``totp_enabled``. Ne jamais utiliser
+    ``get_user_credentials`` côté API : elle expose le hash et le secret TOTP.
+    """
+    conn = _connect(path)
+    try:
+        row = conn.execute(
+            "SELECT password_hash, totp_enabled, password_changed_at, "
+            "failed_attempts, locked_until FROM users WHERE id = ?",
+            (user_id,),
+        ).fetchone()
+        if row is None:
+            return None
+        return {
+            "has_password": bool(row["password_hash"]),
+            "totp_enabled": bool(row["totp_enabled"]),
+            "password_changed_at": row["password_changed_at"],
+            "failed_attempts": row["failed_attempts"],
+            "locked_until": row["locked_until"],
+        }
+    finally:
+        conn.close()
+
+
 def set_user_credentials(
     user_id: int,
     email: str,
@@ -848,6 +894,39 @@ def revoke_all_sessions(user_id: int, path: Path | None = None) -> int:
         )
         conn.commit()
         return cur.rowcount
+    finally:
+        conn.close()
+
+
+def list_sessions(
+    user_id: int, active_only: bool = True, path: Path | None = None
+) -> list[dict[str, Any]]:
+    """Sessions d'un utilisateur (jamais ``token_hash``), plus récentes d'abord.
+
+    ``active_only`` exclut les sessions révoquées et expirées.
+    """
+    conn = _connect(path)
+    try:
+        rows = conn.execute(
+            "SELECT id, created_at, expires_at, revoked_at, last_used_at "
+            "FROM sessions WHERE user_id = ? ORDER BY id DESC",
+            (user_id,),
+        ).fetchall()
+        result = [
+            {
+                "id": r["id"],
+                "created_at": r["created_at"],
+                "expires_at": r["expires_at"],
+                "revoked_at": r["revoked_at"],
+                "last_used_at": r["last_used_at"],
+            }
+            for r in rows
+        ]
+        if active_only:
+            result = [
+                s for s in result if s["revoked_at"] is None and not _is_expired(s["expires_at"])
+            ]
+        return result
     finally:
         conn.close()
 
@@ -1644,6 +1723,21 @@ def list_athletes_for_coach(coach_id: int, path: Path | None = None) -> list[dic
         conn.close()
 
 
+def list_coaches_for_athlete(athlete_id: int, path: Path | None = None) -> list[dict[str, Any]]:
+    """Coachs auxquels un athlète est rattaché (symétrique de ``list_athletes_for_coach``)."""
+    conn = _connect(path)
+    try:
+        rows = conn.execute(
+            "SELECT u.* FROM coach_athlete ca "
+            "JOIN users u ON u.id = ca.coach_id "
+            "WHERE ca.athlete_id = ? ORDER BY u.id",
+            (athlete_id,),
+        ).fetchall()
+        return [_user_dict(r) for r in rows]
+    finally:
+        conn.close()
+
+
 # ---------------------------------------------------------------------------
 # Lien d'invitation réutilisable d'un coach
 # ---------------------------------------------------------------------------
@@ -1732,5 +1826,73 @@ def delete_user(user_id: int, path: Path | None = None) -> bool:
         conn.execute("DELETE FROM users WHERE id = ?", (user_id,))
         conn.commit()
         return conn.total_changes > 0
+    finally:
+        conn.close()
+
+
+# ---------------------------------------------------------------------------
+# Journal d'audit admin
+# ---------------------------------------------------------------------------
+
+
+def _admin_audit_dict(row: sqlite3.Row) -> dict[str, Any]:
+    details: Any = None
+    if row["details"]:
+        try:
+            details = json.loads(row["details"])
+        except (ValueError, TypeError):
+            details = row["details"]
+    return {
+        "id": row["id"],
+        "actor_public_id": row["actor_public_id"],
+        "action": row["action"],
+        "target_public_id": row["target_public_id"],
+        "details": details,
+        "created_at": row["created_at"],
+    }
+
+
+def record_admin_audit(
+    actor: dict[str, Any],
+    action: str,
+    target: dict[str, Any] | None = None,
+    details: dict[str, Any] | None = None,
+    path: Path | None = None,
+) -> None:
+    """Enregistre une action d'administration (best-effort côté appelant)."""
+    conn = _connect(path)
+    try:
+        conn.execute(
+            "INSERT INTO admin_audit (actor_user_id, actor_public_id, action, "
+            "target_user_id, target_public_id, details, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (
+                actor.get("id"),
+                actor.get("public_id"),
+                action,
+                (target or {}).get("id"),
+                (target or {}).get("public_id"),
+                json.dumps(details, ensure_ascii=False) if details else None,
+                _now(),
+            ),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def list_admin_audit(limit: int | None = None, path: Path | None = None) -> list[dict[str, Any]]:
+    """Liste le journal d'audit, du plus récent au plus ancien."""
+    conn = _connect(path)
+    try:
+        if limit is None:
+            rows = conn.execute(
+                "SELECT * FROM admin_audit ORDER BY created_at DESC, id DESC"
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT * FROM admin_audit ORDER BY created_at DESC, id DESC LIMIT ?", (limit,)
+            ).fetchall()
+        return [_admin_audit_dict(r) for r in rows]
     finally:
         conn.close()

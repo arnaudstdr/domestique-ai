@@ -13,6 +13,8 @@ import type {
   AdminFeedback,
   AdminSettings,
   AdminUser,
+  AdminSession,
+  AdminUserDetail,
   AthleteSummary,
   Availability,
   CoachMemoryFact,
@@ -684,6 +686,8 @@ export const api = {
   // cross-tenant : comptes, retours, réglages. L'admin ne voit rien d'autre.
   admin: {
     users: () => http<AdminUser[]>(`/api/admin/users`),
+    userDetail: (publicId: string) =>
+      http<AdminUserDetail>(`/api/admin/users/${publicId}`),
     setRole: (publicId: string, role: string) =>
       http<AdminUser>(`/api/admin/users/${publicId}/role`, {
         method: "POST",
@@ -693,6 +697,20 @@ export const api = {
       http<AdminUser>(`/api/admin/users/${publicId}/reset-2fa`, {
         method: "POST",
       }),
+    unlock: (publicId: string) =>
+      http<AdminUserDetail>(`/api/admin/users/${publicId}/unlock`, { method: "POST" }),
+    verifyEmail: (publicId: string) =>
+      http<AdminUserDetail>(`/api/admin/users/${publicId}/verify-email`, { method: "POST" }),
+    sendPasswordReset: (publicId: string) =>
+      http<{ sent: boolean }>(`/api/admin/users/${publicId}/password-reset`, {
+        method: "POST",
+      }),
+    sessions: (publicId: string) =>
+      http<AdminSession[]>(`/api/admin/users/${publicId}/sessions`),
+    logoutAll: (publicId: string) =>
+      http<{ revoked: number }>(`/api/admin/users/${publicId}/logout`, { method: "POST" }),
+    deleteUser: (publicId: string) =>
+      http<void>(`/api/admin/users/${publicId}`, { method: "DELETE" }),
     feedback: () => http<AdminFeedback[]>(`/api/admin/feedback`),
     setFeedbackStatus: (id: number, status: FeedbackStatus) =>
       http<AdminFeedback>(`/api/admin/feedback/${id}`, {

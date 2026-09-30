@@ -106,6 +106,23 @@ def _send_verification_email(user: dict) -> None:
     mailer.send_verification_email(email, token)
 
 
+def issue_password_reset(user: dict) -> bool:
+    """Génère un lien de réinitialisation et l'envoie par email.
+
+    Partagé par ``forgot_password`` (anti-énumération) et le panneau admin
+    (envoi explicite). ``False`` si le compte n'a pas d'email ou si l'envoi
+    échoue (best-effort).
+    """
+    email = user.get("email")
+    if not email:
+        return False
+    expires = (
+        dt.datetime.now(dt.UTC) + dt.timedelta(minutes=get_password_reset_ttl_minutes())
+    ).isoformat()
+    _row, token = create_auth_token(user["id"], "password_reset", expires)
+    return mailer.send_password_reset_email(email, token)
+
+
 class MeResponse(BaseModel):
     public_id: str
     role: str
@@ -652,11 +669,7 @@ def forgot_password(body: ForgotPasswordRequest, request: Request) -> StatusResp
     if email and ratelimit.check("forgot_email", email, max_events=3, window_seconds=3600):
         user = get_user_by_email(email)
         if user is not None and user.get("email"):
-            expires = (
-                dt.datetime.now(dt.UTC) + dt.timedelta(minutes=get_password_reset_ttl_minutes())
-            ).isoformat()
-            _row, token = create_auth_token(user["id"], "password_reset", expires)
-            mailer.send_password_reset_email(user["email"], token)
+            issue_password_reset(user)
     return StatusResponse(status="ok")
 
 

@@ -789,3 +789,28 @@ export interface AdminFeedback {
 export interface AdminSettings {
   signup_enabled: boolean;
 }
+
+export interface AdminLink {
+  public_id: string;
+  display_name: string | null;
+  email: string | null;
+}
+
+export interface AdminUserDetail extends AdminUser {
+  locked: boolean;
+  failed_attempts: number;
+  locked_until: string | null;
+  password_changed_at: string | null;
+  last_activity_date: string | null;
+  n_activities: number;
+  coaches: AdminLink[];
+  athletes_count: number;
+}
+
+export interface AdminSession {
+  id: number;
+  created_at: string | null;
+  expires_at: string | null;
+  revoked_at: string | null;
+  last_used_at: string | null;
+}

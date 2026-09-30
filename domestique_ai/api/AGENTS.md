@@ -105,15 +105,29 @@ SQLite autorise les trois.
   `_migrate_users_role_check()` reconstruit la table `users` (SQLite ne sait pas
   ALTER un CHECK) au premier `init_platform_db` sur une base existante ;
   idempotente.
-- **Panneau** — routeur `api/routers/admin.py`, préfixe `/api/admin`, protégé par
-  `Depends(require_admin)` (`api/deps.py`) : `GET /users`, `POST
-  /users/{public_id}/role`, `POST /users/{public_id}/reset-2fa` (désactive la 2FA
-  d'un compte : secret + codes de secours purgés, ré-enrôlement forcé à la
-  prochaine connexion), `GET /feedback`, `PATCH /feedback/{id}` (statut de
-  traitement), `GET|PUT /settings`. L'admin est
-  **isolé** : il n'hérite pas des droits coach (`require_coach`/`get_athlete_context`
-  inchangés), et son rôle (comme celui du bootstrap) ne peut pas être modifié via
-  l'endpoint de rôle (403 sur le compte propriétaire).
+- **Panneau** — package `api/routers/admin/` (`__init__.py` assemble le routeur
+  `prefix="/api/admin"`, `dependencies=[Depends(require_admin)]` ; sous-modules
+  `users.py`, `feedback.py`, `settings.py`, helpers partagés `_common.py`).
+  Endpoints comptes : `GET /users`, `GET /users/{public_id}` (fiche détaillée
+  **sans secret** : verrouillage, activité, liens), `POST /users/{id}/role`,
+  `POST /users/{id}/reset-2fa` (secret + codes purgés, ré-enrôlement forcé),
+  `POST /users/{id}/unlock` (débloque un compte verrouillé), `POST
+  /users/{id}/verify-email`, `POST /users/{id}/password-reset` (envoie le lien
+  email — 400 sans email), `GET /users/{id}/sessions` (sans `token_hash`),
+  `POST /users/{id}/logout` (révoque toutes les sessions), `DELETE /users/{id}`
+  (compte + espace disque `remove_athlete_space` ; bootstrap refusé). Retours :
+  `GET /feedback`, `PATCH /feedback/{id}`. Réglages : `GET|PUT /settings`.
+  L'admin est **isolé** : il n'hérite pas des droits coach
+  (`require_coach`/`get_athlete_context` inchangés), et son rôle (comme celui du
+  bootstrap) ne peut pas être modifié via l'endpoint de rôle (403).
+- **Journal d'audit** — table `admin_audit` de `platform.db` (acteur, action,
+  cible, détails JSON, date). Chaque mutation admin est tracée
+  (`platform_db.record_admin_audit`, appelé via `admin/_common.audit`) :
+  `role_change`, `reset_2fa`, `unlock_account`, `verify_email`,
+  `password_reset`, `logout_all`, `delete_account`, `feedback_status`,
+  `settings_update`. FK `SET NULL` + snapshot `public_id` → l'historique survit à
+  la suppression d'un compte (l'audit de suppression est écrit **avant** le
+  DELETE). Jamais de secret dans les détails.
 - **Réglages plateforme** — table `platform_settings` (key/value) de
   `platform.db`, éditée à chaud par l'admin. Seul réglage exposé pour l'instant :
   `signup_enabled`, qui surcharge `DOMESTIQUE_AI_SIGNUP_ENABLED`. La résolution
@@ -123,9 +137,13 @@ SQLite autorise les trois.
   un admin à mot de passe reste soumis à l'enrôlement 2FA (le bootstrap, lui,
   reste exempté break-glass).
 - **UI** — page `/admin` (`frontend/src/pages/Admin.tsx`), lien d'en-tête
-  `ShieldCheck` visible seulement si `me.role === "admin"`.
-- Tests : `tests/test_admin_api.py`, `tests/test_platform_db.py` (rôle + réglages
-  + migration), `tests/test_auth_cli.py` (`set-role`).
+  `ShieldCheck` visible seulement si `me.role === "admin"`. Chaque compte est
+  dépliable (`components/AdminUserRow.tsx`) : fiche sécurité/activité/liens +
+  actions (déverrouiller, vérifier email, reset mdp, déconnexion globale,
+  suppression).
+- Tests : `tests/test_admin_api.py`, `tests/test_platform_db.py` (rôle, réglages,
+  audit, sessions, migration), `tests/test_auth_cli.py` (`create-user`,
+  `set-role`).
 
 ## Heartbeat Healthchecks.io (dead man's switch)
 
