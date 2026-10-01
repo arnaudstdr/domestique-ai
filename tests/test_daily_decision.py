@@ -257,6 +257,23 @@ def test_non_go_calls_llm_reason(ctx: AthleteContext, monkeypatch: pytest.Monkey
     assert result["reason"] == "RAISON LLM"
 
 
+def test_flag_disables_llm_reason(ctx: AthleteContext, monkeypatch: pytest.MonkeyPatch) -> None:
+    """DOMESTIQUE_AI_LLM_DECISION_REASON=0 → raison déterministe, aucun appel."""
+    import domestique_ai.llm.daily_decision as dd
+
+    monkeypatch.setenv("DOMESTIQUE_AI_LLM_DECISION_REASON", "0")
+
+    def boom(decision, reason, signals):
+        raise AssertionError("le LLM ne doit pas être appelé")
+
+    monkeypatch.setattr(dd, "_refine_reason_with_llm", boom)
+    _plan_for(ctx, _today())
+    _seed_morning(ctx, _today(), baseline_readiness=55, readiness_score=45)
+    result = evaluate_daily_decision(_today(), ctx=ctx, use_llm=True, persist=False)
+    assert result["decision"] == "adjust"
+    assert result["reason"]
+
+
 def test_existing_same_decision_not_overwritten(ctx: AthleteContext) -> None:
     """Un recalcul `use_llm=False` ne doit pas écraser une décision persistée
     identique (souvent raffinée par le LLM au check du matin)."""

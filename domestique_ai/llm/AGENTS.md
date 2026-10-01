@@ -43,11 +43,29 @@ Persistance : chaque message (user / assistant / tool) est stocké en JSON brut 
 Chaque appel au SDK Ollama est tracé (best-effort) dans la table `llm_calls` de `platform.db` — alimente la vue « Usage Ollama » du panneau admin (tokens, latence, coût, erreurs).
 
 - **Point unique** : `llm/ollama_client.py` lit les métriques du SDK (`prompt_eval_count`, `prompt_eval_cached_count`, `eval_count`, `total_duration`, `load_duration`, `eval_duration`) et appelle `usage.record_llm_call()` en `finally` (statut `ok`/`error`, `error_type`). Ne pas ajouter d'appel Ollama qui court-circuite ce wrapper, sous peine de trou dans l'observabilité.
-- **`label`** : chaque entrypoint (`stream_chat`, `chat_structured`/`_sync`, `embed_texts`/`_sync`) accepte un `label` (constantes `usage.COACH_CHAT`, `PLAN_WEEK`, `SESSION_SUMMARY`, `FACTS_EXTRACT`, `DAILY_BRIEF`, `WORKOUT_TODAY`, `DECISION_REASON`, `WEEKLY_REVIEW_REASON`, `EMBED_*`). Toujours le renseigner au call-site — c'est le « pourquoi » agrégé dans l'admin.
+- **`label`** : chaque entrypoint (`stream_chat`, `chat_structured`/`_sync`, `embed_texts`/`_sync`) accepte un `label` (constantes `usage.COACH_CHAT`, `PLAN_WEEK`, `SESSION_SUMMARY`, `SESSION_FINALIZE`, `FACTS_EXTRACT`, `DAILY_BRIEF`, `WORKOUT_TODAY`, `DECISION_REASON`, `WEEKLY_REVIEW_REASON`, `EMBED_*`). Toujours le renseigner au call-site — c'est le « pourquoi » agrégé dans l'admin.
 - **Attribution athlète** : `ContextVar` `usage._llm_actor`, posé via `usage.llm_attribution(public_id)` au niveau du **middleware** ASGI (chemin requête, `api/main.py`) et des **boucles du scheduler** (`api/scheduler.py`). ⚠️ Ne **pas** le poser dans `get_athlete_context` (dépendance *sync* → threadpool : le contextvar serait perdu).
 - **Invariant** : `record_llm_call` ne lève **jamais** (une panne d'observabilité ne doit pas casser un appel LLM) ; l'absence de contexte → `actor` `NULL` (normal).
 
 **Config** : clé Cloud via `OLLAMA_API_KEY` (`config.get_ollama_api_key()`, passée au client). Requise pour les modèles `-cloud`, inutile en local. Le palier **Free** Ollama couvre `gemma4:31b-cloud`. Aucune API Ollama n'expose le % de quota (feature requests ouvertes) : le pourcentage affiché côté admin est une **estimation pondérée calibrée**, jamais une lecture.
+
+## Économie de quota Ollama (flags opt-in)
+
+Trois flags d'env (défaut **activé**, `1/true/yes/on` pour activer, `0` pour
+couper) désactivent la **rédaction LLM** des appels proactifs sans changer les
+données : la décision/le calcul reste identique, seul le texte bascule sur le
+fallback déterministe (`config.llm_*_enabled()`).
+
+| Flag | Effet à `0` |
+| --- | --- |
+| `DOMESTIQUE_AI_LLM_DAILY_BRIEF` | phrase + conseil du brief = templates `_build_fallback_*` |
+| `DOMESTIQUE_AI_LLM_WORKOUT_TODAY` | séance du jour = `_decide_kind_fallback` |
+| `DOMESTIQUE_AI_LLM_DECISION_REASON` | raison du check matin = raison des règles |
+
+Le chat coach et la génération de plan explicite restent toujours disponibles
+(actions utilisateur). Les caches (brief, `today_suggestions`, plan) ne sont pas
+affectés : ils servent des payloads `fallback` exactement comme des payloads
+`llm`.
 
 ## Objectif de l'athlète
 
@@ -120,6 +138,14 @@ par la revue hebdo). L'appel `plan_week` passe un **schéma JSON** au SDK
 (`chat_structured(schema=_PLAN_WEEK_SCHEMA)`) : le décodage est contraint, ce
 qui réduit fortement les retries « JSON invalide » (qui renvoient tout le
 prompt une seconde fois).
+
+**Cache des semaines (`plan_llm_cache`)** : la sortie validée d'une semaine est
+persistée avec un hash de l'entrée complète (état, objectif, dates, contraintes,
+modèle) et rejouée sans appel LLM tant que rien n'a changé — double clic sur
+« Générer le plan IA », relance d'une revue à état identique, retry d'UI. Le
+cache est actif quand `GenerationContext.db_path` est renseigné
+(`build_context_from_app_state`, revue hebdo) ; les contextes ad hoc (tests)
+sans `db_path` ne cachent rien.
 
 **Niveau connu du coach conversationnel** : le niveau de l'athlète
 (`beginner|intermediate|advanced|ex_competitor|racer`) est injecté dans le bloc

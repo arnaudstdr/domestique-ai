@@ -24,6 +24,7 @@ import statistics
 from typing import Any
 
 from domestique_ai.athlete_context import AthleteContext, context_from_env
+from domestique_ai.config import llm_decision_reason_enabled
 from domestique_ai.llm import usage
 from domestique_ai.processing.plan_builder import Workout
 
@@ -281,6 +282,10 @@ def evaluate_daily_decision(
 
     ctx = ctx or context_from_env()
     today = today or _dt.date.today()
+    if use_llm and not llm_decision_reason_enabled():
+        # Flag plateforme : la décision reste calculée par les règles, seule la
+        # rédaction LLM de la raison est désactivée.
+        use_llm = False
     signals = _collect_signals(today, ctx)
 
     planned = get_planned_workout(today.isoformat(), ctx=ctx)

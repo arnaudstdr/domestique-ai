@@ -223,6 +223,19 @@ def test_build_daily_brief_uses_llm_when_available(stable_signals, monkeypatch):
     assert brief["coach_tip"] == "Bois régulièrement sur la sortie."
 
 
+def test_daily_brief_flag_disables_llm(stable_signals, monkeypatch):
+    """DOMESTIQUE_AI_LLM_DAILY_BRIEF=0 → fallback déterministe, aucun appel."""
+    monkeypatch.setenv("DOMESTIQUE_AI_LLM_DAILY_BRIEF", "0")
+
+    def boom(signals):
+        raise AssertionError("le LLM ne doit pas être appelé")
+
+    monkeypatch.setattr(daily_brief, "_generate_brief_with_llm", boom)
+    brief = build_daily_brief(today=dt.date(2026, 5, 21))
+    assert brief["source"] == "fallback"
+    assert brief["summary"] and brief["coach_tip"]
+
+
 def test_build_daily_brief_falls_back_when_llm_returns_none(stable_signals, monkeypatch):
     monkeypatch.setattr(daily_brief, "_generate_brief_with_llm", lambda signals: None)
     brief = build_daily_brief(today=dt.date(2026, 5, 21))

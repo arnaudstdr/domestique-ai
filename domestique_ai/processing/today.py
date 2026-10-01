@@ -28,6 +28,7 @@ import logging
 from typing import Any
 
 from domestique_ai.athlete_context import AthleteContext, context_from_env
+from domestique_ai.config import llm_workout_today_enabled
 from domestique_ai.llm import today_cache, usage
 from domestique_ai.llm.availability import (
     Availability,
@@ -712,6 +713,9 @@ def propose_workout_today(
 
     decision: dict[str, Any] | None = None
     source = "fallback"
+    if use_llm and not llm_workout_today_enabled():
+        # Flag plateforme : choix LLM désactivé → règles déterministes.
+        use_llm = False
     if use_llm:
         decision = _decide_kind_with_llm(dossier)
         if decision is not None:

@@ -370,6 +370,25 @@ def test_cache_hit_short_circuits_llm(tmp_path, monkeypatch):
     assert second["source"] == "cache"
 
 
+def test_flag_disables_llm_decision(tmp_path, monkeypatch):
+    """DOMESTIQUE_AI_LLM_WORKOUT_TODAY=0 → règles déterministes, aucun appel."""
+    _patch_paths(tmp_path, monkeypatch)
+    _set_availability(
+        tmp_path,
+        "days:\n  monday:\n    max_duration_min: 90\n    context: indoor\n",
+    )
+    _patch_tsb(monkeypatch, 0.0)
+    monkeypatch.setenv("DOMESTIQUE_AI_LLM_WORKOUT_TODAY", "0")
+
+    def boom(_dossier):
+        raise AssertionError("le LLM ne doit pas être appelé")
+
+    monkeypatch.setattr(today_mod, "_decide_kind_with_llm", boom)
+    result = propose_workout_today(today=dt.date(2026, 1, 5))
+    assert result["source"] == "fallback"
+    assert result["workout"]["kind"]
+
+
 def test_cache_key_distinguishes_available_min(tmp_path, monkeypatch):
     """Deux disponibilités différentes le même jour ne partagent pas le cache."""
     _patch_paths(tmp_path, monkeypatch)

@@ -23,6 +23,7 @@ import logging
 from typing import Any
 
 from domestique_ai.athlete_context import AthleteContext, context_from_env
+from domestique_ai.config import llm_daily_brief_enabled
 from domestique_ai.llm import brief_cache, usage
 from domestique_ai.llm.ollama_client import chat_structured_sync
 from domestique_ai.processing.morning_metrics import (
@@ -424,6 +425,9 @@ def build_daily_brief(
     summary: str | None = None
     tip: str | None = None
     source = "fallback"
+    if use_llm and not llm_daily_brief_enabled():
+        # Flag plateforme : LLM désactivé → fallback déterministe direct.
+        use_llm = False
     if use_llm:
         generated = _generate_brief_with_llm(signals)
         if generated:
