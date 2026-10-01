@@ -40,12 +40,11 @@ from domestique_ai.llm.conversations import (
 )
 from domestique_ai.llm.daily_brief import build_daily_brief
 from domestique_ai.llm.memory import (
-    extract_facts_from_session,
     get_relevant_memory,
     list_facts,
     purge_session,
     remember_fact,
-    summarize_session,
+    summarize_and_extract_facts,
     update_fact,
 )
 from domestique_ai.llm.ollama_client import OllamaError
@@ -349,15 +348,12 @@ async def _update_memory_safely(
 
 
 def _finalize_session_memory(session_id: str, ctx: AthleteContext) -> dict[str, Any]:
-    """Résumé final + extraction des faits durables d'une session (synchrone)."""
-    summary = summarize_session(session_id, final=True, ctx=ctx)
-    facts: list[dict[str, Any]] = []
-    if summary and summary.get("updated"):
-        facts = extract_facts_from_session(session_id, ctx=ctx)
+    """Résumé final + faits durables en UN appel LLM (synchrone)."""
+    result = summarize_and_extract_facts(session_id, ctx=ctx)
     return {
         "session_id": session_id,
-        "summarized": bool(summary and summary.get("updated")),
-        "facts": facts,
+        "summarized": bool(result and result.get("updated")),
+        "facts": (result or {}).get("facts") or [],
     }
 
 

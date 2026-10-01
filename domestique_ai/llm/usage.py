@@ -33,6 +33,7 @@ COACH_CHAT = "coach_chat"
 SESSION_TITLE = "session_title"
 PLAN_WEEK = "plan_week"
 SESSION_SUMMARY = "session_summary"
+SESSION_FINALIZE = "session_finalize"
 FACTS_EXTRACT = "facts_extract"
 DAILY_BRIEF = "daily_brief"
 WORKOUT_TODAY = "workout_today"
@@ -49,6 +50,7 @@ LABELS: dict[str, str] = {
     SESSION_TITLE: "Titre de session",
     PLAN_WEEK: "Génération de plan (semaine)",
     SESSION_SUMMARY: "Résumé de session",
+    SESSION_FINALIZE: "Finalisation de session (résumé + faits)",
     FACTS_EXTRACT: "Extraction de faits",
     DAILY_BRIEF: "Brief quotidien",
     WORKOUT_TODAY: "Séance du jour",

@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import contextlib
 import datetime as _dt
+import json
 import statistics
 from typing import Any
 
@@ -208,12 +209,29 @@ def _llm_decision(report: dict[str, Any], base: tuple[str, float, str]) -> str:
         "properties": {"reason": {"type": "string", "maxLength": 260}},
         "required": ["reason"],
     }
+    # Agrégats seulement : le `per_day` complet (7 entrées planifié/réalisé)
+    # pesait lourd sans servir à la rédaction de la raison.
+    compliance = report.get("compliance") or {}
+    facts = {
+        "compliance": {
+            "planned_sessions": compliance.get("planned_sessions"),
+            "done": compliance.get("done"),
+            "partial": compliance.get("partial"),
+            "missed": compliance.get("missed"),
+            "skipped_by_decision": compliance.get("skipped_by_decision"),
+            "adherence_pct": compliance.get("adherence_pct"),
+            "planned_tss": compliance.get("planned_tss"),
+            "realized_tss": compliance.get("realized_tss"),
+        },
+        "morning": report.get("morning"),
+        "tsb": report.get("tsb"),
+    }
     prompt = (
         "Tu es un coach cyclisme. La revue hebdomadaire a arrêté l'action "
         f"« {action} ». Rédige en français, une à deux phrases, pourquoi et ce "
-        "qui change pour l'athlète. Données: compliance="
-        f"{report.get('compliance')}, matin={report.get('morning')}, "
-        f'TSB={report.get("tsb")}. Retourne un JSON {{"reason": str}}.'
+        "qui change pour l'athlète. Données: "
+        f"{json.dumps(facts, ensure_ascii=False, default=str)}. "
+        'Retourne un JSON {"reason": str}.'
     )
     try:
         messages = [

@@ -28,7 +28,7 @@ Positionnement : coach **cycliste et assistant santé**. Au-delà de l'entraîne
 Pour ajouter un tool :
 
 1. Écrire la fonction Python dans `tools.py` (signature explicite, retourne un dict JSON-sérialisable).
-2. Ajouter son schéma JSON dans `TOOL_SCHEMAS` (description claire, paramètres typés).
+2. Ajouter son schéma JSON dans `TOOL_SCHEMAS` (description claire, paramètres typés). Rester concis : les schémas sont renvoyés à **chaque itération** de la boucle de tool-calling (budget global verrouillé par test).
 3. L'enregistrer dans le dict `TOOLS`. `dispatch()` route automatiquement.
 4. Tester sur DB tmp dans `tests/test_tools.py` (pas de réseau, pas de LLM).
 
@@ -57,11 +57,12 @@ Objectif : `data/objective.yaml` (gitignoré, template `data/objective.yaml.exam
 
 Le coach garde une mémoire **entre les sessions**, à 3 étages, dans le SQLite de l'athlète (`ctx.db_path`) :
 
-- **Faits durables** (`coach_memory`) : préférences, contraintes/blessures, objectifs, accords, perso. Toujours injectés dans le prompt système. Population par l'outil `remember_fact` (explicite) **et** extraction auto en fin de session. Dédup par similarité (cosine > 0.9 → mise à jour).
-- **Résumés épisodiques** (`session_summaries`) : un résumé par session. **Résumé roulant** tous les `SESSION_SUMMARY_EVERY_MESSAGES` messages (défaut 8) ; **finalisation** (résumé final + extraction de faits) quand une session est inactive > `SESSION_IDLE_FINALIZE_MINUTES` (défaut 45, job APScheduler `finalize_sessions`), **ou** automatiquement à la rotation du fil (nouveau chunk ouvert par `POST /api/coach/chat`), ou sur appel explicite `POST /api/coach/sessions/{id}/finalize` (conservé pour tests/clients). Le garde-fou `last_summarized_message_id` évite les régénérations.
-- **RAG** (`memory_vectors`) : index de retrieval unifié (messages, résumés, faits). Embeddings via Ollama (`OLLAMA_EMBED_MODEL`, défaut `nomic-embed-text` — `ollama pull nomic-embed-text`), cosine brute-force numpy (numpy déjà tiré par pandas). `build_memory_block(query)` assemble faits + 5 derniers résumés + top-4 passages pertinents, avec budget de contexte.
+- **Faits durables** (`coach_memory`) : préférences, contraintes/blessures, objectifs, accords, perso. Injectés dans le prompt système : les **épinglés toujours**, puis le **top 20 par pertinence** vs la question (repli sur les plus récents si pas de vecteurs/query) — l'ancien « tous les faits » coûtait jusqu'à ~4 400 tok/tour. Population par l'outil `remember_fact` (explicite) **et** extraction auto en fin de session. Dédup par similarité (cosine > 0.9 → mise à jour).
+- **Résumés épisodiques** (`session_summaries`) : un résumé par session. **Résumé roulant** tous les `SESSION_SUMMARY_EVERY_MESSAGES` messages (défaut 8) ; **finalisation en UN seul appel LLM** (`summarize_and_extract_facts`, label `session_finalize` : résumé + faits dans la même sortie JSON contrainte par schéma) quand une session est inactive > `SESSION_IDLE_FINALIZE_MINUTES` (défaut 45, job APScheduler `finalize_sessions`), **ou** automatiquement à la rotation du fil (nouveau chunk ouvert par `POST /api/coach/chat`), ou sur appel explicite `POST /api/coach/sessions/{id}/finalize` (conservé pour tests/clients). Le garde-fou `last_summarized_message_id` évite les régénérations. `extract_facts_from_session` reste disponible pour une extraction isolée (tests/outils).
+- **Transcript borné** : `_transcript` plafonne à 500 c/message **et** ~24 000 c au total, en gardant les messages les plus récents — sans ce plafond le prompt de résumé croissait linéairement avec la session (~12 k tokens à 120 messages).
+- **RAG** (`memory_vectors`) : index de retrieval unifié (messages, résumés, faits). Embeddings via Ollama (`OLLAMA_EMBED_MODEL`, défaut `nomic-embed-text` — `ollama pull nomic-embed-text`), cosine brute-force numpy (numpy déjà tiré par pandas). `build_memory_block(query)` assemble faits (top pertinence) + 5 derniers résumés (500 c max) + top-4 passages pertinents (400 c max), plafond global ~8 000 c.
 
-Intégration : `build_initial_messages()` injecte le bloc mémoire en message `system` **à chaque tour** ; `run_turn_stream()` le calcule une fois par tour. L'historique verbatim de session est plafonné à `MAX_HISTORY_MESSAGES` (24) — le résumé roulant prend le relais. Outils exposés : `remember_fact` (écriture), `search_conversations` (lecture RAG).
+Intégration : `build_initial_messages()` injecte le bloc mémoire en message `system` **à chaque tour** ; `run_turn_stream()` le calcule une fois par tour. **Ordre `system → contexte → historique → mémoire → user`** : la mémoire (dont le RAG dépend de la question) est placée après l'historique pour que le préfixe `system + historique` reste stable d'un tour à l'autre — servi par le cache de prompt Ollama (tokens *cached* moins chers). L'historique verbatim de session est plafonné à `MAX_HISTORY_MESSAGES` (24) — le résumé roulant prend le relais. Outils exposés : `remember_fact` (écriture), `search_conversations` (lecture RAG).
 
 **Économie d'embeddings** : `get_relevant_memory` court-circuite l'appel si `memory_vectors` n'a aucune ligne du type demandé (athlète sans historique), et les embeddings de requête sont mémoïsés (LRU `(model, query)`, déterministes — `clear_embedding_cache()` pour les tests). L'indexation et l'extraction de faits passent en **lot** : `index_messages_batch` pour le tour user+assistant (un appel), `remember_facts_batch` pour les faits extraits (un appel pour N faits, dédup cosine conservée y compris entre faits du lot).
 
@@ -80,7 +81,7 @@ Coach qui s'exprime sans être interpellé, en deux étages d'intrusion croissan
   120 min.
 - Alerte la plus saillante (priorité TSB chronique / strain > monotony / saut volume > dérive matinale). Les dérives matinales sont formatées côté `processing/morning_metrics.format_morning_alert` (libellés humains de `METRIC_LABELS`) — jamais de nom de colonne brut affiché à l'athlète.
 - **Enrichissements hero** : `sleep_history` (7 j, `StepPoint` `{date, hours}`), `week_tss_planned`/`week_tss_done` (compliance de la semaine courante via `compute_week_compliance`) — accompagnés de `week_adherence_pct` et des statuts `week_done`/`week_partial`/`week_missed`/`week_skipped` (repos coach) ; l'adhérence reste `None` si aucune séance n'est planifiée cette semaine (pas de « 0 % » trompeur) — et `coach_tip` (2ᵉ phrase actionnable).
-- Phrase de synthèse **+ conseil** générés par LLM (~25 mots / ~15 mots, JSON strict `{summary, tip}`, mode `chat_structured_sync`) avec **fallbacks déterministes** (`_build_fallback_summary` / `_build_fallback_tip`) si Ollama injoignable — un `coach_tip` n'est jamais vide.
+- Phrase de synthèse **+ conseil** générés par LLM (~25 mots / ~15 mots, JSON strict `{summary, tip}`, mode `chat_structured_sync`) avec **fallbacks déterministes** (`_build_fallback_summary` / `_build_fallback_tip`) si Ollama injoignable — un `coach_tip` n'est jamais vide. Le prompt ne reçoit qu'un **sous-ensemble compact** des signaux (`_llm_payload` : pas de structure de séance imbriquée ni d'historique sommeil détaillé) — le dossier complet reste dans la réponse API pour le front.
 
 Cache **persistant** (table `daily_brief_cache` du SQLite athlète, `llm/brief_cache.py`) avec clé `(date_iso, bucket TSB, sha1(alertes))` — un seul appel LLM par jour et par état, **y compris après un redémarrage du process** (l'ancien cache mémoire régénérait au boot) ; les jours antérieurs sont purgés à chaque écriture.
 
@@ -108,12 +109,17 @@ désormais TSB, readiness médiane, dérive HRV et compliance de la semaine éco
 `coach_state`** (l'agrégat `athlete_state.build_coach_state`) — injectés dans
 `_build_user_prompt` (bloc « État réel ») pour que le LLM **raisonne sur des
 faits**. `ceiling_for(week_idx)` décide du plafond d'intensité de chaque semaine
-(reprise → base/tempo → normal). Un `racer` (compétiteur en activité) reçoit en
+(reprise → base/tempo → normal). Le bloc « État réel » est **mémoïsé par
+génération** (`GenerationContext.state_text()`) : calculé une fois, pas à chaque
+semaine. Un `racer` (compétiteur en activité) reçoit en
 outre une consigne de prompt (volume/intensité soutenus, jusqu'à 2 séances Z4-Z5)
 hors reprise (`_level_guidance`). Le tool LLM `review_week` expose le rapport de
 semaine en lecture (le coach explique un ajustement sans inventer de chiffres).
 `compose_upcoming_week` expose la composition d'une seule semaine (réutilisée
-par la revue hebdo).
+par la revue hebdo). L'appel `plan_week` passe un **schéma JSON** au SDK
+(`chat_structured(schema=_PLAN_WEEK_SCHEMA)`) : le décodage est contraint, ce
+qui réduit fortement les retries « JSON invalide » (qui renvoient tout le
+prompt une seconde fois).
 
 **Niveau connu du coach conversationnel** : le niveau de l'athlète
 (`beginner|intermediate|advanced|ex_competitor|racer`) est injecté dans le bloc
@@ -129,7 +135,8 @@ dans le bloc mémoire (`memory.build_memory_block`, à chaque tour) via
 
 Le plan n'est plus un artefact fixe de 4 semaines : il **roule** et s'adapte aux
 données réelles via deux boucles, toutes deux avec fallback déterministe
-(le LLM ne décide jamais hors bornes, il ne fait que rédiger les raisons).
+(le LLM ne décide jamais hors bornes, il ne fait que rédiger les raisons — à
+partir d'agrégats de compliance, pas du `per_day` complet).
 
 **Check du matin (quotidien)** — `llm/daily_decision.py` + job
 `scheduler._daily_morning_check_job` (CronTrigger, défaut **08:00 local** via

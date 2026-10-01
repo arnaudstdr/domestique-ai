@@ -798,8 +798,8 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "get_recent_activities",
-            "description": "Liste les activités sur les N derniers jours avec "
-            "sport (sport_type), TSS, durée, distance, dénivelé, HR moyenne et zones.",
+            "description": "Activités des N derniers jours (sport, TSS, durée, "
+            "distance, dénivelé, FC, zones) — 10 plus récentes max.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -818,8 +818,7 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "get_zone_distribution",
-            "description": "Répartition cumulée du temps par zone HR (Z1..Z5) "
-            "sur les N derniers jours, avec part en pourcentage.",
+            "description": "Temps cumulé par zone HR (Z1..Z5) sur N jours, en %.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -865,10 +864,8 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "get_morning_trends",
-            "description": "Tendances des métriques matinales : HRV, FC repos, "
-            "sommeil, stress, readiness score, SpO2, fréquence respiratoire, "
-            "température cutanée, pas et calories. Renvoie baselines 14 j, "
-            "dernières valeurs avancées et alertes si dérive.",
+            "description": "Métriques matinales (HRV, FC repos, sommeil, "
+            "readiness, SpO2…) : baselines 14 j, dernières valeurs, alertes.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -898,10 +895,8 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "get_activity_mix",
-            "description": "Répartition de la pratique par sport (vélo, course, "
-            "renfo, marche…) sur les N derniers jours : séances, durée, "
-            "distance, dénivelé et charge par discipline. Utile pour voir la "
-            "pratique dans son ensemble ou parler des activités hors vélo.",
+            "description": "Répartition par sport (vélo, course, renfo…) sur N "
+            "jours : séances, durée, distance, dénivelé, charge par discipline.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -920,12 +915,9 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "get_nutrition_context",
-            "description": "Contexte factuel pour des conseils nutrition : poids, "
-            "FTP, W/kg, charge hebdo (TSS 7 j), nombre de séances et durée "
-            "totale, séance la plus longue et la plus dure, température "
-            "moyenne, calories estimées. Aucun journal alimentaire n'est "
-            "suivi — sert d'ancrage pour personnaliser, pas à calculer un "
-            "bilan calorique.",
+            "description": "Ancrage factuel pour conseils nutrition : poids, "
+            "FTP, W/kg, charge 7 j, séances (durée, plus longue/dure), "
+            "température, calories. Pas de journal alimentaire suivi.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -944,12 +936,9 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "generate_training_plan",
-            "description": "Génère et persiste un plan d'entraînement multi-semaines "
-            "jusqu'à la date d'objectif (lue depuis objective.yaml ; "
-            "fallback 4 semaines). Retourne un summary structuré "
-            "(TSS hebdo, semaine pic, première et dernière séance). "
-            "L'export `.FIT` se fait depuis l'onglet « 📋 Plan » du "
-            "dashboard.",
+            "description": "Génère et persiste le plan déterministe jusqu'à "
+            "l'objectif (fallback 4 semaines). Renvoie un summary (TSS hebdo, "
+            "semaine pic, séances).",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -973,11 +962,9 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "get_planned_workout",
-            "description": "Renvoie la séance prévue à une date donnée dans le "
-            "plan d'entraînement en cours. En cas de plans "
-            "multiples, sélectionne le plus récent dont la fenêtre "
-            "couvre la date. Retourne `planned_workout=None` si "
-            "jour de repos, `available=False` si date hors plan.",
+            "description": "Séance prévue à une date (plan actif le plus "
+            "récent). `planned_workout=None` si repos, `available=False` "
+            "si date hors plan.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -996,29 +983,21 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "propose_workout_today",
-            "description": "Détermine la séance optimale pour aujourd'hui en "
-            "croisant TSB, objectif (weeks_to_event), plan "
-            "persisté, dernière séance, distribution de zones "
-            "de la semaine et signaux d'alerte. Renvoie soit "
-            "rest_day=True, soit un workout structuré complet "
-            "avec un rationale (justification courte) et un "
-            "dict signals (TSB, last_kind, zone_distribution, "
-            "alerts) — à reformuler pour l'utilisateur.",
+            "description": "Séance optimale du jour (TSB, objectif, plan, "
+            "dernière séance, zones, alertes). Renvoie rest_day ou un workout "
+            "structuré + rationale + signals — à reformuler pour l'athlète.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "available_min": {
                         "type": "integer",
-                        "description": "Durée explicite en minutes "
-                        "(override de la dispo du jour, "
-                        "débraie le check off-day).",
+                        "description": "Durée en minutes (override dispo du jour).",
                         "minimum": 20,
                         "maximum": 240,
                     },
                     "refresh": {
                         "type": "boolean",
-                        "description": "Force la régénération en ignorant "
-                        "le cache du jour (défaut false).",
+                        "description": "Force la régénération (ignore le cache du jour).",
                     },
                 },
                 "required": [],
@@ -1029,11 +1008,9 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "propose_workout",
-            "description": "Génère un squelette de séance (échauffement, corps, "
-            "retour au calme). Par défaut cyclisme : fournir target_zone et "
-            "duration_min. Pour une activité hors vélo (renforcement, gainage, "
-            "mobilité, cross-training), passer sport et duration_min — "
-            "target_zone inutile.",
+            "description": "Squelette de séance (échauffement, corps, retour "
+            "au calme). Cyclisme : target_zone + duration_min. Hors vélo "
+            "(renfo, gainage, mobilité) : sport + duration_min.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -1045,18 +1022,18 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
                     "target_zone": {
                         "type": "string",
                         "enum": list(HR_ZONE_KEYS),
-                        "description": "Zone HR dominante visée (cyclisme uniquement).",
+                        "description": "Zone HR visée (vélo).",
                     },
                     "duration_min": {
                         "type": "integer",
-                        "description": "Durée totale de la séance en minutes.",
+                        "description": "Durée en minutes.",
                         "minimum": 15,
                         "maximum": 480,
                     },
                     "kind": {
                         "type": "string",
                         "enum": list(_WORKOUT_TEMPLATES.keys()),
-                        "description": "Type de séance vélo (déduit de target_zone si absent).",
+                        "description": "Type vélo (déduit de target_zone si absent).",
                     },
                 },
                 "required": ["duration_min"],
@@ -1067,11 +1044,9 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "review_week",
-            "description": "Rapport de la semaine écoulée : compliance du plan "
-            "(séances faites / manquées / repos coach, TSS planifié vs réalisé), "
-            "récupération (readiness, sommeil, HRV), alertes overtraining et "
-            "TSB courant. Lecture seule — à utiliser avant de proposer un "
-            "re-plan ou d'expliquer un ajustement hebdomadaire.",
+            "description": "Rapport de la semaine écoulée (compliance, "
+            "récupération, alertes, TSB). Lecture seule — avant un re-plan "
+            "ou pour expliquer un ajustement.",
             "parameters": {
                 "type": "object",
                 "properties": {},
@@ -1082,11 +1057,8 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "find_similar_activities",
-            "description": "Retrouve les activités passées au profil "
-            "similaire à une activité donnée (même bucket de "
-            "sport indoor/outdoor + distance à ±5 % + dénivelé "
-            "à ±10 %). Utile pour comparer la performance sur "
-            "une boucle hebdomadaire ou un parcours récurrent.",
+            "description": "Activités passées au profil similaire (même "
+            "bucket indoor/outdoor, distance ±5 %, dénivelé ±10 %).",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -1096,9 +1068,9 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
                     },
                     "limit": {
                         "type": "integer",
-                        "description": "Nombre max d'activités similaires retournées (défaut 10).",
+                        "description": "Nombre max de résultats (défaut 10).",
                         "minimum": 1,
-                        "maximum": 100,
+                        "maximum": 20,
                     },
                 },
                 "required": ["external_id"],
@@ -1109,23 +1081,19 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "remember_fact",
-            "description": "Mémorise un fait DURABLE sur l'athlète pour les "
-            "sessions futures (préférence, contrainte/blessure, objectif, "
-            "accord, info perso). À appeler quand l'athlète partage une "
-            "information utile à long terme. Ne pas mémoriser d'état passager "
-            "(fatigue du jour, humeur).",
+            "description": "Mémorise un fait DURABLE (préférence, contrainte, "
+            "objectif, accord, perso). Pas d'état passager (fatigue du jour).",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "category": {
                         "type": "string",
                         "enum": ["preference", "constraint", "goal", "agreement", "personal"],
-                        "description": "Catégorie du fait.",
+                        "description": "Catégorie.",
                     },
                     "content": {
                         "type": "string",
-                        "description": "Fait à retenir, formulé de façon autonome "
-                        "(compréhensible hors contexte).",
+                        "description": "Fait autonome (compréhensible hors contexte).",
                     },
                 },
                 "required": ["category", "content"],
@@ -1136,10 +1104,8 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "search_conversations",
-            "description": "Recherche sémantique dans les échanges passés avec "
-            "l'athlète (mémoire des conversations). Utile pour retrouver un "
-            "échange précis (« quand on avait parlé de… ») ou vérifier ce qui a "
-            "déjà été dit avant de répondre.",
+            "description": "Recherche sémantique dans les échanges passés "
+            "(retrouver un échange précis, vérifier ce qui a été dit).",
             "parameters": {
                 "type": "object",
                 "properties": {

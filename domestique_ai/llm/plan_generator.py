@@ -28,7 +28,7 @@ import datetime as _dt
 import json
 import statistics
 from collections.abc import AsyncIterator
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field, ValidationError, field_validator
@@ -57,6 +57,29 @@ from domestique_ai.processing.plan_validator import validate_and_correct
 
 _VALID_KINDS = ("recovery", "endurance", "tempo", "intervals")
 _GENERATION_TIMEOUT_S = 30.0
+
+# Schéma passé au SDK Ollama (`format=`) : contraint le décodage à la forme
+# attendue et réduit fortement les retries « JSON invalide » (qui renvoient
+# tout le prompt une seconde fois).
+_PLAN_WEEK_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "workouts": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "date": {"type": "string"},
+                    "kind": {"type": "string", "enum": list(_VALID_KINDS)},
+                    "duration_min": {"type": "integer"},
+                    "notes": {"type": "string"},
+                },
+                "required": ["date", "kind", "duration_min"],
+            },
+        }
+    },
+    "required": ["workouts"],
+}
 
 
 class LLMWorkoutDraft(BaseModel):
@@ -323,7 +346,10 @@ async def _generate_week_with_llm(
     ]
     for _attempt in range(2):
         raw = await chat_structured(
-            messages, timeout_s=_GENERATION_TIMEOUT_S, label=usage.PLAN_WEEK
+            messages,
+            timeout_s=_GENERATION_TIMEOUT_S,
+            schema=_PLAN_WEEK_SCHEMA,
+            label=usage.PLAN_WEEK,
         )
         if raw is None:
             continue
@@ -416,6 +442,15 @@ class GenerationContext:
     chronic_tsb: float | None = None  # moyenne TSB 7 j
     level: str | None = None  # niveau/expérience de l'athlète
     coach_state: dict[str, Any] | None = None  # dict agrégé (athlete_state)
+    # Mémoïsation interne : le bloc « État réel » est identique pour toutes les
+    # semaines d'une même génération — calculé une seule fois.
+    _state_text: str | None = field(default=None, init=False, repr=False, compare=False)
+
+    def state_text(self) -> str:
+        """Bloc « État réel » (mémoïsé par génération)."""
+        if self._state_text is None:
+            self._state_text = format_state_block(self.coach_state) if self.coach_state else ""
+        return self._state_text
 
     def ceiling_for(self, week_index: int) -> str:
         """Plafond d'intensité de la semaine ``week_index`` (reprise graduée)."""
@@ -491,7 +526,7 @@ async def _compose_one_week(
     flavor = _objective_flavor(ctx.target_event_type)
     taper_weeks = int(flavor["taper_weeks"])
     emphasis = _training_emphasis(ctx.target_event_type)
-    state_text = format_state_block(ctx.coach_state) if ctx.coach_state else ""
+    state_text = ctx.state_text()
 
     cur_week_end = cur_week_start + _dt.timedelta(days=7)
     future_dates = [

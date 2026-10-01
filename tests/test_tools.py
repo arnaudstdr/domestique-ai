@@ -126,6 +126,15 @@ def test_tool_schemas_have_required_shape():
         assert "parameters" in schema["function"]
 
 
+def test_tool_schemas_stay_compact():
+    """Garde-fou anti-bloat : les schémas sont envoyés à CHAQUE itération de la
+    boucle de tool-calling. Budget total ~7 k caractères (avant : ~8,9 k)."""
+    import json
+
+    total = sum(len(json.dumps(schema, ensure_ascii=False)) for schema in TOOL_SCHEMAS)
+    assert total < 7600
+
+
 def test_get_morning_trends_exposes_weight_and_wkg(seeded_db):
     from domestique_ai.processing.morning_metrics import save_morning_entry
 

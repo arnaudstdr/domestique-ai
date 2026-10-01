@@ -231,6 +231,31 @@ def test_build_daily_brief_falls_back_when_llm_returns_none(stable_signals, monk
     assert brief["coach_tip"]
 
 
+def test_llm_payload_is_slim(stable_signals):
+    """Le prompt LLM ne reçoit qu'un sous-ensemble compact des signaux."""
+    from domestique_ai.llm.daily_brief import _collect_signals, _llm_payload
+
+    signals = _collect_signals(dt.date(2026, 5, 21))
+    payload = _llm_payload(signals)
+    assert set(payload) == {
+        "date",
+        "tsb",
+        "tsb_zone",
+        "ctl",
+        "atl",
+        "primary_alert",
+        "today_workout",
+        "sleep_hours_7d",
+        "week_tss_planned",
+        "week_tss_done",
+        "week_adherence_pct",
+    }
+    workout = payload["today_workout"]
+    # Le workout imbriqué complet (structure, signals, rationale) est exclu.
+    assert set(workout) == {"rest_day", "kind", "duration_min"}
+    assert "structure" not in workout
+
+
 # ---------- Cache journalier -------------------------------------------------
 
 

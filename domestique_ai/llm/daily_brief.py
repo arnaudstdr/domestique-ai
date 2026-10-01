@@ -276,9 +276,44 @@ def _build_fallback_tip(signals: dict[str, Any]) -> str:
     return "Soigne l'échauffement et mélange les allures sans forcer."
 
 
+def _llm_payload(signals: dict[str, Any]) -> dict[str, Any]:
+    """Sous-ensemble compact des signaux envoyé au LLM.
+
+    Le dossier complet (workout imbriqué avec structure/signals/rationale,
+    historique sommeil détaillé, statuts semaine…) reste dans la réponse API
+    pour le front ; le prompt n'a besoin que des faits citables.
+    """
+    workout = signals.get("workout") or {}
+    if workout.get("rest_day"):
+        workout_part: dict[str, Any] = {"rest_day": True}
+    else:
+        w = workout.get("workout") or {}
+        workout_part = {
+            "rest_day": False,
+            "kind": w.get("kind"),
+            "duration_min": w.get("duration_min"),
+        }
+    alert = signals.get("primary_alert")
+    return {
+        "date": signals.get("today"),
+        "tsb": signals.get("tsb"),
+        "tsb_zone": signals.get("tsb_zone"),
+        "ctl": signals.get("ctl"),
+        "atl": signals.get("atl"),
+        "primary_alert": alert.get("message") if alert else None,
+        "today_workout": workout_part,
+        "sleep_hours_7d": [
+            p.get("hours") for p in (signals.get("sleep_history") or []) if isinstance(p, dict)
+        ],
+        "week_tss_planned": signals.get("week_tss_planned"),
+        "week_tss_done": signals.get("week_tss_done"),
+        "week_adherence_pct": signals.get("week_adherence_pct"),
+    }
+
+
 def _generate_brief_with_llm(signals: dict[str, Any]) -> dict[str, str] | None:
     """Demande au LLM une phrase d'état + un conseil. ``None`` si échec."""
-    payload = json.dumps(signals, ensure_ascii=False, default=str)
+    payload = json.dumps(_llm_payload(signals), ensure_ascii=False, default=str)
     messages = [
         {"role": "system", "content": _LLM_SYSTEM_PROMPT},
         {

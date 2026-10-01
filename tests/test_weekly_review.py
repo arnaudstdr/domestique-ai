@@ -118,6 +118,38 @@ def test_decision_maintain_when_no_plan() -> None:
     assert action == "maintain"
 
 
+def test_llm_decision_prompt_uses_aggregates(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Le prompt n'embarque pas le détail `per_day` (bloat supprimé)."""
+    import domestique_ai.llm.ollama_client as oc
+    from domestique_ai.llm.weekly_review import _llm_decision
+
+    captured: dict = {}
+
+    def fake_chat(messages, **kwargs):
+        captured["content"] = messages[1]["content"]
+        return {"reason": "ok"}
+
+    monkeypatch.setattr(oc, "chat_structured_sync", fake_chat)
+    report = {
+        "compliance": {
+            "planned_sessions": 4,
+            "done": 3,
+            "partial": 0,
+            "missed": 1,
+            "skipped_by_decision": 0,
+            "adherence_pct": 75.0,
+            "planned_tss": 300.0,
+            "realized_tss": 280.0,
+            "per_day": [{"date": "2026-01-01", "status": "done"}],
+        },
+        "morning": {"readiness_median": 70},
+        "tsb": -3.0,
+    }
+    assert _llm_decision(report, ("maintain", 1.0, "base")) == "ok"
+    assert "per_day" not in captured["content"]
+    assert "adherence_pct" in captured["content"]
+
+
 # --- run_weekly_review ------------------------------------------------------
 
 

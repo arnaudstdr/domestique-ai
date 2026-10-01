@@ -236,6 +236,24 @@ def test_build_memory_block_empty_when_no_memory(tmp_path, monkeypatch):
     assert memory.build_memory_block("q") == ""
 
 
+def test_build_memory_block_caps_facts_and_keeps_pinned(tmp_path, monkeypatch):
+    """Top 20 faits max, l'épinglé est toujours injecté."""
+    import re
+
+    _use_tmp_db(tmp_path, monkeypatch)
+    for i in range(25):
+        letter = chr(ord("a") + i)
+        memory.remember_fact("preference", letter.upper() * 20)
+    # Épingle un fait dont la lettre n'est pas dans la question (mal classé).
+    pinned = next(f for f in memory.list_facts() if f["content"].startswith("Y"))
+    memory.update_fact(pinned["id"], pinned=True)
+
+    block = memory.build_memory_block("question")
+    injected = re.findall(r"([A-Z])\1{19}", block)
+    assert len(injected) == 20
+    assert "Y" * 20 in block
+
+
 def test_build_memory_block_includes_level(tmp_path, monkeypatch):
     """Le niveau de l'athlète est injecté à chaque tour (coaching renforcé)."""
     import types
@@ -292,6 +310,40 @@ def test_finalize_idle_sessions(tmp_path, monkeypatch):
     assert memory.get_session_summary(session) is not None
     # Idempotent : plus rien à faire.
     assert memory.finalize_idle_sessions() == 0
+
+
+def test_finalize_uses_single_llm_call(tmp_path, monkeypatch):
+    """La finalisation fait résumé + faits en UN seul appel LLM."""
+    _use_tmp_db(tmp_path, monkeypatch)
+    calls = {"n": 0}
+
+    def fake_llm(*args, **kwargs):
+        calls["n"] += 1
+        return {
+            "summary": "Résumé final.",
+            "topics": ["objectif"],
+            "facts": [{"category": "goal", "content": "Objectif cyclo en juin"}],
+        }
+
+    monkeypatch.setattr(memory, "chat_structured_sync", fake_llm)
+    session = new_session_id()
+    append_message(session, "user", {"role": "user", "content": "a"})
+    append_message(session, "assistant", {"role": "assistant", "content": "b"})
+
+    result = memory.summarize_and_extract_facts(session)
+    assert result is not None
+    assert result["updated"] is True
+    assert calls["n"] == 1
+    assert len(result["facts"]) == 1
+    assert memory.get_session_summary(session)["summary"] == "Résumé final."
+
+
+def test_transcript_caps_total_chars():
+    """Le transcript est borné globalement, en gardant les messages récents."""
+    messages = [{"id": i, "role": "user", "payload": {"content": "x" * 500}} for i in range(200)]
+    text = memory._transcript(messages, max_total_chars=2000)
+    assert text.count("[CYCLISTE]") == 3
+    assert len(text) <= 2000
 
 
 def test_finalize_disabled_returns_zero(tmp_path, monkeypatch):

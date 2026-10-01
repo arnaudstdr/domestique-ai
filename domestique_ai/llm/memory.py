@@ -47,13 +47,20 @@ _CATEGORY_LABELS = {
 }
 
 # Budgets d'injection (bornent le prompt sans étouffer le contexte courant).
-_MAX_FACTS = 40
+# Les faits sont sélectionnés par pertinence (top _MAX_FACTS vs la question,
+# épinglés toujours inclus) au lieu d'être tous injectés.
+_MAX_FACTS = 20
 _MAX_SUMMARIES = 5
 _MAX_RAG_HITS = 4
 _MAX_FACT_CHARS = 300
-_MAX_SUMMARY_CHARS = 700
+_MAX_SUMMARY_CHARS = 500
 _MAX_RAG_CHARS = 400
 _FACT_DEDUP_THRESHOLD = 0.9
+# Garde-fou absolu sur le bloc mémoire injecté à chaque tour.
+_MAX_MEMORY_BLOCK_CHARS = 8_000
+# Plafond global du transcript envoyé aux appels de résumé/extraction : sans
+# lui, le prompt croît linéairement avec la session (12k+ tokens à 120 messages).
+_MAX_TRANSCRIPT_CHARS = 24_000
 
 
 def _resolve_db_path(db_path: Path | None, ctx: AthleteContext | None) -> Path:
@@ -458,16 +465,33 @@ def _load_messages_with_ids(
     return out
 
 
-def _transcript(messages: list[dict[str, Any]], *, limit_chars: int = 500) -> str:
+def _transcript(
+    messages: list[dict[str, Any]],
+    *,
+    limit_chars: int = 500,
+    max_total_chars: int = _MAX_TRANSCRIPT_CHARS,
+) -> str:
+    """Transcript borné : 500 c par message, budget global en gardant le récent.
+
+    On parcourt du plus récent au plus ancien et on s'arrête quand le budget
+    est épuisé (puis on remet dans l'ordre chronologique) — les échanges
+    récents portent l'état courant, c'est eux qu'il faut résumer en priorité.
+    """
     lines: list[str] = []
-    for msg in messages:
+    total = 0
+    for msg in reversed(messages):
         role = msg.get("role")
         content = (msg.get("payload") or {}).get("content") or ""
         content = content.strip()
         if role not in ("user", "assistant") or not content:
             continue
         label = "CYCLISTE" if role == "user" else "COACH"
-        lines.append(f"[{label}] {content[:limit_chars]}")
+        line = f"[{label}] {content[:limit_chars]}"
+        if lines and total + len(line) > max_total_chars:
+            break
+        lines.append(line)
+        total += len(line)
+    lines.reverse()
     return "\n".join(lines)
 
 
@@ -551,6 +575,39 @@ def summarize_session(
         topics = []
     topics = [str(t).strip() for t in topics if str(t).strip()][:8]
 
+    _persist_summary(
+        session_id,
+        summary,
+        topics,
+        message_count=len(messages),
+        max_id=max_id,
+        existing=existing,
+        ctx=ctx,
+        db_path=db_path,
+    )
+
+    return {
+        "session_id": session_id,
+        "summary": summary,
+        "topics": topics,
+        "message_count": len(messages),
+        "updated": True,
+        "final": final,
+    }
+
+
+def _persist_summary(
+    session_id: str,
+    summary: str,
+    topics: list[str],
+    *,
+    message_count: int,
+    max_id: int,
+    existing: dict[str, Any] | None,
+    ctx: AthleteContext | None,
+    db_path: Path | None,
+) -> None:
+    """UPSERT du résumé + embedding associé (best-effort, ne lève jamais côté appelant)."""
     now = _now()
     conn = _connect(db_path, ctx)
     try:
@@ -567,7 +624,7 @@ def summarize_session(
                 session_id,
                 summary,
                 json.dumps(topics, ensure_ascii=False),
-                len(messages),
+                message_count,
                 max_id,
                 (existing or {}).get("created_at") or now,
                 now,
@@ -589,13 +646,123 @@ def summarize_session(
     finally:
         conn.close()
 
+
+def summarize_and_extract_facts(
+    session_id: str,
+    *,
+    ctx: AthleteContext | None = None,
+    db_path: Path | None = None,
+) -> dict[str, Any] | None:
+    """Finalisation d'une session en **un seul** appel LLM : résumé + faits.
+
+    Remplace le couple ``summarize_session(final=True)`` +
+    ``extract_facts_from_session()``, qui renvoyait deux fois le même transcript
+    au modèle. Même garde ``last_summarized_message_id`` : sans nouveaux
+    messages, retourne ``{"updated": False, ...}`` sans aucun appel.
+
+    Best-effort : retourne ``None`` si la génération échoue (l'appelant garde
+    le résumé existant).
+    """
+    messages = _load_messages_with_ids(session_id, db_path=db_path, ctx=ctx)
+    if not messages:
+        return None
+
+    existing = get_session_summary(session_id, ctx=ctx, db_path=db_path)
+    last_id = (existing or {}).get("last_summarized_message_id") or 0
+    max_id = max(m["id"] for m in messages)
+    if existing and max_id <= int(last_id):
+        result = dict(existing)
+        result["updated"] = False
+        result["facts"] = []
+        return result
+
+    transcript = _transcript(messages)
+    if not transcript:
+        return None
+
+    schema = {
+        "type": "object",
+        "properties": {
+            "summary": {"type": "string"},
+            "topics": {"type": "array", "items": {"type": "string"}},
+            "facts": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "category": {"type": "string"},
+                        "content": {"type": "string"},
+                    },
+                    "required": ["category", "content"],
+                },
+            },
+        },
+        "required": ["summary"],
+    }
+    prompt = (
+        "Tu finalises une session de coaching entre un cycliste et son coach, "
+        "pour la mémoire long terme du coach.\n\n"
+        "Renvoie UNIQUEMENT un JSON valide de la forme :\n"
+        '{"summary": "3 à 5 phrases factuelles en français", '
+        '"topics": ["thème1", "thème2"], '
+        '"facts": [{"category": "preference|constraint|goal|agreement|personal", '
+        '"content": "fait durable"}]}\n\n'
+        "Règles :\n"
+        "- Résumé : concentre-toi sur les éléments durables (état de forme, "
+        "séances, ressenti, décisions prises, objectifs évoqués, contraintes), "
+        "pas sur les banalités.\n"
+        "- Faits : uniquement ce qui est explicitement dit et utile à long "
+        "terme ; n'invente rien ; ignore l'état passager (fatigue du jour).\n"
+        '- Si aucun fait durable : "facts": [].\n\n'
+        f"Conversation :\n{transcript}"
+    )
+    parsed = chat_structured_sync(
+        [{"role": "user", "content": prompt}],
+        timeout_s=45.0,
+        schema=schema,
+        label=usage.SESSION_FINALIZE,
+    )
+    if not parsed:
+        return None
+    summary = str(parsed.get("summary") or "").strip()
+    if not summary:
+        return None
+    topics = parsed.get("topics")
+    if not isinstance(topics, list):
+        topics = []
+    topics = [str(t).strip() for t in topics if str(t).strip()][:8]
+
+    _persist_summary(
+        session_id,
+        summary,
+        topics,
+        message_count=len(messages),
+        max_id=max_id,
+        existing=existing,
+        ctx=ctx,
+        db_path=db_path,
+    )
+
+    facts: list[dict[str, Any]] = []
+    raw_facts = parsed.get("facts")
+    if isinstance(raw_facts, list):
+        items: list[tuple[str, str]] = []
+        for item in raw_facts:
+            if not isinstance(item, dict):
+                continue
+            content = str(item.get("content") or "").strip()
+            category = str(item.get("category") or "personal").strip()
+            if content:
+                items.append((category, content))
+        facts = remember_facts_batch(items, ctx=ctx, source_session_id=session_id, db_path=db_path)
+
     return {
         "session_id": session_id,
         "summary": summary,
         "topics": topics,
+        "facts": facts,
         "message_count": len(messages),
         "updated": True,
-        "final": final,
     }
 
 
@@ -607,8 +774,10 @@ def extract_facts_from_session(
 ) -> list[dict[str, Any]]:
     """Extrait les faits durables d'une session et les mémorise.
 
-    Appelée uniquement à la finalisation (inactivité ou explicite) pour borner
-    le coût LLM. Retourne la liste des faits créés/mis à jour.
+    La finalisation passe par ``summarize_and_extract_facts`` (un seul appel
+    LLM pour résumé + faits) ; cette fonction reste disponible pour une
+    extraction isolée (tests, usage explicite). Retourne la liste des faits
+    créés/mis à jour.
     """
     messages = _load_messages_with_ids(session_id, db_path=db_path, ctx=ctx)
     transcript = _transcript(messages)
@@ -774,6 +943,56 @@ def get_relevant_memory(
     ]
 
 
+def _select_facts(
+    query: str,
+    *,
+    ctx: AthleteContext | None = None,
+    db_path: Path | None = None,
+) -> list[dict[str, Any]]:
+    """Faits à injecter : épinglés toujours, puis top pertinence vs ``query``.
+
+    Repli sur les plus récents si la recherche sémantique est indisponible
+    (pas de vecteurs, Ollama KO) ou si ``query`` est vide.
+    """
+    facts = list_facts(active_only=True, ctx=ctx, db_path=db_path)
+    if not facts:
+        return []
+    pinned = [f for f in facts if f.get("pinned")]
+    if not query or len(facts) <= _MAX_FACTS:
+        return facts[:_MAX_FACTS]
+
+    ranked_ids: list[int] = []
+    try:
+        hits = get_relevant_memory(query, k=_MAX_FACTS, types=("fact",), ctx=ctx, db_path=db_path)
+        ranked_ids = [int(h["ref_id"]) for h in hits if h.get("ref_id") is not None]
+    except Exception:  # noqa: BLE001
+        ranked_ids = []
+
+    by_id = {int(f["id"]): f for f in facts}
+    selected: list[dict[str, Any]] = []
+    seen: set[int] = set()
+    for fact in pinned:
+        fid = int(fact["id"])
+        selected.append(fact)
+        seen.add(fid)
+    for fid in ranked_ids:
+        if len(selected) >= _MAX_FACTS:
+            break
+        fact = by_id.get(fid)
+        if fact is not None and fid not in seen:
+            selected.append(fact)
+            seen.add(fid)
+    # Complète avec les plus récents si la sélection par pertinence est courte.
+    for fact in facts:
+        if len(selected) >= _MAX_FACTS:
+            break
+        fid = int(fact["id"])
+        if fid not in seen:
+            selected.append(fact)
+            seen.add(fid)
+    return selected
+
+
 def build_memory_block(
     query: str,
     *,
@@ -782,15 +1001,15 @@ def build_memory_block(
 ) -> str:
     """Assemble le bloc mémoire injecté dans le prompt système du coach.
 
-    Contient : faits durables (toujours), résumés des sessions récentes, et
-    passages passés pertinents pour ``query`` (recherche sémantique). Chaque
-    partie est isolée en try/except : une panne de mémoire ne casse jamais le
-    chat, elle dégrade le bloc.
+    Contient : faits durables (épinglés + top pertinence pour ``query``),
+    résumés des sessions récentes, et passages passés pertinents (recherche
+    sémantique). Chaque partie est isolée en try/except : une panne de mémoire
+    ne casse jamais le chat, elle dégrade le bloc.
     """
     sections: list[str] = []
 
     try:
-        facts = list_facts(active_only=True, ctx=ctx, db_path=db_path)[:_MAX_FACTS]
+        facts = _select_facts(query, ctx=ctx, db_path=db_path)
     except Exception:  # noqa: BLE001
         facts = []
     if facts:
@@ -849,12 +1068,15 @@ def build_memory_block(
 
     if not sections:
         return ""
-    return (
-        "MÉMOIRE PERSISTANTE (issue de tes échanges passés avec l'athlète) et "
-        "profil courant.\n"
-        "Utilise-la pour la continuité, mais ne prétends jamais te souvenir "
-        "d'autre chose que de ce qui figure ici ou dans les tools.\n\n" + "\n\n".join(sections)
+    block = "MÉMOIRE PERSISTANTE (issue de tes échanges passés avec l'athlète) :\n\n" + "\n\n".join(
+        sections
     )
+    # Garde-fou absolu : coupe sur une fin de ligne pour ne jamais dépasser le
+    # budget injecté à chaque tour.
+    if len(block) > _MAX_MEMORY_BLOCK_CHARS:
+        cut = block.rfind("\n", 0, _MAX_MEMORY_BLOCK_CHARS)
+        block = block[: cut if cut > 0 else _MAX_MEMORY_BLOCK_CHARS]
+    return block
 
 
 # --------------------------------------------------------------------------- #
@@ -924,9 +1146,8 @@ def finalize_idle_sessions(
         if (row["messages"] or 0) < 2:
             continue
         try:
-            summary = summarize_session(session_id, final=True, ctx=ctx, db_path=db_path)
-            if summary and summary.get("updated"):
-                extract_facts_from_session(session_id, ctx=ctx, db_path=db_path)
+            result = summarize_and_extract_facts(session_id, ctx=ctx, db_path=db_path)
+            if result and result.get("updated"):
                 finalized += 1
         except Exception:  # noqa: BLE001 — une session en erreur ne bloque pas les autres
             continue
