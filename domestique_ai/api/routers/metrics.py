@@ -30,7 +30,10 @@ from domestique_ai.processing.analyzer import (
     is_ride,
     recalculate_training_loads,
 )
-from domestique_ai.processing.morning_metrics import detect_morning_alerts
+from domestique_ai.processing.morning_metrics import (
+    detect_morning_alerts,
+    format_morning_alert,
+)
 from domestique_ai.processing.overtraining import detect_overtraining_signals
 from domestique_ai.processing.trends import get_ftp_projection, get_trends, get_weekly_volume
 
@@ -108,17 +111,11 @@ def get_overtraining(
     for raw in morning:
         severity = raw.get("severity", "warning")
         level = "danger" if severity == "critical" else "warning"
-        delta_pct = raw.get("delta_pct", 0.0)
-        arrow = "↓" if delta_pct < 0 else "↑"
-        message = (
-            f"{raw.get('metric')} {arrow} {delta_pct:+.1f}% vs baseline "
-            f"({raw.get('latest', 0):.1f} le {raw.get('latest_date')})"
-        )
         alerts.append(
             Alert(
                 type=f"morning_{raw.get('metric')}",
                 level=level,  # type: ignore[arg-type]
-                message=message,
+                message=format_morning_alert(raw),
             )
         )
 

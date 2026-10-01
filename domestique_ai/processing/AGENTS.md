@@ -87,6 +87,28 @@ Utilisée par la revue hebdomadaire (`llm/AGENTS.md`) : statut par séance
 de repos du check du matin est traitée comme **repos coach**, pas comme une
 séance manquée. Tests : `tests/test_compliance.py`.
 
+## Alertes de dérive matinale (`processing/morning_metrics.py`)
+
+`detect_morning_alerts()` compare la dernière valeur de chaque métrique à sa
+baseline glissante 14 j ; une alerte est levée au-delà de
+`DEFAULT_ALERT_THRESHOLD_PCT` (10 %) **dans le sens défavorable**
+(`_ALERT_DIRECTION` : baisse mauvaise pour HRV/sommeil/SpO2, hausse mauvaise
+pour FC repos/stress/respiration/température, 0 = jamais alerté pour
+pas/calories/poids). La sévérité passe `critical` à ≥ 2× le seuil.
+
+- `METRIC_LABELS` est la **source de vérité unique** du mapping
+  métrique → libellé humain (aligné sur la page Santé : « Freq. resp. »,
+  « FC repos », « HRV »…). Ne pas re-coder ces libellés ailleurs.
+- `format_morning_alert(alert)` produit le message affiché
+  (`« Freq. resp. ↑ +10.2% vs baseline (11.3 le 2026-10-01) »`), avec repli sur
+  le nom brut si la métrique est inconnue. Utilisé par
+  `llm/daily_brief.py` (carte Dashboard) et `api/routers/metrics.py`
+  (`GET /api/metrics/overtraining`) — toute évolution du format passe par ce
+  helper, jamais par un f-string dupliqué.
+- `GET /api/morning` expose les alertes **structurées** (`MorningAlert` avec
+  `metric` brut) : la métrique reste en snake_case dans le payload, seul le
+  message destiné à l'UI est humanisé.
+
 ## Suivi du poids + rapport poids/puissance (W/kg)
 
 Le poids est une **métrique de la table `morning_metrics`** (`weight_kg REAL`,

@@ -17,6 +17,7 @@ from domestique_ai.processing.morning_metrics import (
     detect_morning_alerts,
     fetch_morning_entry,
     fetch_morning_history,
+    format_morning_alert,
     latest_weight,
     latest_weight_entry,
     power_to_weight,
@@ -413,3 +414,39 @@ def test_weight_baseline_computable(db_path: Path):
     baseline = compute_baselines("weight_kg", db_path=db_path)
     assert baseline["available"] is True
     assert baseline["latest"] == 72.0
+
+
+def test_format_morning_alert_uses_human_label():
+    message = format_morning_alert(
+        {
+            "metric": "respiratory_rate_avg_bpm",
+            "delta_pct": 10.2,
+            "latest": 11.3,
+            "latest_date": "2026-10-01",
+        }
+    )
+    assert message == "Freq. resp. ↑ +10.2% vs baseline (11.3 le 2026-10-01)"
+
+
+def test_format_morning_alert_arrow_down_on_drop():
+    message = format_morning_alert(
+        {
+            "metric": "hrv_ms",
+            "delta_pct": -16.7,
+            "latest": 50.0,
+            "latest_date": "2026-05-04",
+        }
+    )
+    assert message.startswith("HRV ↓")
+
+
+def test_format_morning_alert_falls_back_to_raw_metric():
+    message = format_morning_alert(
+        {
+            "metric": "unknown_metric",
+            "delta_pct": 12.0,
+            "latest": 3.0,
+            "latest_date": "2026-05-04",
+        }
+    )
+    assert message.startswith("unknown_metric ↑")

@@ -60,7 +60,7 @@ Coach qui s'exprime sans être interpellé, en deux étages d'intrusion croissan
 
 - TSB courant + zone (Frais / Optimal / Fatigué / Surentraîné) + CTL/ATL (repris des signaux de `propose_workout_today`, recalculés sur jour off).
 - Séance suggérée du jour (via `propose_workout_today`).
-- Alerte la plus saillante (priorité TSB chronique / strain > monotony / saut volume > dérive matinale).
+- Alerte la plus saillante (priorité TSB chronique / strain > monotony / saut volume > dérive matinale). Les dérives matinales sont formatées côté `processing/morning_metrics.format_morning_alert` (libellés humains de `METRIC_LABELS`) — jamais de nom de colonne brut affiché à l'athlète.
 - **Enrichissements hero** : `sleep_history` (7 j, `StepPoint` `{date, hours}`), `week_tss_planned`/`week_tss_done` (compliance de la semaine courante via `compute_week_compliance`) — accompagnés de `week_adherence_pct` et des statuts `week_done`/`week_partial`/`week_missed`/`week_skipped` (repos coach) ; l'adhérence reste `None` si aucune séance n'est planifiée cette semaine (pas de « 0 % » trompeur) — et `coach_tip` (2ᵉ phrase actionnable).
 - Phrase de synthèse **+ conseil** générés par LLM (~25 mots / ~15 mots, JSON strict `{summary, tip}`, mode `chat_structured_sync`) avec **fallbacks déterministes** (`_build_fallback_summary` / `_build_fallback_tip`) si Ollama injoignable — un `coach_tip` n'est jamais vide.
 

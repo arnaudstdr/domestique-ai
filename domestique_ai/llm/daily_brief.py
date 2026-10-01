@@ -24,7 +24,10 @@ from typing import Any
 
 from domestique_ai.athlete_context import AthleteContext, context_from_env
 from domestique_ai.llm.ollama_client import chat_structured_sync
-from domestique_ai.processing.morning_metrics import detect_morning_alerts
+from domestique_ai.processing.morning_metrics import (
+    detect_morning_alerts,
+    format_morning_alert,
+)
 from domestique_ai.processing.overtraining import detect_overtraining_signals
 from domestique_ai.processing.today import propose_workout_today
 
@@ -92,15 +95,10 @@ def _select_primary_alert(
     pool = morning_critical or morning
     if pool:
         first = pool[0]
-        delta = float(first.get("delta_pct", 0.0))
-        arrow = "↓" if delta < 0 else "↑"
         return {
             "type": f"morning_{first.get('metric')}",
             "severity": "danger" if first.get("severity") == "critical" else "warning",
-            "message": (
-                f"{first.get('metric')} {arrow} {delta:+.1f}% vs baseline "
-                f"({first.get('latest', 0):.1f} le {first.get('latest_date')})"
-            ),
+            "message": format_morning_alert(first),
         }
     return None
 

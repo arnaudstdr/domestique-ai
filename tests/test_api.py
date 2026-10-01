@@ -279,6 +279,24 @@ def test_overtraining_endpoint_empty(client: TestClient) -> None:
     assert body["indicators"]["monotony"] is None
 
 
+def test_overtraining_morning_alert_uses_human_label(
+    client: TestClient,
+    tmp_path: Path,
+) -> None:
+    from domestique_ai.processing.morning_metrics import save_morning_entry
+
+    db = Path(tmp_path / "api_test.db")
+    for i, rate in enumerate([10.0, 10.2, 9.9, 10.1, 11.3]):
+        save_morning_entry(f"2026-10-0{i + 1}", respiratory_rate_avg_bpm=rate, db_path=db)
+
+    r = client.get("/api/metrics/overtraining")
+    assert r.status_code == 200
+    morning = [a for a in r.json()["alerts"] if a["type"] == "morning_respiratory_rate_avg_bpm"]
+    assert len(morning) == 1
+    assert "Freq. resp." in morning[0]["message"]
+    assert "respiratory_rate_avg_bpm" not in morning[0]["message"]
+
+
 def test_morning_get_empty(client: TestClient) -> None:
     r = client.get("/api/morning")
     assert r.status_code == 200

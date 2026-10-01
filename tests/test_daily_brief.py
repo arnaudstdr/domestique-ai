@@ -122,7 +122,7 @@ def test_select_primary_alert_falls_back_to_warning():
 def test_select_primary_alert_uses_morning_when_no_overtraining():
     morning = [
         {
-            "metric": "hrv",
+            "metric": "hrv_ms",
             "delta_pct": -22.0,
             "severity": "critical",
             "latest": 28.0,
@@ -130,9 +130,10 @@ def test_select_primary_alert_uses_morning_when_no_overtraining():
         }
     ]
     primary = _select_primary_alert({"alerts": []}, morning)
-    assert primary["type"] == "morning_hrv"
+    assert primary["type"] == "morning_hrv_ms"
     assert primary["severity"] == "danger"
-    assert "hrv" in primary["message"]
+    assert "HRV" in primary["message"]
+    assert "hrv_ms" not in primary["message"]
 
 
 def test_select_primary_alert_returns_none_when_clean():

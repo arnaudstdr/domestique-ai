@@ -38,6 +38,23 @@ METRIC_COLUMNS = (
     "weight_kg",
 )
 
+# Libellés humains (UI, messages d'alerte, contexte coach) — alignés sur la
+# page Santé du front. Source de vérité unique du mapping métrique → libellé.
+METRIC_LABELS = {
+    "hrv_ms": "HRV",
+    "resting_hr": "FC repos",
+    "sleep_hours": "Sommeil",
+    "sleep_score": "Score sommeil",
+    "stress_score": "Stress",
+    "readiness_score": "Readiness",
+    "spo2_avg_pct": "SpO2 moyen",
+    "respiratory_rate_avg_bpm": "Freq. resp.",
+    "skin_temp_delta_c": "Δ temp. peau",
+    "steps": "Pas",
+    "active_calories": "Calories act.",
+    "weight_kg": "Poids",
+}
+
 # Sens d'alerte par métrique :
 # -1 = baisse mauvaise (HRV, sommeil, score sommeil, readiness, SpO2),
 # +1 = hausse mauvaise (FC repos, stress, fréquence respiratoire, température).
@@ -58,6 +75,20 @@ _ALERT_DIRECTION = {
 
 # Seuil par défaut : écart relatif (en %) à partir duquel on lève une alerte.
 DEFAULT_ALERT_THRESHOLD_PCT = 10.0
+
+
+def format_morning_alert(alert: dict[str, Any]) -> str:
+    """Formate une alerte de dérive matinale avec un libellé humain.
+
+    `alert` est une entrée de `detect_morning_alerts()`. Repli sur le nom brut
+    de la métrique si elle n'a pas de libellé connu.
+    """
+    metric = alert.get("metric", "")
+    label = METRIC_LABELS.get(metric, metric)
+    delta = float(alert.get("delta_pct", 0.0))
+    arrow = "↓" if delta < 0 else "↑"
+    latest = float(alert.get("latest", 0.0))
+    return f"{label} {arrow} {delta:+.1f}% vs baseline ({latest:.1f} le {alert.get('latest_date')})"
 
 
 def save_morning_entry(
