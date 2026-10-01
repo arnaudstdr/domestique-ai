@@ -11,7 +11,7 @@ from domestique_ai.llm import memory
 from domestique_ai.llm.conversations import append_message, new_session_id
 
 
-def _fake_embed(texts, *, model=None, timeout_s=30.0):
+def _fake_embed(texts, *, model=None, timeout_s=30.0, label=None):
     """Embedding déterministe 26-dim (fréquence de lettres) — pas de réseau."""
     out = []
     for text in texts:

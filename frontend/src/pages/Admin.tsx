@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Copy, Loader2, ShieldCheck } from "lucide-react";
 import { api, ApiError } from "../api/client";
 import AdminAuditLog from "../components/AdminAuditLog";
+import AdminOllamaUsage from "../components/AdminOllamaUsage";
 import AdminUserRow from "../components/AdminUserRow";
 import FilterTab from "../components/FilterTab";
 import { copyToClipboard } from "../lib/clipboard";
@@ -29,6 +30,78 @@ function Stat({ label, value, sub }: { label: string; value: string | number; su
       <div className="text-[11px] text-muted">{label}</div>
       {sub && <div className="text-[11px] text-amber-400">{sub}</div>}
     </div>
+  );
+}
+
+function NumberSetting({
+  label,
+  value,
+  disabled,
+  onCommit,
+  step = "0.01",
+}: {
+  label: string;
+  value: number;
+  disabled?: boolean;
+  onCommit: (v: number) => void;
+  step?: string;
+}) {
+  const [draft, setDraft] = useState(String(value));
+  useEffect(() => {
+    setDraft(String(value));
+  }, [value]);
+  return (
+    <label className="block">
+      <span className="block text-[11px] text-muted">{label}</span>
+      <input
+        type="number"
+        min={0}
+        step={step}
+        value={draft}
+        disabled={disabled}
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={() => {
+          const parsed = Number(draft);
+          if (!Number.isNaN(parsed) && parsed !== value) onCommit(parsed);
+        }}
+        className="input mt-1 py-1 text-sm disabled:opacity-50"
+      />
+    </label>
+  );
+}
+
+function JsonSetting({
+  label,
+  hint,
+  value,
+  disabled,
+  onCommit,
+}: {
+  label: string;
+  hint?: string;
+  value: string;
+  disabled?: boolean;
+  onCommit: (v: string) => void;
+}) {
+  const [draft, setDraft] = useState(value);
+  useEffect(() => {
+    setDraft(value);
+  }, [value]);
+  return (
+    <label className="block">
+      <span className="block text-[11px] text-muted">{label}</span>
+      {hint && <span className="block text-[10px] text-muted">{hint}</span>}
+      <textarea
+        value={draft}
+        rows={2}
+        disabled={disabled}
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={() => {
+          if (draft.trim() !== value.trim()) onCommit(draft.trim());
+        }}
+        className="input mt-1 resize-none font-mono text-xs disabled:opacity-50"
+      />
+    </label>
   );
 }
 
@@ -339,6 +412,62 @@ export default function Admin() {
             >
               Publier le message
             </button>
+            <div className="border-t border-border/[0.06] pt-4">
+              <p className="label-eyebrow mb-2">
+                Usage Ollama — tarifs &amp; quota (coût estimé, vue admin)
+              </p>
+              <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+                <NumberSetting
+                  label="Prix prompt / 1k tok ($)"
+                  value={settings.llm_price_prompt_per_1k}
+                  step="0.00001"
+                  disabled={savingSettings}
+                  onCommit={(v) => saveSettings({ llm_price_prompt_per_1k: v })}
+                />
+                <NumberSetting
+                  label="Prix cached / 1k tok ($)"
+                  value={settings.llm_price_cached_per_1k}
+                  step="0.00001"
+                  disabled={savingSettings}
+                  onCommit={(v) => saveSettings({ llm_price_cached_per_1k: v })}
+                />
+                <NumberSetting
+                  label="Prix completion / 1k tok ($)"
+                  value={settings.llm_price_completion_per_1k}
+                  step="0.00001"
+                  disabled={savingSettings}
+                  onCommit={(v) => saveSettings({ llm_price_completion_per_1k: v })}
+                />
+                <NumberSetting
+                  label="Quota hebdo (unités)"
+                  value={settings.llm_weekly_quota_units}
+                  disabled={savingSettings}
+                  onCommit={(v) => saveSettings({ llm_weekly_quota_units: v })}
+                />
+                <NumberSetting
+                  label="Seuil d'alerte (%)"
+                  value={settings.llm_alert_pct}
+                  disabled={savingSettings}
+                  onCommit={(v) => saveSettings({ llm_alert_pct: v })}
+                />
+              </div>
+              <div className="mt-3 space-y-3">
+                <JsonSetting
+                  label="Poids par modèle (JSON)"
+                  hint='Ex. {"gemma4:31b-cloud": 0.5} — poids de 1 requête selon le modèle.'
+                  value={settings.llm_model_weights}
+                  disabled={savingSettings}
+                  onCommit={(v) => saveSettings({ llm_model_weights: v })}
+                />
+                <JsonSetting
+                  label="Tarifs par modèle (JSON, USD /1k)"
+                  hint='Ex. {"gemma4:31b-cloud": {"prompt": 0.00014, "cached": 0.00005, "completion": 0.0004}}'
+                  value={settings.llm_model_prices}
+                  disabled={savingSettings}
+                  onCommit={(v) => saveSettings({ llm_model_prices: v })}
+                />
+              </div>
+            </div>
           </div>
         )}
       </section>
@@ -514,6 +643,8 @@ export default function Admin() {
           </>
         )}
       </section>
+
+      <AdminOllamaUsage />
 
       <AdminAuditLog />
     </div>

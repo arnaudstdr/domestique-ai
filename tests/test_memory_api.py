@@ -11,7 +11,7 @@ from fastapi.testclient import TestClient
 from domestique_ai.ingestion.db import init_db
 
 
-def _fake_embed(texts, *, model=None, timeout_s=30.0):
+def _fake_embed(texts, *, model=None, timeout_s=30.0, label=None):
     out = []
     for text in texts:
         vec = [0.0] * 26

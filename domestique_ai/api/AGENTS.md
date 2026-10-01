@@ -33,8 +33,10 @@ L'UI coach affiche **un seul fil** continu, toutes sessions internes fusionnées
   `session_id` explicite reste honoré tel quel.
 - Endpoints historiques conservés (tests/clients) : `GET /api/coach/sessions`,
   `GET /api/coach/sessions/{id}/messages`, `DELETE /api/coach/sessions/{id}`,
-  `POST /api/coach/sessions/{id}/finalize`. La **génération de titre** n'est plus
-  déclenchée (plus de sélecteur côté UI).
+  `POST /api/coach/sessions/{id}/finalize`. La **génération de titre** a été
+  **entièrement retirée** (`generate_session_title` + backfill au démarrage) :
+  plus de sélecteur côté UI, et c'était de la conso Ollama gaspillée à chaque
+  reboot. `GET /api/coach/sessions` renvoie un `title` toujours `None`.
 - Implémentation DB : `domestique_ai/llm/conversations.py` (`load_thread_page`,
   `current_or_new_session`). Tests : `tests/test_coach_thread.py`.
 
@@ -154,8 +156,14 @@ SQLite autorise les trois.
   `garmin.sync_overview()`, dernier `healthcheck.last_ping()`,
   fuseau/horaires). Maintenance : `POST /athlete-spaces/purge-orphans` supprime
   les dossiers `data/athletes/<id>` sans compte correspondant
-  (`orphan_athlete_space_ids` + `remove_athlete_space`, action auditée
-  `purge_orphan_spaces`). Réglages : `GET|PUT /settings`.
+  (  `orphan_athlete_space_ids` + `remove_athlete_space`, action auditée
+  `purge_orphan_spaces`). Observabilité LLM (`admin/llm_usage.py`, sous-module
+  dédié) : `GET /ollama-usage?days=` (usage app réel — appels, tokens
+  prompt/cached/completion, latence, coût estimé selon les tarifs configurés,
+  erreurs, agrégats par `label`/modèle/athlète, derniers appels) et
+  `GET /ollama-cloud?period=week|month` (reconstitution façon console Ollama
+  Cloud : par modèle + **deux fenêtres de quota pondéré** — voir ci-dessous).
+  Réglages : `GET|PUT /settings`.
   L'admin est **isolé** : il n'hérite pas des droits coach
   (`require_coach`/`get_athlete_context` inchangés), et son rôle (comme celui du
   bootstrap) ne peut pas être modifié via l'endpoint de rôle (403).
@@ -178,8 +186,37 @@ SQLite autorise les trois.
   `platform.db`, éditée à chaud par l'admin via `GET|PUT /settings` :
   `signup_enabled` (surcharge `DOMESTIQUE_AI_SIGNUP_ENABLED`, résolu par
   `effective_signup_enabled()`), `maintenance_mode` (bool) et
-  `broadcast_message` (≤ 500 car., `NULL` = pas de bandeau). `PUT` accepte un
-  patch partiel (`exclude_unset`) et journalise les champs modifiés.
+  `broadcast_message` (≤ 500 car., `NULL` = pas de bandeau var) ; plus les
+  réglages d'observabilité LLM : tarifs plats (`llm_price_prompt_per_1k`,
+  `llm_price_cached_per_1k`, `llm_price_completion_per_1k` — fallback),
+  `llm_weekly_quota_units`, `llm_alert_pct`, et les JSON `llm_model_weights`
+  (poids d'1 requête par modèle, pour le quota pondéré) + `llm_model_prices`
+  (tarifs par modèle `{prompt, cached, completion}` /1k, **prioritaires** sur
+  les tarifs plats). `PUT` accepte un patch partiel (`exclude_unset`), valide le
+  JSON (`422` si invalide) et journalise les champs modifiés.
+- **Observabilité LLM (`llm_calls`)** — une ligne par appel au SDK Ollama,
+  écrite **best-effort** par `llm.usage.record_llm_call` (via
+  `platform_db.insert_llm_call`) : `label` (type d'appel), `entrypoint`, `model`,
+  tokens (`prompt`/`cached`/`completion`), durées, `status`/`error_type`,
+  `tools_count`, `actor_public_id` (attribution par `ContextVar`, cf.
+  `llm/AGENTS.md`). Data cross-tenant ; FK `SET NULL` + snapshot `public_id`
+  (l'historique survit à la suppression d'un compte). Requêtes :
+  `fetch_llm_calls(since, until, limit)`. Le **coût** distingue input / cached /
+  output (le `prompt_eval_count` Ollama inclut les tokens cachés : on facture
+  `(prompt − cached)` au tarif input et `cached` au tarif cache). **Le % de
+  quota Cloud est une estimation** (Ollama n'expose aucun endpoint d'usage) :
+  l'admin cale `llm_weekly_quota_units` + `llm_model_weights` pour coller au %
+  vu sur ollama.com.
+- **Deux fenêtres de limite Ollama Cloud** — la doc officielle
+  (`ollama.com/cloud`) définit une limite **session 5 h** (reset toutes les 5 h)
+  et une limite **hebdo 7 j** (reset tous les 7 j). Les dates d'ancre ne sont
+  **pas documentées** ; `_window_bounds()` reprend l'ancre mesurée par la
+  communauté (`github.com/Momar8989/ollama-usage` : blocs de 5 h et fenêtre 7 j
+  ancrés à epoch `2026-08-12 11:55 UTC`, minute `:55`) — **approximation non
+  officielle**, affichée comme telle. `_window_usage()` agrège chaque fenêtre et
+  projette la fin selon le rythme écoulé. Quota session : `llm_session_quota_units`
+  (réglage optionnel) sinon dérivé du quota hebdo (`quota / 33` blocs de 5 h).
+  Le % contraignant (max des deux) pilote la recommandation de forfait.
 - **Annonce / bandeau** — `GET /api/announcement` (router
   `api/routers/announcement.py`, authentifié, lisible par **tout** compte) :
   `{maintenance_mode, message}` depuis `platform_db.get_announcement()`. Non

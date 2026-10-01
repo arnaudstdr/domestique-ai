@@ -23,6 +23,7 @@ import threading
 from typing import Any
 
 from domestique_ai.athlete_context import AthleteContext, context_from_env
+from domestique_ai.llm import usage
 from domestique_ai.llm.ollama_client import chat_structured_sync
 from domestique_ai.processing.morning_metrics import (
     detect_morning_alerts,
@@ -293,7 +294,7 @@ def _generate_brief_with_llm(signals: dict[str, Any]) -> dict[str, str] | None:
             ),
         },
     ]
-    response = chat_structured_sync(messages, timeout_s=15.0)
+    response = chat_structured_sync(messages, timeout_s=15.0, label=usage.DAILY_BRIEF)
     if not response:
         return None
     summary = response.get("summary")

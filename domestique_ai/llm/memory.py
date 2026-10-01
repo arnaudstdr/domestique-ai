@@ -31,6 +31,7 @@ from domestique_ai.config import (
     get_session_summary_every_messages,
 )
 from domestique_ai.ingestion.db import init_db
+from domestique_ai.llm import usage
 from domestique_ai.llm.ollama_client import chat_structured_sync, embed_texts_sync
 
 MEMORY_CATEGORIES = ("preference", "constraint", "goal", "agreement", "personal")
@@ -133,7 +134,7 @@ def remember_fact(
     if category not in MEMORY_CATEGORIES:
         category = "personal"
 
-    embedding = embed_texts_sync([content])
+    embedding = embed_texts_sync([content], label=usage.EMBED_FACT)
     vec = embedding[0] if embedding else None
     now = _now()
 
@@ -243,7 +244,7 @@ def update_fact(
         new_content = content.strip() if content is not None else None
         vec = None
         if new_content:
-            embedded = embed_texts_sync([new_content])
+            embedded = embed_texts_sync([new_content], label=usage.EMBED_FACT)
             vec = embedded[0] if embedded else None
 
         if new_content is not None:
@@ -415,7 +416,9 @@ def summarize_session(
         '"topics": ["thème1", "thème2"]}\n\n'
         f"Conversation :\n{transcript}"
     )
-    parsed = chat_structured_sync([{"role": "user", "content": prompt}], timeout_s=45.0)
+    parsed = chat_structured_sync(
+        [{"role": "user", "content": prompt}], timeout_s=45.0, label=usage.SESSION_SUMMARY
+    )
     if not parsed:
         return None
     summary = str(parsed.get("summary") or "").strip()
@@ -448,7 +451,7 @@ def summarize_session(
                 now,
             ),
         )
-        emb = embed_texts_sync([summary])
+        emb = embed_texts_sync([summary], label=usage.EMBED_SUMMARY)
         conn.execute(
             "DELETE FROM memory_vectors WHERE source_type = 'summary' AND session_id = ?",
             (session_id,),
@@ -506,7 +509,9 @@ def extract_facts_from_session(
         'Si aucun fait durable : {"facts": []}\n\n'
         f"Conversation :\n{transcript}"
     )
-    parsed = chat_structured_sync([{"role": "user", "content": prompt}], timeout_s=45.0)
+    parsed = chat_structured_sync(
+        [{"role": "user", "content": prompt}], timeout_s=45.0, label=usage.FACTS_EXTRACT
+    )
     if not parsed:
         return []
     raw_facts = parsed.get("facts")
@@ -570,7 +575,7 @@ def index_messages_batch(
         fresh = [it for it in clean if it[0] not in done]
         if not fresh:
             return
-        embs = embed_texts_sync([it[2] for it in fresh])
+        embs = embed_texts_sync([it[2] for it in fresh], label=usage.EMBED_MESSAGES)
         if not embs or len(embs) != len(fresh):
             return
         conn = _connect(db_path, ctx)
@@ -617,7 +622,7 @@ def get_relevant_memory(
     query = (query or "").strip()
     if not query:
         return []
-    emb = embed_texts_sync([query])
+    emb = embed_texts_sync([query], label=usage.EMBED_QUERY)
     if not emb:
         return []
 

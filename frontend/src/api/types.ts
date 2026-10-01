@@ -825,6 +825,105 @@ export interface AdminSettings {
   signup_enabled: boolean;
   maintenance_mode: boolean;
   broadcast_message: string | null;
+  llm_price_prompt_per_1k: number;
+  llm_price_cached_per_1k: number;
+  llm_price_completion_per_1k: number;
+  llm_weekly_quota_units: number;
+  llm_alert_pct: number;
+  llm_model_weights: string;
+  llm_model_prices: string;
+}
+
+export interface AdminUsageTotals {
+  calls: number;
+  prompt_tokens: number;
+  cached_tokens: number;
+  completion_tokens: number;
+  total_tokens: number;
+  errors: number;
+  avg_duration_ms: number | null;
+  estimated_cost_usd: number;
+  price_prompt_per_1k: number;
+  price_completion_per_1k: number;
+}
+
+export interface AdminUsageBreakdown {
+  key: string;
+  label: string;
+  calls: number;
+  prompt_tokens: number;
+  completion_tokens: number;
+  errors: number;
+  estimated_cost_usd: number;
+}
+
+export interface AdminUsageActor {
+  public_id: string | null;
+  display_name: string | null;
+  calls: number;
+  total_tokens: number;
+  estimated_cost_usd: number;
+}
+
+export interface AdminUsageCall {
+  id: number;
+  created_at: string;
+  actor_public_id: string | null;
+  label: string | null;
+  label_human: string;
+  entrypoint: string | null;
+  model: string | null;
+  prompt_tokens: number | null;
+  completion_tokens: number | null;
+  total_duration_ms: number | null;
+  status: string;
+  error_type: string | null;
+  tools_count: number;
+}
+
+export interface AdminOllamaUsage {
+  days: number;
+  since: string;
+  totals: AdminUsageTotals;
+  by_label: AdminUsageBreakdown[];
+  by_model: AdminUsageBreakdown[];
+  by_actor: AdminUsageActor[];
+  recent: AdminUsageCall[];
+}
+
+export interface AdminCloudModelUsage {
+  model: string;
+  requests: number;
+  weight: number;
+  units: number;
+  prompt_tokens: number;
+  completion_tokens: number;
+}
+
+export interface AdminCloudWindow {
+  label: string;
+  window_start: string;
+  window_end: string;
+  seconds_until_reset: number;
+  units_used: number;
+  requests: number;
+  quota_units: number;
+  usage_pct: number;
+  projected_pct_at_reset: number | null;
+}
+
+export interface AdminOllamaCloud {
+  period: string;
+  period_start: string;
+  period_end: string;
+  requests: number;
+  prompt_tokens: number;
+  completion_tokens: number;
+  alert_pct: number;
+  recommendation: string;
+  session: AdminCloudWindow;
+  weekly: AdminCloudWindow;
+  models: AdminCloudModelUsage[];
 }
 
 export interface Announcement {

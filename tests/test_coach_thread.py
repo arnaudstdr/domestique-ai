@@ -148,7 +148,7 @@ def test_current_session_disabled_keeps_single_thread(tmp_path: Path) -> None:
 # --------------------------------------------------------------------------- #
 
 
-def _fake_embed(texts, *, model=None, timeout_s=30.0):
+def _fake_embed(texts, *, model=None, timeout_s=30.0, label=None):
     out = []
     for text in texts:
         vec = [0.0] * 26
