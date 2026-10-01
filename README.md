@@ -98,8 +98,9 @@ to balance reliability and latency. Responses **stream over SSE**, token by toke
 Four automatic indicators grounded in the physiology literature
 (**Foster 2001, Banister**): chronic TSB, Monotony, Strain, weekly volume jump —
 plus a **health module** (HRV, resting HR, sleep + stages, SpO₂, skin temp)
-auto-imported from the **Google Health API** (Fitbit / Pixel Watch), with a
-14-day rolling baseline, drift alerts and local sleep / readiness scores.
+auto-imported from your **Garmin watch** or the **Google Health API**
+(Fitbit / Pixel Watch) — provider preference is per athlete — with a 14-day
+rolling baseline, drift alerts and local sleep / readiness scores.
 
 </td>
 <td width="50%" valign="top">
@@ -397,16 +398,22 @@ existing subscriptions but is no longer required.
 > `python -m domestique_ai.export.garmin_connect` remains available for the
 > bootstrap account.
 
-### Google Health (recovery data — Fitbit / Pixel Watch)
+### Recovery data (Garmin watch or Google Health — Fitbit / Pixel Watch)
 
-1. Create a Google Cloud project, enable the **Google Health API** and add the five
-   read-only health scopes to the OAuth consent screen.
-2. Set `GOOGLE_HEALTH_CLIENT_ID` / `GOOGLE_HEALTH_CLIENT_SECRET` in `.env`, then run
-   the OAuth flow from the **Santé** page (or `GET /api/google-health/auth`).
-3. HRV, resting HR, sleep + stages, SpO₂ and skin temperature sync every 6 hours.
+1. **Garmin**: once the athlete's Garmin account is connected for activities, health
+   metrics (sleep + stages, HRV, resting HR, SpO₂, respiration, steps, calories, weight)
+   sync automatically every 6 hours — no extra setup. Native watch values (sleep score,
+   training readiness, body battery) are stored as bonus columns.
+2. **Google Health** (alternative or gap-filler): create a Google Cloud project, enable
+   the **Google Health API**, add the five read-only scopes to the OAuth consent screen,
+   set `GOOGLE_HEALTH_CLIENT_ID` / `GOOGLE_HEALTH_CLIENT_SECRET` in `.env`, then run the
+   OAuth flow from the **Santé** page (or `GET /api/google-health/auth`).
+3. When both are connected, pick the preferred source from the Santé page
+   (**Auto** favors Garmin, Google Health fills missing days). Same local sleep /
+   readiness / stress scores either way.
 
-> Tokens are stored **per athlete** (`data/athletes/<public_id>/.google_health_tokens.json`);
-> the OAuth `state` is HMAC-signed to route the callback to the right account.
+> Garmin tokens are per athlete (`data/athletes/<public_id>/.garmin_tokens`); Google
+> Health tokens too (`…/.google_health_tokens.json`, HMAC-signed OAuth `state`).
 
 ### Ollama (LLM coach)
 
@@ -458,6 +465,7 @@ See [DEPLOY.md](DEPLOY.md) for the Pi 5 + Tailscale setup.
 - [x] Adaptive rolling plan — daily morning check + weekly review
 - [x] Graduated return when deconditioned (graduated intensity ceiling)
 - [x] Google Health ingestion (HRV, sleep + stages, SpO₂, skin temp)
+- [x] Garmin health ingestion (sleep + stages, HRV, resting HR, SpO₂, body battery)
 - [x] Garmin Connect as sole source (Strava API retired after its paid-only policy)
 - [x] Enriched activities — streams, GPS, weather, source de-duplication
 - [x] Similar-activity comparison ("how many times have I climbed this?")

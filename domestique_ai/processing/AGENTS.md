@@ -109,6 +109,18 @@ pas/calories/poids). La sévérité passe `critical` à ≥ 2× le seuil.
   `metric` brut) : la métrique reste en snake_case dans le payload, seul le
   message destiné à l'UI est humanisé.
 
+## Providers automatiques de métriques (Garmin / Google Health)
+
+`processing/morning_metrics.py` est le **sink partagé** des deux providers :
+écriture via `build_provider_morning_payload()` (scores locaux identiques,
+préservation des scores manuels) puis `save_morning_entry()`, qui préserve
+`source`, `garmin_*` et `sleep_stages_json` par `COALESCE` — **un provider
+n'écrase jamais l'autre avec `None`** (un fetch partiel complète les métriques
+existantes). La provenance de la ligne (`morning_metrics.source`) et la
+préférence athlète (`get/set_health_provider`, `resolve_health_provider` —
+`auto` = Garmin prioritaire, Google ne remplit que les trous) vivent ici aussi.
+Détail des pipelines : `ingestion/AGENTS.md`.
+
 ## Suivi du poids + rapport poids/puissance (W/kg)
 
 Le poids est une **métrique de la table `morning_metrics`** (`weight_kg REAL`,

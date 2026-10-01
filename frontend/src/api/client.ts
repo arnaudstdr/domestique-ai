@@ -33,9 +33,12 @@ import type {
   FeedbackPayload,
   FeedbackStatus,
   FtpProjectionResponse,
+  GarminHealthSyncResponse,
   GoogleHealthAuthResponse,
   GoogleHealthStatusResponse,
   GoogleHealthSyncResponse,
+  HealthProvider,
+  HealthSourcesResponse,
   InvitationCreated,
   InvitationOut,
   LoadResponse,
@@ -337,6 +340,12 @@ export const api = {
         method: "PUT",
         body: JSON.stringify({ weight_kg, date }),
       }),
+    sources: () => http<HealthSourcesResponse>(`/api/morning/sources`),
+    setProvider: (provider: HealthProvider) =>
+      http<HealthSourcesResponse>(`/api/morning/sources/provider`, {
+        method: "PUT",
+        body: JSON.stringify({ provider }),
+      }),
   },
   googleHealth: {
     status: () => http<GoogleHealthStatusResponse>(`/api/google-health/status`),
@@ -389,6 +398,10 @@ export const api = {
     disconnect: () => http<void>(`/api/garmin/disconnect`, { method: "POST" }),
     sync: () => http<SyncStatus>(`/api/garmin/sync`, { method: "POST" }),
     syncStatus: () => http<SyncStatus>(`/api/garmin/sync-status`),
+    healthSync: (days = 7) =>
+      http<GarminHealthSyncResponse>(`/api/garmin/health/sync?days=${days}`, {
+        method: "POST",
+      }),
   },
   coach: {
     thread: (params: {

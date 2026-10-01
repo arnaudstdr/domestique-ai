@@ -347,6 +347,11 @@ class MorningEntry(BaseModel):
     sleep_score_computed: int | None = None
     stress_score_computed: int | None = None
     weight_kg: float | None = None
+    source: str | None = None
+    garmin_sleep_score: int | None = None
+    garmin_readiness_score: int | None = None
+    garmin_body_battery_min: int | None = None
+    garmin_body_battery_max: int | None = None
 
 
 class MorningBaseline(BaseModel):
@@ -437,6 +442,37 @@ class GoogleHealthSyncResponse(BaseModel):
 
 class GoogleHealthAuthResponse(BaseModel):
     auth_url: str
+
+
+# ---- Sources de santé (Garmin / Google Health) -------------------------------
+
+
+class HealthProviderStatus(BaseModel):
+    """État d'un provider de métriques automatiques (connexion + fraîcheur)."""
+
+    configured: bool = False
+    connected: bool = False
+    last_sync_at: str | None = None
+    last_error: str | None = None
+
+
+class HealthSourcesResponse(BaseModel):
+    provider: Literal["auto", "garmin", "google_health"] = "auto"
+    provider_effective: Literal["garmin", "google_health"] | None = None
+    garmin: HealthProviderStatus = Field(default_factory=HealthProviderStatus)
+    google_health: HealthProviderStatus = Field(default_factory=HealthProviderStatus)
+
+
+class HealthProviderUpdate(BaseModel):
+    provider: Literal["auto", "garmin", "google_health"]
+
+
+class GarminHealthSyncResponse(BaseModel):
+    success: bool
+    synced_dates: list[str] = Field(default_factory=list)
+    skipped_dates: list[str] = Field(default_factory=list)
+    disabled: bool = False
+    message: str
 
 
 # ---- Objective ---------------------------------------------------------------

@@ -21,7 +21,17 @@ from pathlib import Path
 from typing import Any
 
 from domestique_ai.config import get_db_path
-from domestique_ai.ingestion.db import init_db
+from domestique_ai.ingestion.db import get_sync_meta, init_db, set_sync_meta
+
+# Providers de métriques automatiques supportés. ``auto`` privilégie Garmin
+# (montre au poignet) et laisse Google Health remplir les jours sans données
+# Garmin. Les valeurs correspondent à la colonne ``morning_metrics.source``.
+HEALTH_PROVIDER_AUTO = "auto"
+HEALTH_PROVIDER_GARMIN = "garmin"
+HEALTH_PROVIDER_GOOGLE = "google_health"
+HEALTH_PROVIDERS = (HEALTH_PROVIDER_AUTO, HEALTH_PROVIDER_GARMIN, HEALTH_PROVIDER_GOOGLE)
+
+_HEALTH_PROVIDER_KEY = "health_provider"
 
 METRIC_COLUMNS = (
     "hrv_ms",
@@ -114,10 +124,22 @@ def save_morning_entry(
     sleep_score_computed: int | None = None,
     stress_score_computed: int | None = None,
     weight_kg: float | None = None,
+    source: str | None = None,
+    garmin_sleep_score: int | None = None,
+    garmin_readiness_score: int | None = None,
+    garmin_body_battery_min: int | None = None,
+    garmin_body_battery_max: int | None = None,
     db_path: Path | None = None,
 ) -> bool:
     """
     Insère ou remplace une entrée matinale. Idempotent sur la date (PK).
+
+    ``source`` trace le provider automatique qui a écrit la ligne
+    ("garmin" / "google_health"). Les colonnes bonus ``garmin_*``, ``source``
+    et ``sleep_stages_json`` sont préservées quand la mise à jour ne les
+    fournit pas (COALESCE) : un sync Google ne doit pas effacer les valeurs
+    natives Garmin, et inversement un sync Garmin ne doit pas effacer la
+    provenance posée par Google ni l'hypnogramme existant.
 
     Retourne True si l'opération a écrit quelque chose, False si tous les
     champs métriques étaient None (pas d'écriture utile).
@@ -141,6 +163,10 @@ def save_morning_entry(
         sleep_score_computed,
         stress_score_computed,
         weight_kg,
+        garmin_sleep_score,
+        garmin_readiness_score,
+        garmin_body_battery_min,
+        garmin_body_battery_max,
     )
     if all(v is None for v in (*metric_values, notes, sleep_stages)):
         return False
@@ -155,8 +181,10 @@ def save_morning_entry(
             "respiratory_rate_avg_bpm, skin_temp_delta_c, sleep_deep_min, "
             "sleep_rem_min, sleep_light_min, sleep_awake_min, sleep_stages_json, "
             "steps, active_calories, readiness_score, sleep_score_computed, "
-            "weight_kg, stress_score_computed) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+            "weight_kg, stress_score_computed, source, garmin_sleep_score, "
+            "garmin_readiness_score, garmin_body_battery_min, "
+            "garmin_body_battery_max) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
             "ON CONFLICT(date) DO UPDATE SET "
             "hrv_ms = excluded.hrv_ms, "
             "resting_hr = excluded.resting_hr, "
@@ -171,13 +199,23 @@ def save_morning_entry(
             "sleep_rem_min = excluded.sleep_rem_min, "
             "sleep_light_min = excluded.sleep_light_min, "
             "sleep_awake_min = excluded.sleep_awake_min, "
-            "sleep_stages_json = excluded.sleep_stages_json, "
+            "sleep_stages_json = COALESCE(excluded.sleep_stages_json, "
+            "morning_metrics.sleep_stages_json), "
             "steps = excluded.steps, "
             "active_calories = excluded.active_calories, "
             "readiness_score = excluded.readiness_score, "
             "sleep_score_computed = excluded.sleep_score_computed, "
             "weight_kg = excluded.weight_kg, "
-            "stress_score_computed = excluded.stress_score_computed",
+            "stress_score_computed = excluded.stress_score_computed, "
+            "source = COALESCE(excluded.source, morning_metrics.source), "
+            "garmin_sleep_score = COALESCE(excluded.garmin_sleep_score, "
+            "morning_metrics.garmin_sleep_score), "
+            "garmin_readiness_score = COALESCE(excluded.garmin_readiness_score, "
+            "morning_metrics.garmin_readiness_score), "
+            "garmin_body_battery_min = COALESCE(excluded.garmin_body_battery_min, "
+            "morning_metrics.garmin_body_battery_min), "
+            "garmin_body_battery_max = COALESCE(excluded.garmin_body_battery_max, "
+            "morning_metrics.garmin_body_battery_max)",
             (
                 date,
                 hrv_ms,
@@ -200,6 +238,11 @@ def save_morning_entry(
                 sleep_score_computed,
                 weight_kg,
                 stress_score_computed,
+                source,
+                garmin_sleep_score,
+                garmin_readiness_score,
+                garmin_body_battery_min,
+                garmin_body_battery_max,
             ),
         )
         conn.commit()
@@ -223,7 +266,9 @@ def fetch_morning_entry(
             "skin_temp_delta_c, sleep_deep_min, sleep_rem_min, sleep_light_min, "
             "sleep_awake_min, sleep_stages_json, steps, active_calories, "
             "readiness_score, sleep_score_computed, weight_kg, "
-            "stress_score_computed "
+            "stress_score_computed, source, garmin_sleep_score, "
+            "garmin_readiness_score, garmin_body_battery_min, "
+            "garmin_body_battery_max "
             "FROM morning_metrics WHERE date = ?",
             (date,),
         ).fetchone()
@@ -253,7 +298,9 @@ def fetch_morning_history(
             "skin_temp_delta_c, sleep_deep_min, sleep_rem_min, sleep_light_min, "
             "sleep_awake_min, sleep_stages_json, steps, active_calories, "
             "readiness_score, sleep_score_computed, weight_kg, "
-            "stress_score_computed "
+            "stress_score_computed, source, garmin_sleep_score, "
+            "garmin_readiness_score, garmin_body_battery_min, "
+            "garmin_body_battery_max "
             "FROM morning_metrics ORDER BY date ASC"
         ).fetchall()
     finally:
@@ -311,6 +358,47 @@ def latest_weight(db_path: Path | None = None) -> float | None:
     """Dernier poids connu (colonne ``weight_kg`` non NULL), ou ``None``."""
     entry = latest_weight_entry(db_path=db_path)
     return entry[1] if entry is not None else None
+
+
+def get_health_provider(db_path: Path | None = None) -> str:
+    """Préférence de provider automatique ("auto" par défaut)."""
+    path = Path(db_path) if db_path else get_db_path()
+    init_db(path)
+    value = get_sync_meta(_HEALTH_PROVIDER_KEY, db_path=path)
+    return value if value in HEALTH_PROVIDERS else HEALTH_PROVIDER_AUTO
+
+
+def set_health_provider(provider: str, db_path: Path | None = None) -> None:
+    """Enregistre la préférence de provider automatique."""
+    if provider not in HEALTH_PROVIDERS:
+        raise ValueError(f"Provider inconnu: {provider!r}")
+    path = Path(db_path) if db_path else get_db_path()
+    init_db(path)
+    set_sync_meta(_HEALTH_PROVIDER_KEY, provider, db_path=path)
+
+
+def resolve_health_provider(
+    provider: str | None,
+    *,
+    garmin_connected: bool,
+    google_connected: bool,
+) -> str | None:
+    """Provider effectif qui alimente les métriques automatiques.
+
+    En mode ``auto``, Garmin est prioritaire (montre au poignet) ; Google
+    Health ne remplit que les jours sans données Garmin. L'autre provider
+    reste utilisable pour combler les trous (sync par date).
+    """
+    pref = provider if provider in HEALTH_PROVIDERS else HEALTH_PROVIDER_AUTO
+    if pref == HEALTH_PROVIDER_GARMIN:
+        return HEALTH_PROVIDER_GARMIN if garmin_connected else None
+    if pref == HEALTH_PROVIDER_GOOGLE:
+        return HEALTH_PROVIDER_GOOGLE if google_connected else None
+    if garmin_connected:
+        return HEALTH_PROVIDER_GARMIN
+    if google_connected:
+        return HEALTH_PROVIDER_GOOGLE
+    return None
 
 
 def power_to_weight(power_w: float | None, weight_kg: float | None) -> float | None:
@@ -427,6 +515,160 @@ def _row_to_dict(row: tuple) -> dict[str, Any]:
         "sleep_score_computed": row[18],
         "weight_kg": row[19],
         "stress_score_computed": row[20],
+        "source": row[21],
+        "garmin_sleep_score": row[22],
+        "garmin_readiness_score": row[23],
+        "garmin_body_battery_min": row[24],
+        "garmin_body_battery_max": row[25],
+    }
+
+
+# Champs automatiques d'une ligne matinale. ``weight_kg`` en est exclu pour
+# ``has_auto_metrics`` : un jour avec seulement un pesage ne doit pas bloquer
+# l'autre provider (le poids est conservé par le merge, pas la provenance).
+_CORE_AUTO_FIELDS = (
+    "hrv_ms",
+    "resting_hr",
+    "sleep_hours",
+    "spo2_avg_pct",
+    "respiratory_rate_avg_bpm",
+    "skin_temp_delta_c",
+    "steps",
+    "active_calories",
+    "readiness_score",
+)
+
+_PROVIDER_AUTO_FIELDS = (
+    *_CORE_AUTO_FIELDS,
+    "sleep_deep_min",
+    "sleep_rem_min",
+    "sleep_light_min",
+    "sleep_awake_min",
+    "weight_kg",
+)
+
+
+def provider_has_data(data: dict[str, Any]) -> bool:
+    """True si un fetch provider apporte au moins une métrique automatique."""
+    if data.get("sleep_stages"):
+        return True
+    return any(data.get(field) is not None for field in _PROVIDER_AUTO_FIELDS)
+
+
+def has_auto_metrics(entry: dict[str, Any] | None) -> bool:
+    """True si la ligne porte des métriques automatiques (hors poids)."""
+    if not entry:
+        return False
+    return any(entry.get(field) is not None for field in _CORE_AUTO_FIELDS)
+
+
+def build_provider_morning_payload(
+    existing: dict[str, Any] | None,
+    data: dict[str, Any],
+    db_path: Path | None = None,
+) -> dict[str, Any] | None:
+    """Payload d'écriture commun aux syncs provider (Garmin, Google Health).
+
+    Calcule les scores locaux (sleep, readiness, stress) à partir du dict
+    ``data`` (mêmes clés pour tous les providers), préserve un score saisi à la
+    main (``sleep_score_computed=0`` / ``stress_score_computed != 1``) et
+    complète les métriques absentes du fetch par la valeur existante — un
+    provider ne doit jamais effacer une donnée de l'autre avec ``None``.
+
+    Retourne ``None`` si le fetch n'apporte aucune métrique automatique — la
+    date doit alors être ignorée par le sync (pas d'écrasement de provenance).
+    """
+    if not provider_has_data(data):
+        return None
+
+    def value(field: str) -> Any:
+        new = data.get(field)
+        if new is not None:
+            return new
+        return existing.get(field) if existing else None
+
+    manual_sleep_score = (
+        existing is not None
+        and existing.get("sleep_score") is not None
+        and existing.get("sleep_score_computed") == 0
+    )
+    if manual_sleep_score:
+        sleep_score = existing.get("sleep_score")
+        sleep_score_computed = 0
+    else:
+        sleep_score = calculate_sleep_score(
+            data.get("sleep_hours"),
+            data.get("sleep_deep_min"),
+            data.get("sleep_rem_min"),
+            data.get("sleep_light_min"),
+            data.get("sleep_awake_min"),
+        )
+        sleep_score_computed = 1 if sleep_score is not None else None
+        if sleep_score is None and existing is not None and existing.get("sleep_score") is not None:
+            sleep_score = existing.get("sleep_score")
+            sleep_score_computed = existing.get("sleep_score_computed")
+
+    readiness_score = calculate_readiness_score(
+        data.get("hrv_ms"),
+        data.get("resting_hr"),
+        data.get("sleep_hours"),
+        db_path=db_path,
+    )
+    if readiness_score is None and existing is not None:
+        readiness_score = existing.get("readiness_score")
+
+    # Une valeur de stress saisie à la main (flag != 1, y compris les lignes
+    # historiques au flag NULL) n'est jamais écrasée par le score calculé.
+    manual_stress_score = (
+        existing is not None
+        and existing.get("stress_score") is not None
+        and existing.get("stress_score_computed") != 1
+    )
+    if manual_stress_score:
+        stress_score = existing.get("stress_score")
+        stress_score_computed = 0
+    else:
+        stress_score = calculate_stress_score(
+            data.get("hrv_ms"),
+            data.get("resting_hr"),
+            data.get("sleep_hours"),
+            sleep_score,
+            data.get("respiratory_rate_avg_bpm"),
+            data.get("skin_temp_delta_c"),
+            data.get("steps"),
+            data.get("active_calories"),
+            db_path=db_path,
+        )
+        stress_score_computed = 1 if stress_score is not None else None
+        if (
+            stress_score is None
+            and existing is not None
+            and existing.get("stress_score") is not None
+        ):
+            stress_score = existing.get("stress_score")
+            stress_score_computed = existing.get("stress_score_computed")
+
+    return {
+        "hrv_ms": value("hrv_ms"),
+        "resting_hr": value("resting_hr"),
+        "sleep_hours": value("sleep_hours"),
+        "sleep_score": sleep_score,
+        "sleep_score_computed": sleep_score_computed,
+        "spo2_avg_pct": value("spo2_avg_pct"),
+        "respiratory_rate_avg_bpm": value("respiratory_rate_avg_bpm"),
+        "skin_temp_delta_c": value("skin_temp_delta_c"),
+        "sleep_deep_min": value("sleep_deep_min"),
+        "sleep_rem_min": value("sleep_rem_min"),
+        "sleep_light_min": value("sleep_light_min"),
+        "sleep_awake_min": value("sleep_awake_min"),
+        "sleep_stages": data.get("sleep_stages"),
+        "steps": value("steps"),
+        "active_calories": value("active_calories"),
+        "readiness_score": readiness_score,
+        "stress_score": stress_score,
+        "stress_score_computed": stress_score_computed,
+        "weight_kg": value("weight_kg"),
+        "notes": existing.get("notes") if existing else None,
     }
 
 

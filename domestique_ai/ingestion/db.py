@@ -244,7 +244,12 @@ def init_db(db_path: Path | None = None, *, ctx: AthleteContext | None = None) -
                 readiness_score INTEGER,
                 sleep_score_computed INTEGER,
                 stress_score_computed INTEGER,
-                weight_kg REAL
+                weight_kg REAL,
+                source TEXT,
+                garmin_sleep_score INTEGER,
+                garmin_readiness_score INTEGER,
+                garmin_body_battery_min INTEGER,
+                garmin_body_battery_max INTEGER
             )
         """)
         for col, ddl in (
@@ -262,6 +267,15 @@ def init_db(db_path: Path | None = None, *, ctx: AthleteContext | None = None) -
             ("sleep_score_computed", "INTEGER"),
             ("stress_score_computed", "INTEGER"),
             ("weight_kg", "REAL"),
+            # Provenance des métriques automatiques : "garmin" |
+            # "google_health". NULL = saisie manuelle seule / ligne historique.
+            ("source", "TEXT"),
+            # Valeurs natives Garmin (bonus, hors calculs) : score de sommeil
+            # et training readiness de la montre, body battery min/max du jour.
+            ("garmin_sleep_score", "INTEGER"),
+            ("garmin_readiness_score", "INTEGER"),
+            ("garmin_body_battery_min", "INTEGER"),
+            ("garmin_body_battery_max", "INTEGER"),
         ):
             _ensure_column(conn, "morning_metrics", col, ddl)
         conn.execute("""
@@ -575,6 +589,7 @@ def delete_activity(
 def get_sync_meta(key: str, db_path: Path | None = None) -> str | None:
     """Lit une valeur de la table ``sync_meta`` (flags de maintenance one-off)."""
     path = Path(db_path) if db_path else get_db_path()
+    init_db(path)  # base neuve (athlète sans données) → crée la table
     conn = sqlite3.connect(path)
     try:
         row = conn.execute("SELECT value FROM sync_meta WHERE key = ?", (key,)).fetchone()
@@ -586,6 +601,7 @@ def get_sync_meta(key: str, db_path: Path | None = None) -> str | None:
 def set_sync_meta(key: str, value: str, db_path: Path | None = None) -> None:
     """Écrit (upsert) une valeur dans ``sync_meta``."""
     path = Path(db_path) if db_path else get_db_path()
+    init_db(path)
     conn = sqlite3.connect(path)
     try:
         conn.execute(

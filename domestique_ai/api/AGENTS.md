@@ -47,6 +47,30 @@ Un `BackgroundScheduler` APScheduler tourne dans le process FastAPI et déclench
 - **Logs et erreurs** : le job enveloppe `trigger_sync_blocking` dans un `try/except` global — un job APScheduler qui lève marque le job comme erroné et peut arrêter le scheduler, ce qu'on ne veut surtout pas. Toute exception inattendue est loggée mais n'interrompt pas la cadence.
 - **Ciblage** : le cache token étant désormais **par athlète** (`garmin_token_dir_for(ctx)`), le job boucle sur **tous les athlètes ayant connecté leur compte** (`token_cache_present`) — plus seulement le bootstrap. Un athlète en échec n'interrompt pas les autres.
 
+## Sources de santé (Garmin Health / Google Health)
+
+La page Santé expose une vue agrégée des providers de métriques automatiques :
+
+- `GET /api/morning/sources` — un seul appel pour l'UI :
+  `{provider, provider_effective, garmin: {configured, connected, last_sync_at,
+  last_error}, google_health: {...}}`. `provider_effective` résout `auto` en
+  Garmin prioritaire (cf. `processing/morning_metrics.resolve_health_provider`).
+- `PUT /api/morning/sources/provider` — préférence
+  `auto|garmin|google_health` (stockée dans `sync_meta`). Refusé en lecture
+  seule coach (403 via `get_athlete_context`).
+- `POST /api/garmin/health/sync?days=7` — sync santé Garmin **synchrone**
+  (7 j par défaut, 30 max), verrou par athlète `_claim_health_sync` (409 si
+  déjà en cours), 404 si Garmin non connecté, 502 si l'API échoue. Retourne
+  `GarminHealthSyncResponse` (dont `message` affiché en toast).
+
+L'auto-sync santé Garmin est un job APScheduler dédié
+(`garmin_health_auto_sync`, `DOMESTIQUE_AI_GARMIN_HEALTH_AUTO_SYNC_MINUTES`,
+défaut 360, `0` = off) : les métriques de récupération n'évoluent qu'une fois
+par jour, pas besoin de la cadence 30 min des activités. Il ne cible que les
+athlètes avec tokens Garmin dont la préférence n'est pas `google_health`, ne
+lève jamais, et est pré-synchronisé dans le check du matin et la revue hebdo
+(comme Google Health). Détail ingésion/provenance : `ingestion/AGENTS.md`.
+
 ## Notifications push (Pushover) — palier 4 du coach proactif
 
 `domestique_ai/notifications.py` expose deux fonctions best-effort :

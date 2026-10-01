@@ -40,7 +40,7 @@ un dossier).
 
 | Zone | Guide |
 | --- | --- |
-| Ingestion — Garmin, TCX, Google Health, persistance DB | `domestique_ai/ingestion/AGENTS.md` |
+| Ingestion — Garmin (activités + santé), TCX, Google Health, persistance DB | `domestique_ai/ingestion/AGENTS.md` |
 | Traitement — charge, zones HR, tendances, plan déterministe, compliance, comparateur | `domestique_ai/processing/AGENTS.md` |
 | Coach LLM — coach, mémoire, génération de plan, décisions | `domestique_ai/llm/AGENTS.md` |
 | API & plateforme — routers, scheduler, notifs, export, auth/avatar | `domestique_ai/api/AGENTS.md` |

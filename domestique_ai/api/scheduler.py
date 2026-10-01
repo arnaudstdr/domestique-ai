@@ -5,8 +5,10 @@ pool dédié, pas l'event loop asyncio). Chaque job partage le verrou de son
 router avec le sync manuel correspondant : pas de risque de chevauchement.
 
 Configuration :
-- ``DOMESTIQUE_AI_GARMIN_AUTO_SYNC_MINUTES`` : période Garmin en minutes
-  (défaut 30). ``0`` désactive complètement l'auto-sync Garmin.
+- ``DOMESTIQUE_AI_GARMIN_AUTO_SYNC_MINUTES`` : période Garmin (activités) en
+  minutes (défaut 30). ``0`` désactive complètement l'auto-sync Garmin.
+- ``DOMESTIQUE_AI_GARMIN_HEALTH_AUTO_SYNC_MINUTES`` : période santé Garmin
+  (métriques matinales, défaut 360 = 6h). ``0`` désactive.
 - ``DOMESTIQUE_AI_GOOGLE_HEALTH_AUTO_SYNC_MINUTES`` : période Google Health.
 - ``DOMESTIQUE_AI_DAILY_CHECK_HOUR`` / ``_MINUTE`` : heure du check du matin
   (défaut 08:00 local, ``-1`` = off). ``DOMESTIQUE_AI_SCHEDULER_TZ`` : fuseau
@@ -25,6 +27,8 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from domestique_ai.api.logging import get_logger
 from domestique_ai.api.routers.garmin import trigger_sync_blocking as trigger_garmin_sync
 from domestique_ai.config import (
+    get_garmin_health_auto_sync_minutes,
+    get_garmin_health_first_run_delay_minutes,
     get_google_health_auto_sync_minutes,
     get_google_health_first_run_delay_minutes,
     get_session_idle_finalize_minutes,
@@ -41,6 +45,8 @@ _DEFAULT_GOOGLE_HEALTH_INTERVAL_MIN = 360
 _DEFAULT_GOOGLE_HEALTH_FIRST_RUN_DELAY_MIN = 10
 _DEFAULT_GARMIN_INTERVAL_MIN = 30
 _DEFAULT_GARMIN_FIRST_RUN_DELAY_MIN = 5
+_DEFAULT_GARMIN_HEALTH_INTERVAL_MIN = 360
+_DEFAULT_GARMIN_HEALTH_FIRST_RUN_DELAY_MIN = 10
 # Cadence du job de finalisation des sessions mémoire (résumé + faits). Le
 # seuil d'inactivité lui-même est `SESSION_IDLE_FINALIZE_MINUTES` (défaut 45).
 _SESSION_FINALIZE_INTERVAL_MIN = 15
@@ -160,6 +166,74 @@ def _garmin_auto_sync_job() -> None:
         log.exception("Auto-sync Garmin : exception non gérée.")
 
 
+def _garmin_health_auto_sync_interval_minutes() -> int:
+    return get_garmin_health_auto_sync_minutes()
+
+
+def _garmin_health_first_run_delay_minutes() -> int:
+    return get_garmin_health_first_run_delay_minutes()
+
+
+def _garmin_health_targets() -> list[tuple[str, object]]:
+    """Athlètes avec tokens Garmin dont la préférence laisse Garmin écrire.
+
+    Les athlètes ayant explicitement choisi ``google_health`` sont exclus :
+    inutile d'ouvrir un client Garmin (et d'appeler l'API non officielle) pour
+    une sync que le module court-circuiterait de toute façon.
+    """
+    from domestique_ai.athlete_context import context_for_athlete
+    from domestique_ai.config import garmin_token_dir_for
+    from domestique_ai.export.garmin_connect import token_cache_present
+    from domestique_ai.platform_db import get_or_create_bootstrap_coach, list_users
+    from domestique_ai.processing.morning_metrics import (
+        HEALTH_PROVIDER_GOOGLE,
+        get_health_provider,
+    )
+
+    users = list_users()
+    if not any(u.get("is_bootstrap") for u in users):
+        get_or_create_bootstrap_coach()
+        users = list_users()
+
+    targets: list[tuple[str, object]] = []
+    for user in users:
+        ctx = context_for_athlete(user)
+        if not token_cache_present(garmin_token_dir_for(ctx)):
+            continue
+        if get_health_provider(db_path=ctx.db_path) == HEALTH_PROVIDER_GOOGLE:
+            continue
+        targets.append((user["public_id"], ctx))
+    return targets
+
+
+def _garmin_health_auto_sync_job() -> None:
+    """Sync santé Garmin périodique — API non officielle, cadence sobre (6 h)."""
+    try:
+        targets = _garmin_health_targets()
+    except Exception:  # noqa: BLE001 — un job APScheduler ne doit jamais lever
+        log.exception("Auto-sync santé Garmin : énumération des athlètes échouée.")
+        return
+
+    from domestique_ai.ingestion.garmin_health import sync_garmin_health_morning_metrics
+
+    for public_id, ctx in targets:
+        try:
+            result = sync_garmin_health_morning_metrics(
+                start_date=dt.date.today() - dt.timedelta(days=7),
+                end_date=dt.date.today(),
+                ctx=ctx,
+                db_path=ctx.db_path,
+            )
+            log.info(
+                "Auto-sync santé Garmin [%s] : %d sync, %d skip.",
+                public_id[:8],
+                len(result["synced_dates"]),
+                len(result["skipped_dates"]),
+            )
+        except Exception:  # noqa: BLE001 — un athlète KO ne bloque pas les autres
+            log.exception("Auto-sync santé Garmin [%s] : exception non gérée.", public_id[:8])
+
+
 def _healthcheck_interval_minutes() -> int:
     return _read_positive_int("HEALTHCHECKS_PING_INTERVAL_MIN", _DEFAULT_HEALTHCHECK_INTERVAL_MIN)
 
@@ -251,6 +325,23 @@ def _weekly_review_job() -> None:
         except Exception:  # noqa: BLE001
             log.warning("Revue hebdo [%s] : pre-sync Google Health échoué.", public_id[:8])
 
+    # Pre-sync santé Garmin (7 j) — les tendances matin doivent être à jour.
+    try:
+        from domestique_ai.ingestion.garmin_health import sync_garmin_health_morning_metrics
+
+        for public_id, ctx in _garmin_health_targets():
+            try:
+                sync_garmin_health_morning_metrics(
+                    start_date=dt.date.today() - dt.timedelta(days=7),
+                    end_date=dt.date.today(),
+                    ctx=ctx,
+                    db_path=ctx.db_path,
+                )
+            except Exception:  # noqa: BLE001 — best-effort par athlète
+                log.warning("Revue hebdo [%s] : pre-sync santé Garmin échoué.", public_id[:8])
+    except Exception:  # noqa: BLE001
+        log.warning("Revue hebdo : pre-sync santé Garmin échoué (best-effort).")
+
     for user in users:
         public_id = user["public_id"]
         try:
@@ -310,6 +401,25 @@ def _daily_morning_check_job() -> None:
             )
         except Exception:  # noqa: BLE001
             log.warning("Check du matin [%s] : pre-sync Google Health échoué.", public_id[:8])
+
+    # Pre-sync santé Garmin (hier → aujourd'hui) — Garmin prioritaire en mode
+    # auto, la nuit vient d'être calculée par la montre.
+    try:
+        from domestique_ai.ingestion.garmin_health import sync_garmin_health_morning_metrics
+
+        for public_id, ctx in _garmin_health_targets():
+            try:
+                sync_garmin_health_morning_metrics(
+                    start_date=dt.date.today() - dt.timedelta(days=1),
+                    end_date=dt.date.today(),
+                    ctx=ctx,
+                    db_path=ctx.db_path,
+                )
+            except Exception:  # noqa: BLE001 — best-effort par athlète
+                log.warning("Check du matin [%s] : pre-sync santé Garmin échoué.", public_id[:8])
+    except Exception:  # noqa: BLE001
+        log.warning("Check du matin : pre-sync santé Garmin échoué (best-effort).")
+
     # Pre-sync Garmin (tous les athlètes connectés) : la séance d'hier soir doit
     # être ingérée avant d'évaluer la décision du matin.
     try:
@@ -345,7 +455,8 @@ def start_scheduler() -> None:
     """Démarre le scheduler s'il n'est pas déjà en cours.
 
     Enregistre plusieurs jobs indépendants :
-    - ``garmin_auto_sync`` : sync Garmin périodique (si activé)
+    - ``garmin_auto_sync`` : sync Garmin (activités) périodique (si activé)
+    - ``garmin_health_auto_sync`` : sync santé Garmin périodique (si activé)
     - ``google_health_auto_sync`` : sync Google Health périodique (si activé)
     - ``healthcheck_ping`` : ping Healthchecks.io périodique (si URL configurée)
     - ``daily_morning_check`` / ``weekly_review`` : coach adaptatif (CronTrigger)
@@ -362,19 +473,32 @@ def start_scheduler() -> None:
     hc_interval = _healthcheck_interval_minutes()
     hc_url_configured = os.getenv("HEALTHCHECKS_PING_URL", "").strip() != ""
     garmin_interval = _garmin_auto_sync_interval_minutes()
+    garmin_health_interval = _garmin_health_auto_sync_interval_minutes()
     session_finalize_enabled = get_session_idle_finalize_minutes() > 0
 
     gh_enabled = gh_interval > 0
     hc_enabled = hc_interval > 0 and hc_url_configured
     garmin_enabled = garmin_interval > 0
+    garmin_health_enabled = garmin_health_interval > 0
 
-    if not gh_enabled and not hc_enabled and not garmin_enabled and not session_finalize_enabled:
+    if (
+        not gh_enabled
+        and not hc_enabled
+        and not garmin_enabled
+        and not garmin_health_enabled
+        and not session_finalize_enabled
+    ):
         if not gh_enabled:
             log.info("Auto-sync Google Health désactivé.")
         if not hc_url_configured:
             log.info("Healthchecks ping désactivé (HEALTHCHECKS_PING_URL absent).")
         if not garmin_enabled:
             log.info("Auto-sync Garmin désactivé (DOMESTIQUE_AI_GARMIN_AUTO_SYNC_MINUTES=0).")
+        if not garmin_health_enabled:
+            log.info(
+                "Auto-sync santé Garmin désactivé "
+                "(DOMESTIQUE_AI_GARMIN_HEALTH_AUTO_SYNC_MINUTES=0)."
+            )
         log.info("Finalisation sessions mémoire désactivée (SESSION_IDLE_FINALIZE_MINUTES=0).")
         return
 
@@ -469,6 +593,27 @@ def start_scheduler() -> None:
         log.info("Scheduler : sync Garmin toutes les %d min.", garmin_interval)
     else:
         log.info("Auto-sync Garmin désactivé (DOMESTIQUE_AI_GARMIN_AUTO_SYNC_MINUTES=0).")
+
+    if garmin_health_enabled:
+        delay = _garmin_health_first_run_delay_minutes()
+        scheduler.add_job(
+            _garmin_health_auto_sync_job,
+            "interval",
+            minutes=garmin_health_interval,
+            id="garmin_health_auto_sync",
+            coalesce=True,
+            max_instances=1,
+            next_run_time=dt.datetime.now(dt.UTC) + dt.timedelta(minutes=delay),
+        )
+        log.info(
+            "Scheduler : sync santé Garmin toutes les %d min (1er run dans %d min).",
+            garmin_health_interval,
+            delay,
+        )
+    else:
+        log.info(
+            "Auto-sync santé Garmin désactivé (DOMESTIQUE_AI_GARMIN_HEALTH_AUTO_SYNC_MINUTES=0)."
+        )
 
     if hc_enabled:
         # 1er ping immédiat (au démarrage) pour confirmer à Healthchecks.io

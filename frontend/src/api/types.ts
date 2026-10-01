@@ -301,6 +301,11 @@ export interface MorningEntry {
   sleep_score_computed: number | null;
   stress_score_computed: number | null;
   weight_kg: number | null;
+  source: HealthProvider | null;
+  garmin_sleep_score: number | null;
+  garmin_readiness_score: number | null;
+  garmin_body_battery_min: number | null;
+  garmin_body_battery_max: number | null;
 }
 
 export interface WeightResponse {
@@ -351,6 +356,30 @@ export interface GoogleHealthSyncResponse {
 
 export interface GoogleHealthAuthResponse {
   auth_url: string;
+}
+
+export type HealthProvider = "auto" | "garmin" | "google_health";
+
+export interface HealthProviderStatus {
+  configured: boolean;
+  connected: boolean;
+  last_sync_at: string | null;
+  last_error: string | null;
+}
+
+export interface HealthSourcesResponse {
+  provider: HealthProvider;
+  provider_effective: "garmin" | "google_health" | null;
+  garmin: HealthProviderStatus;
+  google_health: HealthProviderStatus;
+}
+
+export interface GarminHealthSyncResponse {
+  success: boolean;
+  synced_dates: string[];
+  skipped_dates: string[];
+  disabled: boolean;
+  message: string;
 }
 
 export interface Objective {

@@ -106,6 +106,11 @@ def test_save_and_fetch_full_entry(db_path: Path):
         "sleep_score_computed": 1,
         "weight_kg": None,
         "stress_score_computed": None,
+        "source": None,
+        "garmin_sleep_score": None,
+        "garmin_readiness_score": None,
+        "garmin_body_battery_min": None,
+        "garmin_body_battery_max": None,
     }
 
 

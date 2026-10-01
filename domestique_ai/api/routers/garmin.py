@@ -22,6 +22,7 @@ from domestique_ai.api.logging import get_logger
 from domestique_ai.api.schemas import (
     GarminConnectRequest,
     GarminConnectResponse,
+    GarminHealthSyncResponse,
     GarminMfaRequest,
     SyncStatus,
 )
@@ -39,6 +40,12 @@ log = get_logger("garmin")
 # État de la dernière synchro, indexé par athlète (public_id).
 _sync_state: dict[str, dict[str, Any]] = {}
 _sync_lock = Lock()
+
+# État de la dernière sync **santé** Garmin (métriques matinales) — verrou
+# distinct de celui des activités : les deux pipelines sont indépendants et
+# peuvent tourner l'un sans l'autre. Le statut durable (last_sync_at /
+# last_error) vit dans ``sync_meta`` de la base athlète.
+_health_sync_state: dict[str, dict[str, Any]] = {}
 
 # ---------------------------------------------------------------------------
 # Connexion MFA en 2 étapes.
@@ -345,3 +352,90 @@ def get_sync_status(
 ) -> SyncStatus:
     """État de la dernière synchro Garmin."""
     return SyncStatus(**_state_for(_public_key(ctx)))
+
+
+def _set_health_sync_state(key: str, **fields: Any) -> None:
+    with _sync_lock:
+        base = _health_sync_state.get(key) or {"status": "idle"}
+        base.update(fields)
+        _health_sync_state[key] = base
+
+
+def _claim_health_sync(key: str) -> bool:
+    with _sync_lock:
+        if (_health_sync_state.get(key) or {}).get("status") == "syncing":
+            return False
+        _health_sync_state[key] = {
+            "status": "syncing",
+            "started_at": dt.datetime.now(dt.UTC).isoformat(),
+        }
+    return True
+
+
+@router.post("/health/sync", response_model=GarminHealthSyncResponse)
+def post_health_sync(
+    days: int = 7,
+    ctx: AthleteContext = Depends(get_athlete_context),  # noqa: B008
+) -> GarminHealthSyncResponse:
+    """Sync synchrone des métriques de santé Garmin (7 j par défaut, 30 max).
+
+    Alimente la page Santé (sommeil, HRV, FC repos, SpO2, respiration, pas,
+    calories, poids) avec les scores calculés localement, comme Google Health.
+    """
+    from domestique_ai.ingestion.garmin_health import (
+        MAX_SYNC_DAYS,
+        GarminHealthError,
+        sync_garmin_health_morning_metrics,
+    )
+
+    key = _public_key(ctx)
+    if not _claim_health_sync(key):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Sync santé Garmin déjà en cours.",
+        )
+
+    end_date = dt.date.today()
+    start_date = end_date - dt.timedelta(days=max(1, min(days, MAX_SYNC_DAYS)))
+    try:
+        result = sync_garmin_health_morning_metrics(
+            start_date=start_date,
+            end_date=end_date,
+            ctx=ctx,
+            db_path=ctx.db_path,
+        )
+    except GarminIngestError as exc:
+        _set_health_sync_state(key, status="error", error=str(exc))
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except GarminHealthError as exc:
+        _set_health_sync_state(key, status="error", error=str(exc))
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
+    except Exception as exc:  # noqa: BLE001 — remonté en 502 actionnable
+        log.exception("Sync santé Garmin [%s] : exception non gérée", key[:8])
+        _set_health_sync_state(key, status="error", error=f"{type(exc).__name__}: {exc}")
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Sync santé Garmin échouée — réessaie plus tard.",
+        ) from exc
+
+    _set_health_sync_state(
+        key,
+        status="done",
+        error=None,
+        synced=len(result["synced_dates"]),
+        skipped=len(result["skipped_dates"]),
+        finished_at=dt.datetime.now(dt.UTC).isoformat(),
+    )
+    if result.get("disabled"):
+        message = "Sync ignorée : Google Health est le provider préféré."
+    elif result["synced_dates"]:
+        message = f"{len(result['synced_dates'])} jour(s) synchronisé(s) via Garmin."
+    else:
+        message = "Aucune donnée Garmin sur la fenêtre."
+    return GarminHealthSyncResponse(
+        success=not result.get("disabled"),
+        synced_dates=result["synced_dates"],
+        skipped_dates=result["skipped_dates"],
+        disabled=bool(result.get("disabled")),
+        message=message,
+    )
