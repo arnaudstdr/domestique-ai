@@ -78,9 +78,11 @@ function AuthedShell() {
     <div className="min-h-screen bg-surface text-fg">
       {viewing && <ViewingBanner name={viewing.name} />}
       <header
-        className="sticky top-0 z-[1100] bg-surface/70 backdrop-blur-xl
-                   border-b border-border/[0.06] pt-[env(safe-area-inset-top)]
-                   shadow-[0_1px_0_0_rgb(255_255_255/0.03)]"
+        className={`sticky top-0 z-[1100] bg-surface/70 backdrop-blur-xl
+                   border-b border-border/[0.06] ${viewing ? "" : "pt-[env(safe-area-inset-top)]"}
+                   shadow-[0_1px_0_0_rgb(255_255_255/0.03)]
+                   will-change-transform [transform:translateZ(0)]
+                   [-webkit-backface-visibility:hidden]`}
       >
         <div className="mx-auto max-w-3xl px-4 py-3 flex items-center justify-between">
           <h1 className="flex items-center gap-2.5 font-display text-[17px] font-extrabold tracking-tight">

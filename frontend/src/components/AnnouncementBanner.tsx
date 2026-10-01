@@ -25,7 +25,7 @@ export default function AnnouncementBanner() {
   return (
     <div
       role="status"
-      className={`border-b pt-[env(safe-area-inset-top)] ${
+      className={`border-b ${
         maintenance
           ? "border-red-500/30 bg-red-500/10 text-red-300"
           : "border-accent/30 bg-accent/10 text-accent"
