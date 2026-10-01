@@ -15,6 +15,8 @@ import type {
   AdminFeedback,
   AdminInvitation,
   AdminInvitationCreated,
+  AdminOllamaCloud,
+  AdminOllamaUsage,
   AdminSession,
   AdminSettings,
   AdminStats,
@@ -738,6 +740,9 @@ export const api = {
       http<void>(`/api/admin/invitations/${id}`, { method: "DELETE" }),
     stats: () => http<AdminStats>(`/api/admin/stats`),
     status: () => http<AdminStatus>(`/api/admin/status`),
+    ollamaUsage: (days = 30) => http<AdminOllamaUsage>(`/api/admin/ollama-usage?days=${days}`),
+    ollamaCloud: (period: "week" | "month" = "month") =>
+      http<AdminOllamaCloud>(`/api/admin/ollama-cloud?period=${period}`),
     purgeOrphanSpaces: () =>
       http<{ removed: number }>(`/api/admin/athlete-spaces/purge-orphans`, { method: "POST" }),
     setFeedbackStatus: (id: number, status: FeedbackStatus) =>

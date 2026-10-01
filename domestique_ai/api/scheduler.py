@@ -172,6 +172,18 @@ def _healthcheck_ping_job() -> None:
         log.exception("Healthcheck ping : exception non gérée.")
 
 
+def _attribute(public_id: str):
+    """Contexte d'attribution des appels LLM du job (table ``llm_calls``).
+
+    Les jobs APScheduler tournent dans un thread pool dédié, hors requête HTTP :
+    on pose explicitement ``public_id`` pour rattacher les appels Ollama de la
+    boucle à l'athlète courant.
+    """
+    from domestique_ai.llm.usage import llm_attribution
+
+    return llm_attribution(public_id)
+
+
 def _all_athlete_contexts() -> list[tuple[str, object]]:
     """Contexte de tous les athlètes connus (bootstrap + roster)."""
     from domestique_ai.athlete_context import context_for_athlete
@@ -202,16 +214,17 @@ def _finalize_sessions_job() -> None:
 
     total = 0
     for public_id, ctx in targets:
-        try:
-            backfill_memory(ctx=ctx)
-        except Exception:  # noqa: BLE001
-            log.exception("Backfill mémoire [%s] : exception non gérée.", public_id[:8])
-        try:
-            total += finalize_idle_sessions(ctx=ctx)
-        except Exception:  # noqa: BLE001
-            log.exception(
-                "Finalisation sessions mémoire [%s] : exception non gérée.", public_id[:8]
-            )
+        with _attribute(public_id):
+            try:
+                backfill_memory(ctx=ctx)
+            except Exception:  # noqa: BLE001
+                log.exception("Backfill mémoire [%s] : exception non gérée.", public_id[:8])
+            try:
+                total += finalize_idle_sessions(ctx=ctx)
+            except Exception:  # noqa: BLE001
+                log.exception(
+                    "Finalisation sessions mémoire [%s] : exception non gérée.", public_id[:8]
+                )
     if total:
         log.info("Finalisation sessions mémoire : %d session(s) finalisée(s).", total)
 
@@ -255,7 +268,8 @@ def _weekly_review_job() -> None:
         public_id = user["public_id"]
         try:
             ctx = context_for_athlete(user)
-            result = run_weekly_review(ctx=ctx)
+            with _attribute(public_id):
+                result = run_weekly_review(ctx=ctx)
             log.info(
                 "Revue hebdo [%s] : decision=%s replanned=%s new_plan_id=%s",
                 public_id[:8],
@@ -330,7 +344,8 @@ def _daily_morning_check_job() -> None:
 
     for public_id, ctx in targets:
         try:
-            result = evaluate_daily_decision(ctx=ctx)
+            with _attribute(public_id):
+                result = evaluate_daily_decision(ctx=ctx)
             log.info(
                 "Check du matin [%s] : décision=%s (persisted=%s).",
                 public_id[:8],

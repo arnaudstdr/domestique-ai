@@ -168,7 +168,15 @@ ce sheet (plus de carte de recherche en haut de page).
   `new`/`acknowledged`/`done`/`rejected` ; onglets `components/FilterTab.tsx`,
   partagés avec le journal d'audit), et un encart **Plateforme** (stats + statut
   ops : scheduler, sync Garmin, healthcheck, version, fuseau ; compteur
-  d'espaces athlètes orphelins + bouton de purge). Le **journal d'audit**
+  d'espaces athlètes orphelins + bouton de purge). Encart **Usage Ollama**
+  (`components/AdminOllamaUsage.tsx`) : sélecteur de période (7/30/90 j), tuiles
+  appels/tokens/latence/coût, bar chart par type d'appel (recharts +
+  `chartTheme`), répartition par type d'appel et par athlète, derniers appels,
+  et **deux barres de quota Cloud estimé** (fenêtres *session 5 h* et *hebdo
+  7 j*, chacune avec % + compte à rebours de reset + projection, puis
+  recommandation de forfait). Les tarifs, le quota hebdo et les JSON
+  `llm_model_weights`/`llm_model_prices` s'éditent dans « Réglages plateforme »
+  (`NumberSetting` / `JsonSetting`, commit au blur). Le **journal d'audit**
   (`components/AdminAuditLog.tsx`) est une timeline verticale groupée par jour
   (rail + nœud coloré/icône par famille d'action, « Aujourd'hui » / « Hier » /
   date, temps relatif avec horodatage absolu en tooltip, sous-titre humanisé

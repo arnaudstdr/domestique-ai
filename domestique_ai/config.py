@@ -683,6 +683,17 @@ def get_ollama_host() -> str | None:
     return os.getenv("OLLAMA_HOST") or None
 
 
+def get_ollama_api_key() -> str | None:
+    """Clé API Ollama Cloud (``OLLAMA_API_KEY``).
+
+    Requise pour les modèles cloud (ex. ``gemma4:31b-cloud``) ; inutile pour les
+    modèles locaux. ``None`` → pas de clé passée au client (le SDK retombe sur sa
+    propre lecture de l'env, ou erreur 401 côté cloud).
+    """
+    raw = os.getenv("OLLAMA_API_KEY")
+    return raw.strip() if raw and raw.strip() else None
+
+
 def get_api_token() -> str | None:
     """Token Bearer requis pour les endpoints ``/api/*`` (sauf ``/api/health``).
 

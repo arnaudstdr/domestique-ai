@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import os
 import time
 import uuid
@@ -73,6 +72,7 @@ from domestique_ai.config import (
     get_sentry_enabled,
     get_sentry_send_pii,
 )
+from domestique_ai.llm.usage import llm_attribution
 from domestique_ai.platform_db import init_platform_db
 
 _FRONTEND_DIST = REPO_ROOT / "frontend" / "dist"
@@ -81,43 +81,9 @@ setup_logging()
 log = get_logger("main")
 
 
-async def _backfill_session_titles(limit: int = 30) -> None:
-    """Génère les titres manquants pour les sessions existantes (best-effort).
-
-    Tourne séquentiellement pour ne pas saturer Ollama, et s'arrête après 3
-    échecs consécutifs (modèle indisponible). Idempotent : ne touche pas aux
-    sessions qui ont déjà un titre.
-    """
-    from domestique_ai.llm.conversations import (
-        generate_session_title,
-        list_sessions,
-    )
-
-    sessions = list_sessions(limit=limit)
-    missing = [s for s in sessions if not s.get("title") and s["messages"] >= 2]
-    if not missing:
-        return
-    log.info("Backfill titres de session : %d candidates", len(missing))
-    consecutive_failures = 0
-    for sess in missing:
-        try:
-            title = await generate_session_title(sess["session_id"])
-        except Exception:  # noqa: BLE001 — best-effort, jamais fatal
-            log.exception("Backfill titre échoué (%s)", sess["session_id"][:8])
-            title = None
-        if title:
-            consecutive_failures = 0
-            log.info("Backfill titre %s : %r", sess["session_id"][:8], title)
-        else:
-            consecutive_failures += 1
-            if consecutive_failures >= 3:
-                log.warning("Backfill titres interrompu après 3 échecs consécutifs.")
-                return
-
-
 @asynccontextmanager
 async def lifespan(app: FastAPI):  # noqa: ARG001
-    """Logs au démarrage et à l'arrêt + backfill titres en arrière-plan."""
+    """Logs au démarrage et à l'arrêt."""
     setup_logging()
     log.info(
         "DomestiqueAI API démarrée — frontend_dist=%s (présent=%s)",
@@ -125,9 +91,6 @@ async def lifespan(app: FastAPI):  # noqa: ARG001
         _FRONTEND_DIST.is_dir(),
     )
     init_platform_db()
-    # Lancement non bloquant — l'API est prête immédiatement, le backfill
-    # tourne en tâche de fond.
-    asyncio.create_task(_backfill_session_titles())
     start_scheduler()
     yield
     stop_scheduler()
@@ -226,8 +189,17 @@ class RequestLoggingMiddleware:
                 message = {**message, "headers": headers}
             await send(message)
 
+        # Attribution des appels LLM lancés pendant la requête (table llm_calls) :
+        # le user authentifié est posé dans le scope par BearerAuthMiddleware.
+        # Posé ici (middleware ASGI, contexte renvoyé intact) et non dans
+        # ``get_athlete_context`` (dépendance sync → threadpool, contextvar perdu).
+        state = scope.get("state")
+        user = state.get("user") if isinstance(state, dict) else None
+        actor = user.get("public_id") if isinstance(user, dict) else None
+
         try:
-            await self.app(scope, receive, send_with_logging)
+            with llm_attribution(actor):
+                await self.app(scope, receive, send_with_logging)
         except Exception:
             duration_ms = (time.perf_counter() - start) * 1000
             self._LOG.exception(

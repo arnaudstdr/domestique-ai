@@ -34,6 +34,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field, ValidationError, field_validator
 
 from domestique_ai.athlete_context import AthleteContext
+from domestique_ai.llm import usage
 from domestique_ai.llm.availability import _WEEKDAY_BY_INDEX, Availability
 from domestique_ai.llm.ollama_client import chat_structured
 from domestique_ai.processing.athlete_state import (
@@ -321,7 +322,9 @@ async def _generate_week_with_llm(
         {"role": "user", "content": user},
     ]
     for _attempt in range(2):
-        raw = await chat_structured(messages, timeout_s=_GENERATION_TIMEOUT_S)
+        raw = await chat_structured(
+            messages, timeout_s=_GENERATION_TIMEOUT_S, label=usage.PLAN_WEEK
+        )
         if raw is None:
             continue
         try:

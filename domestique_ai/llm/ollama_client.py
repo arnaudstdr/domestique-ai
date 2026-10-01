@@ -6,6 +6,10 @@ Entrypoints :
 - `chat_structured()` : appel non-stream avec sortie JSON validable côté
   appelant (best-effort, ne lève jamais).
 - `embed_texts()` : embeddings pour la mémoire du coach (best-effort).
+
+Observabilité : chaque appel est enregistré (tokens, latence, statut, modèle)
+via `llm.usage.record_llm_call()` — best-effort, jamais bloquant. Le paramètre
+`label` identifie le *pourquoi* de l'appel (agrégé dans le panneau admin).
 """
 
 from __future__ import annotations
@@ -17,7 +21,13 @@ from typing import Any
 
 import ollama
 
-from domestique_ai.config import get_ollama_embed_model, get_ollama_host, get_ollama_model
+from domestique_ai.config import (
+    get_ollama_api_key,
+    get_ollama_embed_model,
+    get_ollama_host,
+    get_ollama_model,
+)
+from domestique_ai.llm.usage import as_int, ns_to_ms, record_llm_call
 
 
 class OllamaError(RuntimeError):
@@ -26,7 +36,41 @@ class OllamaError(RuntimeError):
 
 def _async_client() -> ollama.AsyncClient:
     host = get_ollama_host()
-    return ollama.AsyncClient(host=host) if host else ollama.AsyncClient()
+    api_key = get_ollama_api_key()
+    headers = {"Authorization": f"Bearer {api_key}"} if api_key else None
+    kwargs: dict[str, Any] = {}
+    if host:
+        kwargs["host"] = host
+    if headers:
+        kwargs["headers"] = headers
+    return ollama.AsyncClient(**kwargs)
+
+
+def _record(
+    *,
+    label: str | None,
+    entrypoint: str,
+    model: str,
+    response: Any,
+    status: str = "ok",
+    error_type: str | None = None,
+    tools_count: int = 0,
+) -> None:
+    """Extrait les métriques SDK d'une réponse et les persiste (best-effort)."""
+    record_llm_call(
+        label=label,
+        entrypoint=entrypoint,
+        model=model,
+        prompt_tokens=as_int(getattr(response, "prompt_eval_count", None)),
+        cached_tokens=as_int(getattr(response, "prompt_eval_cached_count", None)),
+        completion_tokens=as_int(getattr(response, "eval_count", None)),
+        total_duration_ms=ns_to_ms(getattr(response, "total_duration", None)),
+        load_duration_ms=ns_to_ms(getattr(response, "load_duration", None)),
+        eval_duration_ms=ns_to_ms(getattr(response, "eval_duration", None)),
+        status=status,
+        error_type=error_type,
+        tools_count=tools_count,
+    )
 
 
 async def stream_chat(
@@ -35,6 +79,7 @@ async def stream_chat(
     model: str | None = None,
     think: bool = False,
     options: dict[str, Any] | None = None,
+    label: str | None = None,
 ) -> AsyncIterator[dict[str, Any]]:
     """Yield des chunks Ollama normalisés au fur et à mesure de la génération.
 
@@ -42,12 +87,18 @@ async def stream_chat(
     "done": bool}`. `content` et `thinking` sont des DELTAS incrémentaux.
     `tool_calls` arrive en bloc, en pratique sur le dernier chunk d'un tour.
 
-    `think` contrôle l'émission du bloc <think>. Sur gemma3/4, `think=False`
+    `think` contrôle l'émission du bloc de raisonnement. Sur gemma3/4, `think=False`
     rend le tool-calling moins fiable (le modèle saute les tools et répond
     de tête). Garder `think=True` au moins sur le 1ᵉʳ tour pour fiabiliser
     la décision d'appeler des tools.
+
+    `label` identifie le type d'appel pour l'observabilité (table `llm_calls`).
     """
     target_model = model or get_ollama_model()
+    final: Any = None
+    tools_count = 0
+    status = "ok"
+    error_type: str | None = None
     try:
         stream = await _async_client().chat(
             model=target_model,
@@ -59,28 +110,49 @@ async def stream_chat(
         )
         async for chunk in stream:
             msg = chunk.message
+            chunk_tools = [
+                {
+                    "function": {
+                        "name": tc.function.name,
+                        "arguments": dict(tc.function.arguments or {}),
+                    },
+                }
+                for tc in (getattr(msg, "tool_calls", None) or [])
+            ]
+            if chunk_tools:
+                tools_count += len(chunk_tools)
+            if bool(getattr(chunk, "done", False)):
+                final = chunk
             yield {
                 "content": getattr(msg, "content", "") or "",
                 "thinking": getattr(msg, "thinking", "") or "",
-                "tool_calls": [
-                    {
-                        "function": {
-                            "name": tc.function.name,
-                            "arguments": dict(tc.function.arguments or {}),
-                        },
-                    }
-                    for tc in (getattr(msg, "tool_calls", None) or [])
-                ]
-                or None,
+                "tool_calls": chunk_tools or None,
                 "done": bool(getattr(chunk, "done", False)),
             }
     except ConnectionError as exc:
+        status, error_type = "error", "connection"
         raise OllamaError(
             f"Impossible de joindre Ollama (modèle {target_model}). "
             f"Vérifier que le service tourne. Détail: {exc}"
         ) from exc
     except ollama.ResponseError as exc:
+        status, error_type = "error", "response"
         raise OllamaError(f"Ollama a refusé la requête (modèle {target_model}): {exc}") from exc
+    except Exception as exc:  # noqa: BLE001 — erreurs SDK variées (httpx, etc.)
+        status, error_type = "error", "unexpected"
+        raise OllamaError(
+            f"Échec de l'appel Ollama (modèle {target_model}, {type(exc).__name__}): {exc}"
+        ) from exc
+    finally:
+        _record(
+            label=label,
+            entrypoint="stream_chat",
+            model=target_model,
+            response=final,
+            status=status,
+            error_type=error_type,
+            tools_count=tools_count,
+        )
 
 
 async def chat_structured(
@@ -89,6 +161,7 @@ async def chat_structured(
     model: str | None = None,
     timeout_s: float = 30.0,
     options: dict[str, Any] | None = None,
+    label: str | None = None,
 ) -> dict[str, Any] | None:
     """Appel chat non-stream avec ``format="json"`` et parsing du résultat.
 
@@ -100,6 +173,9 @@ async def chat_structured(
     Cette fonction **ne lève jamais** : l'appelant choisit son fallback.
     """
     target_model = model or get_ollama_model()
+    response: Any = None
+    status = "ok"
+    error_type: str | None = None
     try:
         response = await asyncio.wait_for(
             _async_client().chat(
@@ -111,10 +187,27 @@ async def chat_structured(
             ),
             timeout=timeout_s,
         )
-    except (TimeoutError, ConnectionError, ollama.ResponseError):
+    except TimeoutError:
+        status, error_type = "error", "timeout"
+        return None
+    except ConnectionError:
+        status, error_type = "error", "connection"
+        return None
+    except ollama.ResponseError:
+        status, error_type = "error", "response"
         return None
     except Exception:  # noqa: BLE001 — best-effort, on retombe sur le fallback
+        status, error_type = "error", "unexpected"
         return None
+    finally:
+        _record(
+            label=label,
+            entrypoint="chat_structured",
+            model=target_model,
+            response=response,
+            status=status,
+            error_type=error_type,
+        )
 
     content = getattr(getattr(response, "message", None), "content", None) or ""
     if not content.strip():
@@ -132,6 +225,7 @@ def chat_structured_sync(
     model: str | None = None,
     timeout_s: float = 30.0,
     options: dict[str, Any] | None = None,
+    label: str | None = None,
 ) -> dict[str, Any] | None:
     """Variante synchrone de ``chat_structured``, utilisable même sous event loop.
 
@@ -146,6 +240,7 @@ def chat_structured_sync(
             model=model,
             timeout_s=timeout_s,
             options=options,
+            label=label,
         )
 
     try:
@@ -168,6 +263,7 @@ async def embed_texts(
     *,
     model: str | None = None,
     timeout_s: float = 30.0,
+    label: str | None = None,
 ) -> list[list[float]]:
     """Calcule les embeddings d'une liste de textes via Ollama.
 
@@ -181,15 +277,35 @@ async def embed_texts(
     if not texts:
         return []
     target_model = model or get_ollama_embed_model()
+    response: Any = None
+    status = "ok"
+    error_type: str | None = None
     try:
         response = await asyncio.wait_for(
             _async_client().embed(model=target_model, input=texts),
             timeout=timeout_s,
         )
-    except (TimeoutError, ConnectionError, ollama.ResponseError):
+    except TimeoutError:
+        status, error_type = "error", "timeout"
+        return []
+    except ConnectionError:
+        status, error_type = "error", "connection"
+        return []
+    except ollama.ResponseError:
+        status, error_type = "error", "response"
         return []
     except Exception:  # noqa: BLE001 — best-effort, on retombe sur "pas d'embedding"
+        status, error_type = "error", "unexpected"
         return []
+    finally:
+        _record(
+            label=label,
+            entrypoint="embed_texts",
+            model=target_model,
+            response=response,
+            status=status,
+            error_type=error_type,
+        )
 
     embeddings = getattr(response, "embeddings", None)
     if embeddings is None and isinstance(response, dict):
@@ -204,11 +320,12 @@ def embed_texts_sync(
     *,
     model: str | None = None,
     timeout_s: float = 30.0,
+    label: str | None = None,
 ) -> list[list[float]]:
     """Variante synchrone de ``embed_texts``, sûre même sous event loop."""
 
     async def _run() -> list[list[float]]:
-        return await embed_texts(texts, model=model, timeout_s=timeout_s)
+        return await embed_texts(texts, model=model, timeout_s=timeout_s, label=label)
 
     try:
         asyncio.get_running_loop()

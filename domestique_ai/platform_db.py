@@ -416,6 +416,36 @@ def init_platform_db(path: Path | None = None) -> None:
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_admin_audit_created ON admin_audit(created_at DESC)"
         )
+        # Observabilité des appels LLM/Ollama (data cross-tenant, comme l'audit).
+        # Une ligne par appel au SDK Ollama, écrite best-effort par
+        # ``llm.usage.record_llm_call`` via ``insert_llm_call``. Alimente la vue
+        # « Usage Ollama » du panneau admin (tokens, latence, coût, erreurs).
+        # FK ``SET NULL`` + snapshot ``public_id`` : l'historique survit à la
+        # suppression d'un compte.
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS llm_calls (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                created_at TEXT NOT NULL,
+                actor_public_id TEXT,
+                label TEXT,
+                entrypoint TEXT,
+                model TEXT,
+                prompt_tokens INTEGER,
+                cached_tokens INTEGER,
+                completion_tokens INTEGER,
+                total_duration_ms REAL,
+                load_duration_ms REAL,
+                eval_duration_ms REAL,
+                status TEXT NOT NULL DEFAULT 'ok',
+                error_type TEXT,
+                tools_count INTEGER NOT NULL DEFAULT 0
+            )
+        """)
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_llm_calls_created ON llm_calls(created_at DESC)"
+        )
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_llm_calls_label ON llm_calls(label)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_llm_calls_actor ON llm_calls(actor_public_id)")
         conn.commit()
     finally:
         conn.close()
@@ -1903,6 +1933,98 @@ def record_admin_audit(
             ),
         )
         conn.commit()
+    finally:
+        conn.close()
+
+
+# ---------------------------------------------------------------------------
+# Observabilité LLM (table llm_calls)
+# ---------------------------------------------------------------------------
+
+
+def insert_llm_call(
+    *,
+    label: str | None,
+    entrypoint: str,
+    model: str | None,
+    prompt_tokens: int | None = None,
+    cached_tokens: int | None = None,
+    completion_tokens: int | None = None,
+    total_duration_ms: float | None = None,
+    load_duration_ms: float | None = None,
+    eval_duration_ms: float | None = None,
+    status: str = "ok",
+    error_type: str | None = None,
+    tools_count: int = 0,
+    actor_public_id: str | None = None,
+    path: Path | None = None,
+) -> int:
+    """Enregistre un appel LLM (best-effort côté appelant). Retourne le rowid."""
+    conn = _connect(path)
+    try:
+        cur = conn.execute(
+            "INSERT INTO llm_calls (created_at, actor_public_id, label, entrypoint, "
+            "model, prompt_tokens, cached_tokens, completion_tokens, total_duration_ms, "
+            "load_duration_ms, eval_duration_ms, status, error_type, tools_count) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                _now(),
+                actor_public_id,
+                label,
+                entrypoint,
+                model,
+                prompt_tokens,
+                cached_tokens,
+                completion_tokens,
+                total_duration_ms,
+                load_duration_ms,
+                eval_duration_ms,
+                status,
+                error_type,
+                tools_count,
+            ),
+        )
+        conn.commit()
+        return int(cur.lastrowid or 0)
+    finally:
+        conn.close()
+
+
+def fetch_llm_calls(
+    since: str | None = None,
+    until: str | None = None,
+    limit: int | None = None,
+    path: Path | None = None,
+) -> list[dict[str, Any]]:
+    """Appels LLM sur une fenêtre ``[since, until)`` (ISO), plus récents d'abord.
+
+    ``limit`` borne le nombre de lignes (le plus souvent on agrège sans limite).
+    """
+    query = "SELECT * FROM llm_calls WHERE 1=1"
+    params: list[Any] = []
+    if since:
+        query += " AND created_at >= ?"
+        params.append(since)
+    if until:
+        query += " AND created_at < ?"
+        params.append(until)
+    query += " ORDER BY id DESC"
+    if limit is not None:
+        query += " LIMIT ?"
+        params.append(int(limit))
+    conn = _connect(path)
+    try:
+        return [dict(row) for row in conn.execute(query, params).fetchall()]
+    finally:
+        conn.close()
+
+
+def llm_calls_earliest_created(path: Path | None = None) -> str | None:
+    """Date du plus ancien appel LLM enregistré (``None`` si la table est vide)."""
+    conn = _connect(path)
+    try:
+        row = conn.execute("SELECT MIN(created_at) AS m FROM llm_calls").fetchone()
+        return row["m"] if row is not None else None
     finally:
         conn.close()
 

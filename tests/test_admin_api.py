@@ -548,6 +548,163 @@ def test_stats_and_status_forbidden_for_non_admin(client: TestClient):
     assert client.get("/api/admin/status", headers=_bearer(athlete_token)).status_code == 403
 
 
+# --- Usage Ollama -------------------------------------------------------------
+
+
+def test_ollama_usage_aggregates_calls(client: TestClient):
+    admin_token, admin_pid = _session("admin")
+    pdb.insert_llm_call(
+        label="coach_chat",
+        entrypoint="stream_chat",
+        model="gemma4:31b-cloud",
+        prompt_tokens=100,
+        completion_tokens=50,
+        total_duration_ms=1200.0,
+        actor_public_id=admin_pid,
+    )
+    pdb.insert_llm_call(
+        label="embed_query",
+        entrypoint="embed_texts",
+        model="nomic-embed-text",
+        prompt_tokens=10,
+        status="error",
+        error_type="timeout",
+    )
+
+    r = client.get("/api/admin/ollama-usage?days=7", headers=_bearer(admin_token))
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["totals"]["calls"] == 2
+    assert body["totals"]["prompt_tokens"] == 110
+    assert body["totals"]["completion_tokens"] == 50
+    assert body["totals"]["errors"] == 1
+    labels = {b["key"]: b for b in body["by_label"]}
+    assert labels["coach_chat"]["calls"] == 1
+    assert labels["coach_chat"]["label"] == "Chat coach"
+    assert body["by_actor"][0]["calls"] == 1
+    assert body["recent"][0]["label_human"] in {"Chat coach", "Embedding requête"}
+
+
+def test_ollama_usage_estimates_cost(client: TestClient):
+    admin_token, _ = _session("admin")
+    # Tarif par modèle prioritaire (le prix de ``gemma4:31b-cloud`` est posé en
+    # JSON par modèle, il prime sur les tarifs plats).
+    pdb.set_setting(
+        "llm_model_prices",
+        '{"gemma4:31b-cloud": {"prompt": 0.001, "cached": 0.0005, "completion": 0.002}}',
+    )
+    pdb.insert_llm_call(
+        label="plan_week",
+        entrypoint="chat_structured",
+        model="gemma4:31b-cloud",
+        prompt_tokens=1000,
+        completion_tokens=1000,
+    )
+    body = client.get("/api/admin/ollama-usage", headers=_bearer(admin_token)).json()
+    # 1000/1000 * 0.001 + 1000/1000 * 0.002 = 0.003
+    assert body["totals"]["estimated_cost_usd"] == 0.003
+
+
+def test_ollama_usage_cost_bills_cached_at_cached_rate(client: TestClient):
+    admin_token, _ = _session("admin")
+    pdb.set_setting(
+        "llm_model_prices",
+        '{"gemma4:31b-cloud": {"prompt": 0.001, "cached": 0.0005, "completion": 0.002}}',
+    )
+    # 1000 tokens prompt dont 400 servis depuis le cache.
+    pdb.insert_llm_call(
+        label="coach_chat",
+        entrypoint="stream_chat",
+        model="gemma4:31b-cloud",
+        prompt_tokens=1000,
+        cached_tokens=400,
+        completion_tokens=0,
+    )
+    body = client.get("/api/admin/ollama-usage", headers=_bearer(admin_token)).json()
+    # frais : 600 * 0.001/1000 + 400 * 0.0005/1000 = 0.0006 + 0.0002 = 0.0008
+    assert body["totals"]["estimated_cost_usd"] == 0.0008
+
+
+def test_ollama_cloud_quota_reconstruction(client: TestClient):
+    admin_token, _ = _session("admin")
+    pdb.set_setting("llm_weekly_quota_units", "10")
+    pdb.set_setting("llm_model_weights", '{"gemma4:31b-cloud": 2.0}')
+    for _ in range(3):
+        pdb.insert_llm_call(
+            label="coach_chat",
+            entrypoint="stream_chat",
+            model="gemma4:31b-cloud",
+            prompt_tokens=100,
+            completion_tokens=20,
+        )
+    body = client.get("/api/admin/ollama-cloud", headers=_bearer(admin_token)).json()
+    assert body["requests"] == 3
+    # 3 appels × poids 2.0 = 6 unités, réparties sur les deux fenêtres (session
+    # et semaine englobent toutes deux les appels qui viennent d'être écrits).
+    assert body["weekly"]["units_used"] == 6.0
+    # Quota hebdo 10 → 60 %.
+    assert body["weekly"]["usage_pct"] == 60.0
+    assert body["session"]["units_used"] == 6.0
+    assert body["session"]["window_start"] <= body["session"]["window_end"]
+    assert body["weekly"]["seconds_until_reset"] > 0
+    assert body["models"][0]["model"] == "gemma4:31b-cloud"
+    assert body["models"][0]["weight"] == 2.0
+    assert isinstance(body["recommendation"], str) and body["recommendation"]
+
+
+def test_ollama_cloud_windows_are_anchored(client: TestClient):
+    admin_token, _ = _session("admin")
+    body = client.get("/api/admin/ollama-cloud", headers=_bearer(admin_token)).json()
+    import datetime as dt
+
+    # La fenêtre session fait exactement 5 h, la fenêtre hebdo 7 j.
+    for key, hours in (("session", 5), ("weekly", 24 * 7)):
+        start = dt.datetime.fromisoformat(body[key]["window_start"])
+        end = dt.datetime.fromisoformat(body[key]["window_end"])
+        assert (end - start).total_seconds() == hours * 3600
+
+
+def test_ollama_usage_forbidden_for_non_admin(client: TestClient):
+    athlete_token, _ = _session("athlete")
+    assert client.get("/api/admin/ollama-usage", headers=_bearer(athlete_token)).status_code == 403
+    assert client.get("/api/admin/ollama-cloud", headers=_bearer(athlete_token)).status_code == 403
+
+
+def test_admin_can_set_model_weights_json(client: TestClient):
+    admin_token, _ = _session("admin")
+    r = client.put(
+        "/api/admin/settings",
+        headers=_bearer(admin_token),
+        json={"llm_model_weights": '{"gemma4:31b-cloud": 0.5}'},
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["llm_model_weights"] == '{"gemma4:31b-cloud": 0.5}'
+    # JSON invalide → 422.
+    bad = client.put(
+        "/api/admin/settings",
+        headers=_bearer(admin_token),
+        json={"llm_model_weights": "{not json"},
+    )
+    assert bad.status_code == 422
+
+
+def test_admin_can_set_llm_pricing(client: TestClient):
+    admin_token, _ = _session("admin")
+    r = client.put(
+        "/api/admin/settings",
+        headers=_bearer(admin_token),
+        json={"llm_price_prompt_per_1k": 0.5, "llm_weekly_quota_units": 42},
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["llm_price_prompt_per_1k"] == 0.5
+    assert body["llm_weekly_quota_units"] == 42
+    # Relu depuis un GET (persisté en base).
+    again = client.get("/api/admin/settings", headers=_bearer(admin_token)).json()
+    assert again["llm_price_prompt_per_1k"] == 0.5
+    assert again["llm_weekly_quota_units"] == 42
+
+
 def test_admin_purges_orphan_athlete_spaces(client: TestClient):
     from domestique_ai.config import get_athletes_root
 

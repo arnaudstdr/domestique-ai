@@ -17,6 +17,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from domestique_ai.athlete_context import AthleteContext, context_from_env
+from domestique_ai.llm import usage
 from domestique_ai.llm.ollama_client import stream_chat
 from domestique_ai.llm.tools import TOOL_SCHEMAS, dispatch
 
@@ -199,7 +200,9 @@ async def run_turn_stream(
         # déjà concrètes, ça gagne du temps sans nuire à la qualité.
         think = iteration == 0
 
-        async for chunk in stream_chat(messages, tools=TOOL_SCHEMAS, think=think):
+        async for chunk in stream_chat(
+            messages, tools=TOOL_SCHEMAS, think=think, label=usage.COACH_CHAT
+        ):
             if chunk["content"]:
                 turn_content += chunk["content"]
                 accumulated_content += chunk["content"]

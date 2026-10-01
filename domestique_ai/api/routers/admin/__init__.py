@@ -12,7 +12,7 @@ from fastapi import APIRouter, Depends
 
 from domestique_ai.api.deps import require_admin
 
-from . import audit, feedback, invitations, platform, settings, users
+from . import audit, feedback, invitations, llm_usage, platform, settings, users
 
 router = APIRouter(
     prefix="/api/admin",
@@ -26,5 +26,6 @@ router.include_router(audit.router)
 router.include_router(invitations.router)
 router.include_router(platform.router)
 router.include_router(settings.router)
+router.include_router(llm_usage.router)
 
 __all__ = ["router"]

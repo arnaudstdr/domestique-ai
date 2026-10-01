@@ -31,6 +31,7 @@ from typing import Any
 from domestique_ai.athlete_context import AthleteContext, context_from_env
 from domestique_ai.config import get_plan_min_ctl
 from domestique_ai.ingestion.db import get_sync_meta, set_sync_meta
+from domestique_ai.llm import usage
 
 _WEEKLY_REVIEW_FLAG = "weekly_review_last_week"
 
@@ -215,8 +216,15 @@ def _llm_decision(report: dict[str, Any], base: tuple[str, float, str]) -> str:
         f'TSB={report.get("tsb")}. Retourne un JSON {{"reason": str}}.'
     )
     try:
+        messages = [
+            {"role": "system", "content": "Coach cycliste — bref et concret."},
+            {"role": "user", "content": prompt},
+        ]
         result = chat_structured_sync(
-            prompt, schema, system="Coach cycliste — bref et concret.", timeout_s=15
+            messages,
+            timeout_s=15.0,
+            options={"format": schema},
+            label=usage.WEEKLY_REVIEW_REASON,
         )
         if isinstance(result, dict) and result.get("reason"):
             return str(result["reason"])[:260]

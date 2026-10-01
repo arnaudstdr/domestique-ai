@@ -28,7 +28,7 @@ import logging
 from typing import Any
 
 from domestique_ai.athlete_context import AthleteContext, context_from_env
-from domestique_ai.llm import today_cache
+from domestique_ai.llm import today_cache, usage
 from domestique_ai.llm.availability import (
     Availability,
     AvailabilityError,
@@ -508,7 +508,7 @@ def _decide_kind_with_llm(dossier: dict[str, Any]) -> dict[str, Any] | None:
             ),
         },
     ]
-    response = chat_structured_sync(messages, timeout_s=20.0)
+    response = chat_structured_sync(messages, timeout_s=20.0, label=usage.WORKOUT_TODAY)
     if response is None:
         return None
 

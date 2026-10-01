@@ -34,7 +34,20 @@ Pour ajouter un tool :
 
 Mode `thinking` activé sur le 1ᵉʳ tour de tool-calling (fiabilise la décision d'appeler les tools sur gemma3/4), désactivé sur les tours suivants pour gagner du temps. Les deltas de raisonnement sont streamés au client et affichés dans l'expander « 🧠 Raisonnement » de la page Coach (debug).
 
-Persistance : chaque message (user / assistant / tool) est stocké en JSON brut dans la table `conversations` (clé `session_id`, ordre par `id`). L'UI présente **un fil unique** fusionnant toutes les sessions ; en interne le fil est découpé en **sessions invisibles** : `current_or_new_session()` rattache le message à la session courante et en ouvre une nouvelle si le fil est inactif depuis `SESSION_IDLE_FINALIZE_MINUTES` (rotation transparente). `load_thread_page()` pagine le fil toutes sessions confondues (`before` / `after` / `anchor`). La génération de titre (`generate_session_title`) n'est plus appelée par le router (plus de sélecteur côté UI).
+Persistance : chaque message (user / assistant / tool) est stocké en JSON brut dans la table `conversations` (clé `session_id`, ordre par `id`). L'UI présente **un fil unique** fusionnant toutes les sessions ; en interne le fil est découpé en **sessions invisibles** : `current_or_new_session()` rattache le message à la session courante et en ouvre une nouvelle si le fil est inactif depuis `SESSION_IDLE_FINALIZE_MINUTES` (rotation transparente). `load_thread_page()` pagine le fil toutes sessions confondues (`before` / `after` / `anchor`).
+
+**Titres de session : supprimés.** La génération de titre (`generate_session_title`) et le backfill au démarrage (`_backfill_session_titles`) ont été **retirés** — plus de sélecteur côté UI, c'était de la conso Ollama gaspillée à chaque reboot. `list_sessions()` reste (endpoint legacy `GET /api/coach/sessions`, `title` toujours `None`) ; la table `session_titles` n'est plus lue ni écrite.
+
+## Observabilité des appels Ollama (`llm/usage.py`)
+
+Chaque appel au SDK Ollama est tracé (best-effort) dans la table `llm_calls` de `platform.db` — alimente la vue « Usage Ollama » du panneau admin (tokens, latence, coût, erreurs).
+
+- **Point unique** : `llm/ollama_client.py` lit les métriques du SDK (`prompt_eval_count`, `prompt_eval_cached_count`, `eval_count`, `total_duration`, `load_duration`, `eval_duration`) et appelle `usage.record_llm_call()` en `finally` (statut `ok`/`error`, `error_type`). Ne pas ajouter d'appel Ollama qui court-circuite ce wrapper, sous peine de trou dans l'observabilité.
+- **`label`** : chaque entrypoint (`stream_chat`, `chat_structured`/`_sync`, `embed_texts`/`_sync`) accepte un `label` (constantes `usage.COACH_CHAT`, `PLAN_WEEK`, `SESSION_SUMMARY`, `FACTS_EXTRACT`, `DAILY_BRIEF`, `WORKOUT_TODAY`, `DECISION_REASON`, `WEEKLY_REVIEW_REASON`, `EMBED_*`). Toujours le renseigner au call-site — c'est le « pourquoi » agrégé dans l'admin.
+- **Attribution athlète** : `ContextVar` `usage._llm_actor`, posé via `usage.llm_attribution(public_id)` au niveau du **middleware** ASGI (chemin requête, `api/main.py`) et des **boucles du scheduler** (`api/scheduler.py`). ⚠️ Ne **pas** le poser dans `get_athlete_context` (dépendance *sync* → threadpool : le contextvar serait perdu).
+- **Invariant** : `record_llm_call` ne lève **jamais** (une panne d'observabilité ne doit pas casser un appel LLM) ; l'absence de contexte → `actor` `NULL` (normal).
+
+**Config** : clé Cloud via `OLLAMA_API_KEY` (`config.get_ollama_api_key()`, passée au client). Requise pour les modèles `-cloud`, inutile en local. Le palier **Free** Ollama couvre `gemma4:31b-cloud`. Aucune API Ollama n'expose le % de quota (feature requests ouvertes) : le pourcentage affiché côté admin est une **estimation pondérée calibrée**, jamais une lecture.
 
 ## Objectif de l'athlète
 

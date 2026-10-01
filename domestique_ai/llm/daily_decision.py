@@ -24,6 +24,7 @@ import statistics
 from typing import Any
 
 from domestique_ai.athlete_context import AthleteContext, context_from_env
+from domestique_ai.llm import usage
 from domestique_ai.processing.plan_builder import Workout
 
 # Seuils déterministes (cf. readiness_band dans processing/morning_metrics).
@@ -248,8 +249,12 @@ def _refine_reason_with_llm(decision: str, reason: str, signals: dict[str, Any])
         'Retourne un JSON {"reason": str}.'
     )
     try:
+        messages = [
+            {"role": "system", "content": "Coach cycliste — bref et concret."},
+            {"role": "user", "content": prompt},
+        ]
         result = chat_structured_sync(
-            prompt, schema, system="Coach cycliste — bref et concret.", timeout_s=15
+            messages, timeout_s=15.0, options={"format": schema}, label=usage.DECISION_REASON
         )
         if isinstance(result, dict) and result.get("reason"):
             return str(result["reason"])[:220]
