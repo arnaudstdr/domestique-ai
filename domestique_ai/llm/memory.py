@@ -21,12 +21,14 @@ from __future__ import annotations
 import datetime as dt
 import json
 import sqlite3
+from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
 from domestique_ai.athlete_context import AthleteContext
 from domestique_ai.config import (
     get_db_path,
+    get_ollama_embed_model,
     get_session_idle_finalize_minutes,
     get_session_summary_every_messages,
 )
@@ -85,7 +87,7 @@ def _pack(vec: list[float]) -> bytes:
     return np.asarray(vec, dtype="<f4").tobytes()
 
 
-def _cosine(query: list[float], rows: list[sqlite3.Row], k: int) -> list[tuple[float, sqlite3.Row]]:
+def _cosine(query: list[float], rows: list[Any], k: int) -> list[tuple[float, Any]]:
     """Top-k cosinus entre ``query`` et les embeddings BLOB de ``rows``.
 
     Les vecteurs de dimension différente de la requête (changement de modèle
@@ -107,6 +109,25 @@ def _cosine(query: list[float], rows: list[sqlite3.Row], k: int) -> list[tuple[f
         scored.append((float(np.dot(q, v)) / denom, row))
     scored.sort(key=lambda item: item[0], reverse=True)
     return scored[:k]
+
+
+@lru_cache(maxsize=512)
+def _embed_query_cached(model: str, query: str) -> tuple[float, ...]:
+    """Embedding de requête mémoïsé (déterministe pour un modèle donné).
+
+    Évite un appel Ollama pour la même recherche (chat + recherche live du
+    front). Lève si Ollama est indisponible : ``lru_cache`` ne mémorise pas les
+    exceptions, une panne transitoire n'empoisonne donc pas le cache.
+    """
+    embs = embed_texts_sync([query], label=usage.EMBED_QUERY)
+    if not embs:
+        raise RuntimeError("embedding indisponible")
+    return tuple(float(v) for v in embs[0])
+
+
+def clear_embedding_cache() -> None:
+    """Vide le cache d'embeddings de requête (tests, changement de modèle)."""
+    _embed_query_cached.cache_clear()
 
 
 # --------------------------------------------------------------------------- #
@@ -195,6 +216,107 @@ def remember_fact(
         "content": content,
         "deduplicated": deduplicated,
     }
+
+
+def remember_facts_batch(
+    items: list[tuple[str, str]],
+    *,
+    ctx: AthleteContext | None = None,
+    source_session_id: str | None = None,
+    db_path: Path | None = None,
+) -> list[dict[str, Any]]:
+    """Enregistre un lot de faits avec **un seul** appel d'embeddings.
+
+    Même dédup que ``remember_fact`` (cosine > ``_FACT_DEDUP_THRESHOLD``), mais
+    compare aussi les faits du lot entre eux pour éviter les doublons quand
+    l'extraction en propose plusieurs proches. Best-effort : si les embeddings
+    échouent, les faits sont quand même stockés sans vecteur.
+    """
+    clean: list[tuple[str, str]] = []
+    for category, content in items:
+        content = (content or "").strip()
+        if not content:
+            continue
+        if category not in MEMORY_CATEGORIES:
+            category = "personal"
+        clean.append((category, content))
+    if not clean:
+        return []
+
+    embedded = embed_texts_sync([content for _cat, content in clean], label=usage.EMBED_FACT)
+    vectors: list[list[float] | None] = (
+        list(embedded) if embedded and len(embedded) == len(clean) else [None] * len(clean)
+    )
+
+    now = _now()
+    conn = _connect(db_path, ctx)
+    stored: list[dict[str, Any]] = []
+    try:
+        existing = conn.execute(
+            "SELECT id, content, embedding FROM coach_memory WHERE active = 1"
+        ).fetchall()
+        pending: list[dict[str, Any]] = []
+        for (category, content), vec in zip(clean, vectors, strict=False):
+            match_id: int | None = None
+            if vec:
+                hits = _cosine(vec, [*existing, *pending], 1)
+                if hits and hits[0][0] >= _FACT_DEDUP_THRESHOLD:
+                    match_id = int(hits[0][1]["id"])
+
+            if match_id is not None:
+                conn.execute(
+                    "UPDATE coach_memory SET category = ?, content = ?, embedding = ?, "
+                    "updated_at = ? WHERE id = ?",
+                    (category, content, _pack(vec) if vec else None, now, match_id),
+                )
+                fact_id = match_id
+                deduplicated = True
+                for entry in pending:
+                    if entry["id"] == fact_id:
+                        entry["embedding"] = _pack(vec) if vec else None
+                        break
+            else:
+                cursor = conn.execute(
+                    "INSERT INTO coach_memory "
+                    "(category, content, embedding, source_session_id, pinned, active, "
+                    " created_at, updated_at) VALUES (?, ?, ?, ?, 0, 1, ?, ?)",
+                    (
+                        category,
+                        content,
+                        _pack(vec) if vec else None,
+                        source_session_id,
+                        now,
+                        now,
+                    ),
+                )
+                fact_id = int(cursor.lastrowid)
+                deduplicated = False
+                if vec:
+                    pending.append({"id": fact_id, "embedding": _pack(vec)})
+
+            conn.execute(
+                "DELETE FROM memory_vectors WHERE source_type = 'fact' AND ref_id = ?",
+                (fact_id,),
+            )
+            if vec:
+                conn.execute(
+                    "INSERT INTO memory_vectors "
+                    "(source_type, ref_id, session_id, text, embedding, created_at) "
+                    "VALUES ('fact', ?, NULL, ?, ?, ?)",
+                    (fact_id, content, _pack(vec), now),
+                )
+            stored.append(
+                {
+                    "id": fact_id,
+                    "category": category,
+                    "content": content,
+                    "deduplicated": deduplicated,
+                }
+            )
+        conn.commit()
+    finally:
+        conn.close()
+    return stored
 
 
 def list_facts(
@@ -518,24 +640,20 @@ def extract_facts_from_session(
     if not isinstance(raw_facts, list):
         return []
 
-    stored: list[dict[str, Any]] = []
+    items: list[tuple[str, str]] = []
     for item in raw_facts:
         if not isinstance(item, dict):
             continue
         content = str(item.get("content") or "").strip()
         category = str(item.get("category") or "personal").strip()
-        if not content:
-            continue
-        result = remember_fact(
-            category,
-            content,
-            ctx=ctx,
-            source_session_id=session_id,
-            db_path=db_path,
-        )
-        if "error" not in result:
-            stored.append(result)
-    return stored
+        if content:
+            items.append((category, content))
+    return remember_facts_batch(
+        items,
+        ctx=ctx,
+        source_session_id=session_id,
+        db_path=db_path,
+    )
 
 
 # --------------------------------------------------------------------------- #
@@ -622,9 +740,6 @@ def get_relevant_memory(
     query = (query or "").strip()
     if not query:
         return []
-    emb = embed_texts_sync([query], label=usage.EMBED_QUERY)
-    if not emb:
-        return []
 
     conn = _connect(db_path, ctx)
     try:
@@ -636,8 +751,17 @@ def get_relevant_memory(
         ).fetchall()
     finally:
         conn.close()
+    # Rien à comparer : inutile de payer un embedding (cas d'un athlète sans
+    # historique indexé, à chaque tour de chat).
+    if not rows:
+        return []
 
-    hits = _cosine(emb[0], rows, k)
+    try:
+        emb = _embed_query_cached(get_ollama_embed_model(), query)
+    except RuntimeError:
+        return []
+
+    hits = _cosine(list(emb), rows, k)
     return [
         {
             "source_type": row["source_type"],

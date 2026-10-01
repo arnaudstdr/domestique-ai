@@ -328,12 +328,17 @@ async def _update_memory_safely(
     def _work() -> None:
         from domestique_ai.llm import memory
 
-        if user_message_id is not None:
-            memory.index_message(user_message_id, session_id, "user", user_text, ctx=ctx)
-        if assistant_message_id is not None:
-            memory.index_message(
-                assistant_message_id, session_id, "assistant", assistant_text, ctx=ctx
+        # Un seul appel d'embeddings pour les deux messages du tour.
+        items = [
+            (mid, role, text)
+            for mid, role, text in (
+                (user_message_id, "user", user_text),
+                (assistant_message_id, "assistant", assistant_text),
             )
+            if mid is not None
+        ]
+        if items:
+            memory.index_messages_batch(session_id, items, ctx=ctx)
         if memory.should_summarize(session_id, ctx=ctx):
             memory.summarize_session(session_id, ctx=ctx)
 

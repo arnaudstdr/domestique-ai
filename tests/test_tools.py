@@ -185,6 +185,68 @@ def test_get_recent_activities_filters_window(seeded_db, freeze_today):
     assert "sport_type" in activity
 
 
+def test_get_recent_activities_caps_output(tmp_path, monkeypatch):
+    """La sortie est plafonnée aux 10 activités les plus récentes."""
+    db_path = tmp_path / "cap.db"
+    monkeypatch.setenv("DOMESTIQUE_AI_DB_PATH", str(db_path))
+    init_db(db_path)
+    conn = sqlite3.connect(db_path)
+    try:
+        for i in range(15):
+            day = dt.date(2026, 4, 1) + dt.timedelta(days=i)
+            conn.execute(
+                "INSERT INTO activities (strava_id, date, duration, training_load) "
+                "VALUES (?, ?, ?, ?)",
+                (i, day.isoformat(), 3600, 50.0),
+            )
+        conn.commit()
+    finally:
+        conn.close()
+    monkeypatch.setattr("domestique_ai.llm.tools._today", lambda: dt.date(2026, 4, 30))
+    out = get_recent_activities(days=30)
+    assert out["count"] == 10
+    assert out["total_in_window"] == 15
+    # Ce sont bien les plus récentes qui sont conservées.
+    assert out["activities"][-1]["date"] == "2026-04-15"
+
+
+def test_find_similar_activities_clamps_limit(tmp_path, monkeypatch):
+    from domestique_ai.llm.tools import find_similar_activities
+
+    monkeypatch.setenv("DOMESTIQUE_AI_DB_PATH", str(tmp_path / "similar.db"))
+    captured: dict[str, int] = {}
+
+    def fake_impl(external_id, *, limit, db_path):
+        captured["limit"] = limit
+        return {"available": False, "matches": []}
+
+    monkeypatch.setattr("domestique_ai.processing.similar.find_similar_activities", fake_impl)
+    find_similar_activities(1, limit=100)
+    assert captured["limit"] == 20
+
+
+def test_search_conversations_truncates_text(tmp_path, monkeypatch):
+    from domestique_ai.llm import memory
+    from domestique_ai.llm.tools import search_conversations
+
+    monkeypatch.setenv("DOMESTIQUE_AI_DB_PATH", str(tmp_path / "search.db"))
+    monkeypatch.setattr(
+        memory,
+        "get_relevant_memory",
+        lambda *a, **k: [
+            {
+                "source_type": "message",
+                "ref_id": 1,
+                "session_id": "s1",
+                "text": "x" * 1000,
+                "score": 0.9,
+            }
+        ],
+    )
+    out = search_conversations("q")
+    assert len(out["results"][0]["text"]) == 400
+
+
 def test_get_activity_mix_aggregates_by_sport(seeded_db, freeze_today):
     out = get_activity_mix(days=10)
     assert out["total_sessions"] == 4

@@ -24,6 +24,12 @@ from domestique_ai.processing.analyzer import (
     fetch_activities_from_db,
 )
 
+# Plafonds de sortie des tools : bornent le contexte réinjecté à chaque
+# itération de la boucle de tool-calling (les résultats s'accumulent).
+_MAX_RECENT_ACTIVITIES = 10
+_MAX_SIMILAR_ACTIVITIES = 20
+_MAX_SEARCH_CHARS = 400
+
 
 def _tsb_zone_label(tsb: float) -> str:
     """Mêmes seuils que dashboard._tsb_zone_label, sans emoji."""
@@ -95,10 +101,17 @@ def get_training_load_state(*, ctx: AthleteContext | None = None) -> dict[str, A
 
 
 def get_recent_activities(days: int = 7, *, ctx: AthleteContext | None = None) -> dict[str, Any]:
-    """Liste des activités sur les N derniers jours (fenêtre ancrée sur today)."""
+    """Liste des activités sur les N derniers jours (fenêtre ancrée sur today).
+
+    La sortie est plafonnée à ``_MAX_RECENT_ACTIVITIES`` (les plus récentes) :
+    les résultats de tools sont réinjectés à chaque itération de la boucle.
+    """
     activities = fetch_activities_from_db(ctx=ctx)
     as_of = _today()
     recent = _filter_recent(activities, days, end=as_of)
+    total_in_window = len(recent)
+    if total_in_window > _MAX_RECENT_ACTIVITIES:
+        recent = sorted(recent, key=lambda act: act.get("date") or "")[-_MAX_RECENT_ACTIVITIES:]
     out = []
     for act in recent:
         out.append(
@@ -119,6 +132,7 @@ def get_recent_activities(days: int = 7, *, ctx: AthleteContext | None = None) -
         "as_of": as_of.isoformat(),
         "days": days,
         "count": len(out),
+        "total_in_window": total_in_window,
         "activities": out,
     }
 
@@ -1199,6 +1213,7 @@ def find_similar_activities(
     )
 
     ctx = ctx or context_from_env()
+    limit = max(1, min(int(limit), _MAX_SIMILAR_ACTIVITIES))
     return _impl(external_id, limit=limit, db_path=ctx.db_path)
 
 
@@ -1230,7 +1245,10 @@ def search_conversations(
 
     ctx = ctx or context_from_env()
     hits = get_relevant_memory(query, k=limit, types=("message", "summary", "fact"), ctx=ctx)
-    return {"query": query, "results": hits, "available": bool(hits)}
+    # Tronque le texte renvoyé au LLM : le résultat est réinjecté à chaque
+    # itération de la boucle, le passage intégral peut être très long.
+    results = [{**hit, "text": (hit.get("text") or "")[:_MAX_SEARCH_CHARS]} for hit in hits]
+    return {"query": query, "results": results, "available": bool(results)}
 
 
 TOOLS["search_conversations"] = search_conversations

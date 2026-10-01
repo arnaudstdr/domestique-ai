@@ -161,9 +161,14 @@ async def chat_structured(
     model: str | None = None,
     timeout_s: float = 30.0,
     options: dict[str, Any] | None = None,
+    schema: dict[str, Any] | None = None,
     label: str | None = None,
 ) -> dict[str, Any] | None:
-    """Appel chat non-stream avec ``format="json"`` et parsing du résultat.
+    """Appel chat non-stream avec sortie JSON contrainte et parsing du résultat.
+
+    Par défaut ``format="json"`` (JSON valide non contraint). Si ``schema`` est
+    fourni (JSON Schema), il est passé en ``format`` au SDK : la décodage est
+    alors contraint au schéma, ce qui réduit fortement les retries/fallbacks.
 
     Retourne le dict parsé en cas de succès, ou ``None`` si :
     - Ollama est injoignable / refuse la requête,
@@ -182,7 +187,7 @@ async def chat_structured(
                 model=target_model,
                 messages=messages,
                 stream=False,
-                format="json",
+                format=schema if schema is not None else "json",
                 options=options or {},
             ),
             timeout=timeout_s,
@@ -225,6 +230,7 @@ def chat_structured_sync(
     model: str | None = None,
     timeout_s: float = 30.0,
     options: dict[str, Any] | None = None,
+    schema: dict[str, Any] | None = None,
     label: str | None = None,
 ) -> dict[str, Any] | None:
     """Variante synchrone de ``chat_structured``, utilisable même sous event loop.
@@ -240,6 +246,7 @@ def chat_structured_sync(
             model=model,
             timeout_s=timeout_s,
             options=options,
+            schema=schema,
             label=label,
         )
 

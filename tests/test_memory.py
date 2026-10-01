@@ -26,6 +26,11 @@ def _fake_embed(texts, *, model=None, timeout_s=30.0, label=None):
 @pytest.fixture(autouse=True)
 def _no_network(monkeypatch):
     monkeypatch.setattr(memory, "embed_texts_sync", _fake_embed)
+    # Le cache d'embeddings de requête est global au module : on le vide entre
+    # les tests pour qu'un fake ne fuite pas dans le suivant.
+    memory.clear_embedding_cache()
+    yield
+    memory.clear_embedding_cache()
 
 
 def _use_tmp_db(tmp_path, monkeypatch):
@@ -165,6 +170,57 @@ def test_index_message_is_idempotent(tmp_path, monkeypatch):
     memory.index_message(1, "s1", "user", "bonjour")
     hits = memory.get_relevant_memory("bonjour", k=5)
     assert len(hits) == 1
+
+
+def _counting_embed(calls: dict[str, int]):
+    def _embed(texts, *, model=None, timeout_s=30.0, label=None):
+        calls["n"] += 1
+        return _fake_embed(texts)
+
+    return _embed
+
+
+def test_query_embedding_is_cached(tmp_path, monkeypatch):
+    """Deux recherches identiques ne paient qu'un seul embedding."""
+    _use_tmp_db(tmp_path, monkeypatch)
+    memory.index_message(1, "s1", "user", "j'ai mal au genou droit")
+    calls = {"n": 0}
+    monkeypatch.setattr(memory, "embed_texts_sync", _counting_embed(calls))
+    memory.get_relevant_memory("genou", k=2)
+    memory.get_relevant_memory("genou", k=2)
+    assert calls["n"] == 1
+
+
+def test_get_relevant_memory_skips_embedding_when_empty(tmp_path, monkeypatch):
+    """Aucun vecteur indexé → aucun appel d'embedding (athlète sans historique)."""
+    _use_tmp_db(tmp_path, monkeypatch)
+    calls = {"n": 0}
+    monkeypatch.setattr(memory, "embed_texts_sync", _counting_embed(calls))
+    assert memory.get_relevant_memory("genou", k=2) == []
+    assert calls["n"] == 0
+
+
+def test_extract_facts_batches_embeddings(tmp_path, monkeypatch):
+    """Tous les faits d'une extraction partent dans UN appel d'embeddings."""
+    _use_tmp_db(tmp_path, monkeypatch)
+    monkeypatch.setattr(
+        memory,
+        "chat_structured_sync",
+        lambda *a, **k: {
+            "facts": [
+                {"category": "goal", "content": "Objectif cyclo en juin"},
+                {"category": "preference", "content": "Préfère rouler le matin"},
+                {"category": "constraint", "content": "Genou droit fragile"},
+            ]
+        },
+    )
+    calls = {"n": 0}
+    monkeypatch.setattr(memory, "embed_texts_sync", _counting_embed(calls))
+    session = new_session_id()
+    append_message(session, "user", {"role": "user", "content": "x"})
+    stored = memory.extract_facts_from_session(session)
+    assert len(stored) == 3
+    assert calls["n"] == 1
 
 
 def test_build_memory_block_contains_facts(tmp_path, monkeypatch):

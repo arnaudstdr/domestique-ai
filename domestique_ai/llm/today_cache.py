@@ -27,11 +27,24 @@ def _connect(db_path: Path | None = None) -> sqlite3.Connection:
     return sqlite3.connect(path)
 
 
-def objective_hash(objective: dict[str, Any] | None) -> str:
-    """Hash stable d'un objectif (dict) pour détecter une modification."""
-    if not objective:
+def objective_hash(objective: dict[str, Any] | None, available_min: int | None = None) -> str:
+    """Hash stable de la clé de cache (objectif + override de dispo éventuel).
+
+    ``available_min`` (durée explicite passée à ``propose_workout_today``) fait
+    partie de la clé : deux suggestions pour la même date avec des
+    disponibilités différentes ne doivent pas se marcher dessus. Quand il est
+    absent, on garde exactement l'ancien hash (compat des entrées existantes).
+    """
+    if not objective and available_min is None:
         return "none"
-    canonical = json.dumps(objective, ensure_ascii=False, sort_keys=True)
+    if available_min is None:
+        canonical = json.dumps(objective, ensure_ascii=False, sort_keys=True)
+    else:
+        canonical = json.dumps(
+            {"objective": objective, "available_min": available_min},
+            ensure_ascii=False,
+            sort_keys=True,
+        )
     return hashlib.sha1(canonical.encode("utf-8")).hexdigest()[:16]
 
 

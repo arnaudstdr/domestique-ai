@@ -177,6 +177,25 @@ def test_review_without_active_plan(ctx: AthleteContext) -> None:
     assert result["decision"] == "maintain"
 
 
+def test_review_without_active_plan_skips_llm_reason(
+    ctx: AthleteContext, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Pas de plan actif → aucune raison LLM à rédiger (appel gaspillé évité)."""
+    import domestique_ai.llm.weekly_review as wr
+
+    calls = {"n": 0}
+
+    def counting(report, base):
+        calls["n"] += 1
+        return "RAISON LLM"
+
+    monkeypatch.setattr(wr, "_llm_decision", counting)
+    result = run_weekly_review(_dt.date.today(), ctx=ctx, use_llm=True, force=True)
+    assert result["replanned"] is False
+    assert calls["n"] == 0
+    assert "Aucun plan actif" in result["reason"]
+
+
 def test_review_reduce_scales_durations(ctx: AthleteContext) -> None:
     today = _dt.date.today()
     last_monday = today - _dt.timedelta(days=today.weekday() + 7)

@@ -63,6 +63,8 @@ Le coach garde une mémoire **entre les sessions**, à 3 étages, dans le SQLite
 
 Intégration : `build_initial_messages()` injecte le bloc mémoire en message `system` **à chaque tour** ; `run_turn_stream()` le calcule une fois par tour. L'historique verbatim de session est plafonné à `MAX_HISTORY_MESSAGES` (24) — le résumé roulant prend le relais. Outils exposés : `remember_fact` (écriture), `search_conversations` (lecture RAG).
 
+**Économie d'embeddings** : `get_relevant_memory` court-circuite l'appel si `memory_vectors` n'a aucune ligne du type demandé (athlète sans historique), et les embeddings de requête sont mémoïsés (LRU `(model, query)`, déterministes — `clear_embedding_cache()` pour les tests). L'indexation et l'extraction de faits passent en **lot** : `index_messages_batch` pour le tour user+assistant (un appel), `remember_facts_batch` pour les faits extraits (un appel pour N faits, dédup cosine conservée y compris entre faits du lot).
+
 CRUD + UI : `GET/POST /api/coach/memory`, `PUT/DELETE /api/coach/memory/{id}`, composant `frontend/src/components/MemoryPanel.tsx` (section « Mémoire du coach » dans `/profil`, lien depuis la page Coach). `DELETE /api/coach/sessions/{id}` purge résumés + vecteurs ; les **faits durables survivent** (`source_session_id` nullifié). Backfill one-off de l'historique via flag `memory_backfill_done` (`sync_meta`), déclenché par le job scheduler. Tests : `tests/test_memory.py`, `tests/test_memory_api.py`, extensions `test_coach.py` / `test_scheduler.py`.
 
 ## Coach proactif — paliers 1 et 2 (`llm/daily_brief.py`)
@@ -72,12 +74,15 @@ Coach qui s'exprime sans être interpellé, en deux étages d'intrusion croissan
 **Palier 1 — Briefing quotidien.** `GET /api/coach/daily-brief` agrège :
 
 - TSB courant + zone (Frais / Optimal / Fatigué / Surentraîné) + CTL/ATL (repris des signaux de `propose_workout_today`, recalculés sur jour off).
-- Séance suggérée du jour (via `propose_workout_today`).
+- Séance suggérée du jour (via `propose_workout_today`). La clé du cache
+  `today_suggestions` inclut l'override de disponibilité (`available_min`) :
+  une suggestion calculée pour 60 min n'est jamais servie pour une demande à
+  120 min.
 - Alerte la plus saillante (priorité TSB chronique / strain > monotony / saut volume > dérive matinale). Les dérives matinales sont formatées côté `processing/morning_metrics.format_morning_alert` (libellés humains de `METRIC_LABELS`) — jamais de nom de colonne brut affiché à l'athlète.
 - **Enrichissements hero** : `sleep_history` (7 j, `StepPoint` `{date, hours}`), `week_tss_planned`/`week_tss_done` (compliance de la semaine courante via `compute_week_compliance`) — accompagnés de `week_adherence_pct` et des statuts `week_done`/`week_partial`/`week_missed`/`week_skipped` (repos coach) ; l'adhérence reste `None` si aucune séance n'est planifiée cette semaine (pas de « 0 % » trompeur) — et `coach_tip` (2ᵉ phrase actionnable).
 - Phrase de synthèse **+ conseil** générés par LLM (~25 mots / ~15 mots, JSON strict `{summary, tip}`, mode `chat_structured_sync`) avec **fallbacks déterministes** (`_build_fallback_summary` / `_build_fallback_tip`) si Ollama injoignable — un `coach_tip` n'est jamais vide.
 
-Cache en mémoire avec clé `(db_path, date_iso, round(tsb/5), sha1(alerts_sorted))` — un seul appel LLM par jour et par état même si le Dashboard est rouvert. Le cache des jours antérieurs est purgé au passage d'une nouvelle journée.
+Cache **persistant** (table `daily_brief_cache` du SQLite athlète, `llm/brief_cache.py`) avec clé `(date_iso, bucket TSB, sha1(alertes))` — un seul appel LLM par jour et par état, **y compris après un redémarrage du process** (l'ancien cache mémoire régénérait au boot) ; les jours antérieurs sont purgés à chaque écriture.
 
 Composant frontal : `DailyBriefCard` en tête du Dashboard (hero). Refonte visuelle : **anneau TSB** (`TsbGauge`, SVG animé, couleur par zone), **halo d'ambiance** teinté par l'état, **avatar coach** (`CoachAvatar`, halo pulsant), barre séance (durée + TSS estimé), **mini-barres sommeil** (`SleepBars`, repère baseline), ligne `coach_tip`, et **surface d'alerte unique** (primaire visible + secondaires dépliables — la carte « Signaux d'alerte » séparée a été supprimée). Animations gated `prefers-reduced-motion`. Le nom affiché dans la salutation vient du contexte `MeProvider` (`hooks/useMe.tsx`) — un seul appel `/me` partagé, plus de fetch par page.
 
@@ -147,6 +152,12 @@ idempotent) + **pre-sync Garmin** pour garantir des données fraîches, puis
   Le Plan affiche « REPOS (coach) » ou « allégée » ; la compliance la traite
   comme repos coach (pas une séance manquée). Override manuel via
   `POST /api/plan/decision`. Aucune notification Pushover pour ce check.
+- **Coût LLM** : la décision `go` ne déclenche **aucun** appel LLM (la raison
+  déterministe suffit, elle n'est pas persistée) ; le LLM ne rédige que
+  `adjust`/`rest`, avec schéma JSON passé au SDK (`chat_structured(schema=…)` →
+  `format=` contraint le décodage). Une décision **déjà persistée identique**
+  n'est pas réécrite par les recalculs `use_llm=False` du dashboard (la raison
+  raffinée par le job du matin est préservée).
 
 **Revue hebdomadaire** — `llm/weekly_review.py` + job `scheduler._weekly_review_job`
 (CronTrigger, défaut **dimanche 18h** local via `DOMESTIQUE_AI_WEEKLY_REVIEW_DAY`/
@@ -171,6 +182,9 @@ idempotent) + **pre-sync Garmin** pour garantir des données fraîches, puis
    (`use_llm=False` ou échec LLM).
 4. Idempotence : flag `weekly_review_last_week` dans `sync_meta` (une revue par
    semaine ISO). Pushover « Plan adapté » si re-plan effectué.
+   **Coût LLM** : la raison n'est rédigée que si un re-plan va effectivement
+   être tenté — les sorties anticipées (« aucun plan actif », « objectif atteint
+   ou dépassé ») ne paient aucun appel (schéma JSON contraint passé au SDK).
 
 **Versionnage** : `training_plans` a désormais `status` (`active`/`superseded`),
 `parent_plan_id`, `start_date`, `adapt_reason`. Le « plan actif » est résolu par

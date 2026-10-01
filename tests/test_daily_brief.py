@@ -21,8 +21,9 @@ from domestique_ai.llm.daily_brief import (
 
 
 @pytest.fixture(autouse=True)
-def _isolated_cache():
-    """Réinitialise le cache entre chaque test."""
+def _isolated_cache(tmp_path, monkeypatch):
+    """Isole le cache persistant : DB temporaire par test."""
+    monkeypatch.setenv("DOMESTIQUE_AI_DB_PATH", str(tmp_path / "brief.db"))
     clear_cache()
     yield
     clear_cache()
@@ -262,13 +263,18 @@ def test_build_daily_brief_refresh_bypasses_cache(stable_signals, monkeypatch):
     assert fresh["source"] == "llm"
 
 
-def test_build_daily_brief_purges_old_cache_keys(stable_signals, monkeypatch):
+def test_build_daily_brief_purges_old_cache_keys(stable_signals, monkeypatch, tmp_path):
+    from domestique_ai.llm import brief_cache
+
     monkeypatch.setattr(daily_brief, "_generate_brief_with_llm", lambda s: {"summary": "x"})
     build_daily_brief(today=dt.date(2026, 5, 20))
     build_daily_brief(today=dt.date(2026, 5, 21))
-    # Le cache ne doit plus contenir d'entrée pour la veille.
-    # Clé = (db_path, date ISO, bucket TSB, hash alertes) → la date est en [1].
-    assert all(key[1] == "2026-05-21" for key in daily_brief._BRIEF_CACHE)
+    # Le cache ne doit plus contenir d'entrée pour la veille (purge au save).
+    db = tmp_path / "brief.db"
+    tsb_bucket = _round_tsb(5.2)
+    alerts_hash = _hash_alerts([])
+    assert brief_cache.load("2026-05-20", tsb_bucket, alerts_hash, db_path=db) is None
+    assert brief_cache.load("2026-05-21", tsb_bucket, alerts_hash, db_path=db) is not None
 
 
 # ---------- coach tip --------------------------------------------------------

@@ -325,6 +325,19 @@ def init_db(db_path: Path | None = None, *, ctx: AthleteContext | None = None) -
                 PRIMARY KEY (date, objective_hash, tsb_rounded)
             )
         """)
+        # Cache du brief quotidien (palier 1) : persiste pour survivre aux
+        # redémarrages process (l'ancien cache était en mémoire uniquement).
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS daily_brief_cache (
+                date TEXT NOT NULL,
+                tsb_rounded REAL NOT NULL,
+                alerts_hash TEXT NOT NULL,
+                payload TEXT NOT NULL,
+                source TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                PRIMARY KEY (date, tsb_rounded, alerts_hash)
+            )
+        """)
         conn.execute("""
             CREATE TABLE IF NOT EXISTS sync_meta (
                 key TEXT PRIMARY KEY,

@@ -223,7 +223,7 @@ def _llm_decision(report: dict[str, Any], base: tuple[str, float, str]) -> str:
         result = chat_structured_sync(
             messages,
             timeout_s=15.0,
-            options={"format": schema},
+            schema=schema,
             label=usage.WEEKLY_REVIEW_REASON,
         )
         if isinstance(result, dict) and result.get("reason"):
@@ -307,8 +307,8 @@ def run_weekly_review(
 
     report = collect_week_report(today, ctx)
     base = _fallback_decision(report)
-    reason = _llm_decision(report, base) if use_llm else base[2]
     action, volume_factor, _base_reason = base
+    reason = base[2]
 
     result: dict[str, Any] = {
         "skipped": False,
@@ -343,6 +343,13 @@ def run_weekly_review(
         result["reason"] = "Objectif atteint ou dépassé — pas de re-plan."
         set_sync_meta(_WEEKLY_REVIEW_FLAG, week_key, ctx.db_path)
         return result
+
+    # Le LLM ne rédige la raison que si un re-plan va effectivement être tenté :
+    # les sorties anticipées ci-dessus (pas de plan, objectif dépassé) ne
+    # doivent pas payer un appel inutile dont le résultat serait écrasé.
+    if use_llm:
+        reason = _llm_decision(report, base)
+        result["reason"] = reason
 
     try:
         activities = fetch_activities_from_db(ctx=ctx)

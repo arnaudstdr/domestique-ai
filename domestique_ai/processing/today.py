@@ -690,7 +690,9 @@ def propose_workout_today(
 
     dossier = _build_decision_dossier(target, availability, available_min, ctx)
 
-    obj_hash = today_cache.objective_hash(dossier.get("objective"))
+    # L'override de dispo fait partie de la clé : une suggestion calculée pour
+    # 60 min ne doit pas être servie pour une demande à 120 min.
+    obj_hash = today_cache.objective_hash(dossier.get("objective"), available_min)
     tsb_key = today_cache.round_tsb(dossier["tsb"])
     cache_key = (target.isoformat(), obj_hash, tsb_key)
 
