@@ -325,12 +325,14 @@ def get_morning_trends(days: int = 30, *, ctx: AthleteContext | None = None) -> 
     for metric in METRIC_COLUMNS:
         b = compute_baselines(metric, db_path=ctx.db_path)
         if b.get("available"):
+            # Sortie compacte : `sample_size` (métadonnée non citable) est
+            # écarté et la baseline arrondie à 1 décimale — le coach cite
+            # `latest`/`delta_pct`/alertes, pas le nombre de points.
             baselines[metric] = {
-                "baseline_14d": round(b["baseline"], 2),
+                "baseline_14d": round(b["baseline"], 1),
                 "latest": b["latest"],
                 "latest_date": b["latest_date"],
                 "delta_pct": round(b["delta_pct"], 1),
-                "sample_size": b["sample_size"],
             }
 
     from domestique_ai.processing.morning_metrics import (
@@ -396,11 +398,14 @@ def get_nutrition_context(days: int = 14, *, ctx: AthleteContext | None = None) 
     week = _filter_recent(activities, 7, end=as_of)
 
     def _session(act: dict[str, Any]) -> dict[str, Any]:
+        load = act.get("training_load")
         return {
             "date": act.get("date"),
             "sport_type": act.get("sport_type"),
             "duration_min": round((act.get("duration") or 0) / 60),
-            "training_load": act.get("training_load"),
+            # Charge arrondie à l'entier : le coach n'a pas besoin de la
+            # décimale pour ancrer son conseil (sortie plus compacte).
+            "training_load": round(load) if isinstance(load, (int, float)) else None,
         }
 
     longest = max(recent, key=lambda a: a.get("duration") or 0, default=None)

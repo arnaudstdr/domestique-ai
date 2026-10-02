@@ -146,6 +146,21 @@ def test_get_morning_trends_exposes_weight_and_wkg(seeded_db):
     assert result["latest_advanced"]["wkg"] == round(250.0 / 70.0, 2)
 
 
+def test_get_morning_trends_baselines_stay_compact(seeded_db):
+    """Baselines : 1 décimale, sans métadonnée `sample_size` (prompt plus court)."""
+    from domestique_ai.processing.morning_metrics import save_morning_entry
+
+    for day, hrv in (("2026-04-27", 50.11), ("2026-04-28", 52.22), ("2026-04-30", 54.33)):
+        save_morning_entry(day, hrv_ms=hrv, db_path=seeded_db)
+
+    result = get_morning_trends(days=30)
+    hrv = result["baselines"].get("hrv_ms")
+    assert hrv is not None
+    assert "sample_size" not in hrv
+    assert hrv["baseline_14d"] == round(hrv["baseline_14d"], 1)
+    assert hrv["latest"] == 54.33
+
+
 def test_propose_workout_today_dispatchable(tmp_path, monkeypatch):
     """Le tool est dispatchable et renvoie le contrat attendu."""
     monkeypatch.setenv("DOMESTIQUE_AI_DB_PATH", str(tmp_path / "today.db"))
@@ -272,6 +287,7 @@ def test_get_nutrition_context_exposes_facts(seeded_db, freeze_today):
     assert out["sessions_count"] == 4
     assert out["longest_session"] is not None
     assert out["hardest_session"] is not None
+    assert isinstance(out["hardest_session"]["training_load"], int)
     assert "weekly_tss_7d" in out
 
 
