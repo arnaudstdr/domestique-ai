@@ -814,6 +814,17 @@ def get_tcx_max_files() -> int:
     return _int_env_min("DOMESTIQUE_AI_TCX_MAX_FILES", 20)
 
 
+def get_trusted_proxy() -> bool:
+    """Fait confiance à ``X-Forwarded-For`` pour l'IP client (``DOMESTIQUE_AI_TRUSTED_PROXY``).
+
+    Défaut ``False`` : l'en-tête est ignoré car spoofable en accès direct. À
+    activer uniquement quand l'app tourne derrière un reverse proxy qui
+    écrase/normalise ``X-Forwarded-For`` — sinon le rate-limit par IP est
+    contournable en forgeant l'en-tête.
+    """
+    return _env_enabled("DOMESTIQUE_AI_TRUSTED_PROXY", default=False)
+
+
 def get_calendar_feed_key() -> str | None:
     """Clé secrète du flux d'abonnement iCalendar (``DOMESTIQUE_AI_CALENDAR_FEED_KEY``).
 

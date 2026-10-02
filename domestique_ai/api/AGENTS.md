@@ -300,6 +300,9 @@ stockant une **data URL** `data:image/<type>;base64,…`, `NULL` par défaut.
   webcal `?key=` dans les logs).
 - **Sentry** — `_scrub_sentry_event` (`before_send`) retire la query string et
   le header `Authorization` des événements, même quand `SENTRY_SEND_PII=1`.
+- **Cache** — `CacheControlMiddleware` force `Cache-Control: no-store` sur
+  toutes les réponses `/api/*` (données privées : plans, exports, santé), en
+  plus de l'`immutable` des assets et du `no-cache` de l'app shell.
 
 ## Inscription publique, vérification d'email, lien coach & mot de passe oublié
 
@@ -342,7 +345,16 @@ est dans `platform_db.py`, les endpoints dans `api/routers/auth.py`.
 - **Rate-limiting** — `domestique_ai/ratelimit.py` (fenêtre glissante
   in-process) sur `signup` (IP), `forgot-password` (IP + email),
   `resend-verification` (user). 429 au dépassement. État par process (single
-  worker uvicorn) ; `X-Forwarded-For` non géré (à faire derrière proxy).
+  worker uvicorn). Derrière un reverse proxy, activer
+  `DOMESTIQUE_AI_TRUSTED_PROXY=1` : l'IP client est alors lue dans
+  `X-Forwarded-For` (premier hop) ; à ne pas activer en accès direct (en-tête
+  spoofable).
+- **Ré-enrôlement TOTP** — `POST /api/auth/totp/enroll` : si une 2FA est déjà
+  active, l'écrasement du secret exige une ré-authentification
+  (`TotpEnrollRequest` : mot de passe courant si le compte en a un + code TOTP
+  ou code de secours valide) — un simple vol de session ne suffit pas. Le
+  bootstrap reste exempté (break-glass). L'enrôlement initial (2FA inactive)
+  reste sans body.
 - **Suppression de son compte** — `DELETE /api/auth/me` (authentifié,
   `DeleteAccountRequest`) : confirmation forte — mot de passe si le compte en a
   un + code TOTP/code de secours si la 2FA est active. Refuse le bootstrap

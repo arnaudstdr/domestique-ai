@@ -47,3 +47,35 @@ def test_client_ip_fallback() -> None:
         client = None
 
     assert ratelimit.client_ip(_Req()) == "unknown"
+
+
+def test_client_ip_ignores_xff_by_default(monkeypatch) -> None:
+    """Sans proxy de confiance, l'en-tête spoofable est ignoré."""
+    monkeypatch.delenv("DOMESTIQUE_AI_TRUSTED_PROXY", raising=False)
+
+    class _Req:
+        client = type("C", (), {"host": "10.0.0.1"})()
+        headers = {"x-forwarded-for": "1.2.3.4, 10.0.0.1"}
+
+    assert ratelimit.client_ip(_Req()) == "10.0.0.1"
+
+
+def test_client_ip_uses_xff_when_trusted(monkeypatch) -> None:
+    """Derrière un proxy de confiance, on prend le premier hop (le client)."""
+    monkeypatch.setenv("DOMESTIQUE_AI_TRUSTED_PROXY", "1")
+
+    class _Req:
+        client = type("C", (), {"host": "10.0.0.1"})()
+        headers = {"x-forwarded-for": "1.2.3.4, 10.0.0.1"}
+
+    assert ratelimit.client_ip(_Req()) == "1.2.3.4"
+
+
+def test_client_ip_empty_xff_falls_back(monkeypatch) -> None:
+    monkeypatch.setenv("DOMESTIQUE_AI_TRUSTED_PROXY", "1")
+
+    class _Req:
+        client = type("C", (), {"host": "10.0.0.1"})()
+        headers = {"x-forwarded-for": "   "}
+
+    assert ratelimit.client_ip(_Req()) == "10.0.0.1"

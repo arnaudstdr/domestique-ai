@@ -7,8 +7,9 @@ spam SMTP, énumération).
 Limitations assumées : l'état vit dans le process. En single-worker uvicorn
 (cas de l'app) c'est suffisant ; en multi-worker, chaque worker a son propre
 compteur. Derrière un reverse proxy, ``request.client.host`` peut être l'IP du
-proxy — l'exploitation d'un en-tête ``X-Forwarded-For`` authentifié reste à
-faire si l'app est exposée derrière un proxy.
+proxy — activer ``DOMESTIQUE_AI_TRUSTED_PROXY=1`` pour que l'IP client soit lue
+dans ``X-Forwarded-For`` (premier hop), à ne faire que si le proxy écrase
+l'en-tête : sinon il est spoofable en accès direct.
 """
 
 from __future__ import annotations
@@ -17,12 +18,26 @@ import threading
 import time
 from collections import defaultdict, deque
 
+from domestique_ai.config import get_trusted_proxy
+
 _LOCK = threading.Lock()
 _HITS: dict[tuple[str, str], deque[float]] = defaultdict(deque)
 
 
 def client_ip(request) -> str:
-    """IP du client (fallback ``"unknown"`` si indisponible)."""
+    """IP du client (fallback ``"unknown"`` si indisponible).
+
+    Lit ``X-Forwarded-For`` (premier hop = client) uniquement quand
+    ``DOMESTIQUE_AI_TRUSTED_PROXY`` est activé ; sinon retombe sur
+    ``request.client.host`` pour ne pas se faire spoof un en-tête.
+    """
+    if get_trusted_proxy():
+        headers = getattr(request, "headers", None)
+        forwarded = headers.get("x-forwarded-for") if headers is not None else None
+        if forwarded:
+            first = forwarded.split(",")[0].strip()
+            if first:
+                return first
     client = getattr(request, "client", None)
     host = getattr(client, "host", None)
     return host or "unknown"

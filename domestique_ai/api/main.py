@@ -281,8 +281,8 @@ class CacheControlMiddleware:
       fois (ETag/Last-Modified de Starlette). Cela évite un ``index.html`` figé
       — notamment sur iOS/PWA — sans casser le fallback offline, le service
       worker gardant sa propre copie en Cache Storage.
-
-    L'API (``/api/*``) n'est jamais touchée (auth, SSE du coach, données perso).
+    - API (``/api/*``) → ``no-store`` : réponses privées (plans, exports,
+      données de santé) qui ne doivent jamais finir dans un cache partagé.
     """
 
     _IMMUTABLE_PREFIX = "/assets/"
@@ -300,11 +300,12 @@ class CacheControlMiddleware:
         return None
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
-        if scope["type"] != "http" or scope["path"].startswith("/api/"):
+        if scope["type"] != "http":
             await self.app(scope, receive, send)
             return
 
-        fixed = self._header_value(scope["path"])
+        path = scope["path"]
+        fixed = "no-store" if path.startswith("/api/") else self._header_value(path)
 
         async def send_with_cache(message: Message) -> None:
             if message["type"] == "http.response.start":

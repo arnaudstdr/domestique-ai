@@ -13,6 +13,7 @@ authors = [{ name = "Arnaud Stadler" }]
 dependencies = [
     "pandas>=2.2",
     "requests>=2.32",
+    "urllib3>=2.8.0",
     "python-dotenv>=1.1",
     "ollama>=0.4",
     "pyyaml>=6",

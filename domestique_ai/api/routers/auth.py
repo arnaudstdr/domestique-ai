@@ -237,6 +237,11 @@ class TotpVerifyRequest(BaseModel):
     code: str
 
 
+class TotpEnrollRequest(BaseModel):
+    password: str | None = None
+    code: str | None = None
+
+
 class TotpVerifyResponse(BaseModel):
     recovery_codes: list[str]
 
@@ -457,6 +462,35 @@ def _consume_recovery_code(user_id: int, code: str) -> bool:
             mark_recovery_code_used(row["id"])
             return True
     return False
+
+
+def _require_totp_reauth(user: dict, body: TotpEnrollRequest | None) -> None:
+    """Exige la ré-auth avant de remplacer une 2FA déjà active (vuln-0001).
+
+    Mot de passe courant si le compte en a un, plus un code TOTP courant ou un
+    code de secours. Empêche qu'un simple vol de session (XSS, token leak)
+    remplace silencieusement le second facteur de la victime.
+    """
+    if body is None:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Ré-authentification requise pour remplacer la 2FA active.",
+        )
+    if user.get("has_password"):
+        _require_password(user["id"], body.password or "")
+    creds = get_user_credentials(user["id"])
+    code = (body.code or "").strip()
+    code_ok = False
+    if code:
+        if creds and creds["totp_secret"]:
+            code_ok = security.verify_totp(creds["totp_secret"], code)
+        if not code_ok:
+            code_ok = _consume_recovery_code(user["id"], code)
+    if not code_ok:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Code 2FA ou code de secours invalide.",
+        )
 
 
 def _locked_error() -> HTTPException:
@@ -899,8 +933,18 @@ def accept_invite_link(
 
 
 @router.post("/totp/enroll", response_model=TotpEnrollResponse)
-def totp_enroll(user: dict = Depends(get_current_user)) -> TotpEnrollResponse:  # noqa: B008
-    """Génère un secret TOTP non confirmé + QR à scanner. À confirmer via /totp/verify."""
+def totp_enroll(
+    body: TotpEnrollRequest | None = None,
+    user: dict = Depends(get_current_user),  # noqa: B008
+) -> TotpEnrollResponse:
+    """Génère un secret TOTP non confirmé + QR à scanner. À confirmer via /totp/verify.
+
+    Si une 2FA est déjà active, l'enrôlement (qui remplace le secret) exige une
+    ré-authentification — mot de passe courant + code TOTP/code de secours — cf.
+    ``_require_totp_reauth``. Le bootstrap reste exempté (break-glass).
+    """
+    if user.get("totp_enabled") and not user.get("is_bootstrap"):
+        _require_totp_reauth(user, body)
     secret = security.new_totp_secret()
     set_totp_secret(user["id"], secret)
     account = user.get("email") or user["public_id"][:8]

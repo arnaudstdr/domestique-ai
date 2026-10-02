@@ -26,7 +26,8 @@ Endpoints consommés : `domestique_ai/api/AGENTS.md`. Données/coach :
   n'est intercepté par aucune route et part directement sur le réseau (jamais
   mis en cache).
 - **Headers HTTP** : `domestique_ai/api/main.py` (`CacheControlMiddleware`) sert
-  les `/assets/*` en `immutable` et l'app shell / HTML en `no-cache`.
+  les `/assets/*` en `immutable`, l'app shell / HTML en `no-cache` et les
+  `/api/*` en `no-store` (réponses privées).
 - Dev : `cd frontend && npm run dev` → Vite écoute sur **5173** et proxy `/api`
   vers `http://localhost:8501`. Build : `npm run build` (FastAPI sert ensuite le
   bundle sur le port 8501).

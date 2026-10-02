@@ -26,7 +26,7 @@ data — and **rewrites your plan week after week** as your body responds.
 <br/>
 ![CI](https://github.com/arnaudstdr/domestique-ai/actions/workflows/ci.yml/badge.svg)
 [![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
-![Tests](https://img.shields.io/badge/tests-1077-success)
+![Tests](https://img.shields.io/badge/tests-1082-success)
 ![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)
 
 <br/>
@@ -337,7 +337,7 @@ Postgres would add operational weight for no benefit at this scale.
 
 ## Quality &amp; rigor
 
-- **1,077 tests across 66 modules** — load math, HR zones, Garmin ingestion
+- **1,082 tests across 66 modules** — load math, HR zones, Garmin ingestion
   (mocked, no network), Google Health, de-duplication, FIT/ICS export, webcal,
   coach tools and memory, overtraining, trends, plan generation and its
   validators, the adaptive daily/weekly loops, the similar-ride engine and the
@@ -382,6 +382,23 @@ high issue and no auth bypass. Every medium finding was fixed or mitigated:
 | Per-athlete calendar `feed_token` in the URL query string | Medium | No access log, Sentry scrubbing, `Authorization: Bearer` supported |
 | Coach bulk-export of an athlete's plan without trace | Medium | `plan_export_ics` / `plan_export_zip` recorded in the audit log |
 | `server: uvicorn` fingerprint header | Info | `--no-server-header` on every launch |
+
+A second run in **standard** mode (same day, through a local headroom proxy that
+compresses the context) went deeper — static analysis (semgrep, gitleaks,
+trivy) plus dynamic validation, OWASP WSTG style. Still no critical or high
+finding, and the first-run fixes held. New hardening items were fixed:
+
+| Finding | Severity | Resolution |
+| - | - | - |
+| Active 2FA could be silently replaced by calling `/totp/enroll` | Medium | Re-enrollment now requires the current password + TOTP/recovery code |
+| Per-IP rate limiting bypassable behind a proxy (`X-Forwarded-For` ignored) | Medium | Client IP read from `X-Forwarded-For` behind `DOMESTIQUE_AI_TRUSTED_PROXY=1` |
+| Missing `Cache-Control` on private API responses | Info | Every `/api/*` response is `Cache-Control: no-store` |
+| Vulnerable dependencies (urllib3 2.7.0, react-router 6.30.3) | High/Medium | Bumped to urllib3 2.8.0 and react-router-dom 6.30.6 |
+
+Known and accepted: the calendar feed token stays in the URL query for
+Apple/Google Calendar compatibility (a `Bearer` header is also accepted), and
+the legacy break-glass token has no application-level revocation — rotate it by
+changing `DOMESTIQUE_AI_API_TOKEN`.
 
 ---
 

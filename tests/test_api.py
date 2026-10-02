@@ -44,6 +44,13 @@ def test_health(client: TestClient) -> None:
     assert r.json() == {"status": "ok"}
 
 
+def test_api_responses_are_not_cacheable(client: TestClient) -> None:
+    """Les réponses /api/* sont privées → no-store (vuln-0005)."""
+    r = client.get("/api/health")
+    assert r.status_code == 200
+    assert r.headers.get("cache-control") == "no-store"
+
+
 def test_metrics_load_empty(client: TestClient) -> None:
     r = client.get("/api/metrics/load")
     assert r.status_code == 200

@@ -622,3 +622,41 @@ def test_delete_own_account_removes_athlete_data_dir(
     )
     assert r.status_code == 204, r.text
     assert not db_path.parent.exists()
+
+
+def test_totp_reenroll_requires_reauth_when_2fa_active(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Remplacer une 2FA active exige la ré-auth (vuln-0001) : un vol de session ne suffit pas."""
+    import pyotp
+
+    monkeypatch.setenv("DOMESTIQUE_AI_SIGNUP_ENABLED", "1")
+    body = _signup(client, role="athlete", email="a@b.c").json()
+    _enable_totp(body["public_id"])
+    headers = _bearer(body["session_token"])
+
+    # Sans ré-auth → refusé.
+    assert client.post("/api/auth/totp/enroll", headers=headers).status_code == 403
+    # Mauvais mot de passe → refusé.
+    r = client.post(
+        "/api/auth/totp/enroll",
+        json={"password": "mauvais-mot-de-passe", "code": "abcdef"},
+        headers=headers,
+    )
+    assert r.status_code == 401
+    # Bon mot de passe mais code invalide → refusé.
+    r = client.post(
+        "/api/auth/totp/enroll",
+        json={"password": _STRONG_PASSWORD, "code": "abcdef"},
+        headers=headers,
+    )
+    assert r.status_code == 403
+    # Ré-auth complète → nouveau secret.
+    code = pyotp.TOTP("JBSWY3DPEHPK3PXP").now()
+    r = client.post(
+        "/api/auth/totp/enroll",
+        json={"password": _STRONG_PASSWORD, "code": code},
+        headers=headers,
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["secret"]
