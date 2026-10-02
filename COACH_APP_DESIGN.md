@@ -5,7 +5,14 @@ suivi coach (humain) ↔ athlète, construite en faisant évoluer
 [domestique-ai](./README.md) vers un **backend commun multi-tenant** servant
 **deux frontends**.
 
-> **Statut** : document de conception. Aucun code n'a encore été écrit.
+> **Statut** : document de conception **partiellement implémenté**.
+> Le socle multi-tenant, les rôles et invitations, le roster, les prescriptions et
+> le panneau admin existent désormais dans le monorepo (voir
+> `domestique_ai/api/AGENTS.md`). Deux choix décrits ici n'ont **pas** été retenus :
+> le **second frontend `frontend-coach/`** (le coach utilise le front unique en
+> consultation lecture seule via `useViewing`) et l'**onboarding Strava**
+> (Strava a été retiré en 09/2026 — Garmin Connect est la source d'ingestion).
+> Les sections ci-dessous restent la trace de la conception d'origine.
 > Nom du front coach : **`roster`** — le coach gère son *roster* d'athlètes.
 
 ---
@@ -14,8 +21,8 @@ suivi coach (humain) ↔ athlète, construite en faisant évoluer
 
 domestique-ai est un coach IA **mono-utilisateur** : un athlète, sa base SQLite,
 ses tokens Strava, son profil. Le déploiement multi-utilisateur existant
-(`MULTI_USER_DEPLOY.md`) fonctionne par **isolation totale** — un conteneur par
-personne, sans aucune visibilité croisée (« c'est voulu »).
+fonctionne par **isolation totale** — un conteneur par personne, sans aucune
+visibilité croisée (« c'est voulu »).
 
 Le besoin exprimé casse précisément cette isolation : un **coach humain** suit
 plusieurs athlètes de son entourage, leur donne des séances, et veut voir quand
@@ -200,7 +207,7 @@ schéma : c'est le moteur existant qui écrit dedans via l'`AthleteContext`.
 | Réutilise le moteur **quasi sans le toucher** | Le moteur prend déjà un `db_path` ; pas besoin d'ajouter un `athlete_id` à chaque requête. |
 | Isolation forte | Une fuite de requête ne peut pas exposer les données d'un autre athlète. |
 | Sauvegarde/suppression triviale | Supprimer un athlète = supprimer son fichier + ses lignes plateforme. |
-| Modèle déjà éprouvé en prod | `MULTI_USER_DEPLOY.md` tourne déjà ainsi. |
+| Modèle déjà éprouvé en prod | Le déploiement « un conteneur / une base par athlète » tourne déjà ainsi. |
 
 | Limite | Mitigation |
 | --- | --- |
@@ -393,8 +400,8 @@ suite selon son retour réel.
 
 - SQLite vs Postgres pour la DB plateforme (SQLite suffit, Postgres si ouverture).
 - Hébergement (même RPi que domestique-ai — probable).
-- App Strava : réutiliser la même (quota partagé, cf. `MULTI_USER_DEPLOY.md`) vs
-  app dédiée.
+- Ingestion des activités : Garmin Connect par athlète (choix retenu) — Strava
+  a été retiré en 09/2026, les imports TCX/manuel couvrent le reste.
 - Servir les deux fronts : chemins distincts derrière le même backend vs ports
   distincts vs sous-domaines Tailscale.
 - Vue « charge agrégée » multi-athlètes pour le coach, ou un athlète à la fois ?
@@ -407,7 +414,7 @@ suite selon son retour réel.
 | --- | --- |
 | Refactor config sous-estimé (beaucoup d'appelants) | S'appuyer sur la suite de tests existante ; faire le refactor isolément, en gardant le mode mono rétrocompatible. |
 | Backend multi-tenant introduit des fuites de données entre athlètes | Isolation par DB + contrôle d'accès strict côté API (athlète = sa base ; coach = ses athlètes liés seulement). À tester explicitement. |
-| Quota Strava partagé entre tous les athlètes | Rester sous 1000 req/jour ; espacer les backfills (cf. limites de `MULTI_USER_DEPLOY.md`). |
+| Backfills Garmin lourds pour plusieurs athlètes | Espacer les backfills et s'appuyer sur l'auto-sync anti-chevauchement ; Garmin Connect n'a pas de quota tiers partagé. |
 | Couplage des deux fronts à un seul backend | Acceptable et voulu (source de vérité unique). Versionner l'`/api` proprement pour éviter qu'un changement coach casse le front athlète. |
 | Collision « coach » (LLM vs humain) | Nommer explicitement (`assistant` pour le LLM) dès le code. |
 | Régression du mode mono domestique-ai | Le contexte par défaut depuis l'env doit rester un chemin testé en CI. |

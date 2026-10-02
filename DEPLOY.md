@@ -53,13 +53,15 @@ Depuis ta machine de dev, copier les fichiers locaux vers le RPi (remplacer `<rp
 # Secrets / config (inclut DOMESTIQUE_AI_API_TOKEN)
 scp .env <rpi>:~/domestique-ai/.env
 
-# Données persistantes (DB, tokens Strava, objectif)
+# Données persistantes (DB activités du coach, objectif)
 scp data/strava_activities.db <rpi>:~/domestique-ai/data/
-scp data/.strava_tokens.json   <rpi>:~/domestique-ai/data/
 scp data/objective.yaml        <rpi>:~/domestique-ai/data/
 ```
 
-> Les tokens Strava se rafraîchissent automatiquement côté app — pas besoin de rejouer le flow OAuth sur le RPi.
+> Les connexions **Garmin Connect / Google Health sont par athlète** et se
+> rétablissent depuis l'UI après le déploiement (Réglages → Garmin Connect,
+> page Santé → Google Health) ; leurs tokens restent dans
+> `data/athletes/<public_id>/` et n'ont pas à être copiés.
 
 ## Étape 3 — Build et démarrage
 
@@ -71,7 +73,8 @@ docker compose up -d --build
 docker compose logs -f          # vérifier que FastAPI démarre (port 8501)
 ```
 
-Le premier build prend quelques minutes (compilation pandas/pyarrow en ARM64).
+Le premier build prend quelques minutes (installation des dépendances Python et
+build du front React en ARM64).
 
 ### 3.1 — Créer le compte coach (bootstrap)
 
@@ -199,7 +202,7 @@ Points de contrôle après migration :
 ### 3.3 — Connexions Garmin / Google Health (par athlète)
 
 Depuis l'isolation multi-tenant, chaque athlète connecte **ses propres** sources
-depuis sont interface ; il n'y a plus de compte global partagé :
+depuis son interface ; il n'y a plus de compte global partagé :
 
 - **Garmin Connect** : Réglages → **Garmin Connect** → email + mot de passe, puis
   code MFA si demandé. Les credentials vont en DB plateforme
@@ -251,7 +254,7 @@ docker compose down
 
 ## Sauvegarde
 
-Tout l'état persistant tient dans `./data/` (DB SQLite + tokens Strava + objectif). Un simple `tar czf backup.tgz data/` suffit.
+Tout l'état persistant tient dans `./data/` : `platform.db` (comptes, sessions, invitations), une DB SQLite d'activités par athlète (`data/athletes/<public_id>/`), les tokens Garmin / Google Health par athlète et les YAML d'objectif. Un simple `tar czf backup.tgz data/` suffit.
 
 ## Notes
 
