@@ -88,14 +88,14 @@ pytest tests/test_garmin.py -x   # stoppe au premier échec
 python -m domestique_ai.export.garmin_connect
 
 # Backend API FastAPI (production / runtime principal)
-uvicorn domestique_ai.api.main:app --reload --port 8501
+uvicorn domestique_ai.api.main:app --reload --no-server-header --no-access-log --port 8501
 
 # Frontend React PWA (dev — dans un autre terminal)
 cd frontend && npm install && npm run dev   # → http://localhost:5173
 
 # Build complet (FastAPI sert ensuite le bundle React via StaticFiles)
 cd frontend && npm run build
-uvicorn domestique_ai.api.main:app --port 8501   # → http://localhost:8501
+uvicorn domestique_ai.api.main:app --no-server-header --no-access-log --port 8501   # → http://localhost:8501
 ```
 
 ## Stack web
@@ -119,6 +119,12 @@ L'UI est une **PWA FastAPI + React** (Streamlit a été retiré) :
   documenté ici est **fictif** — il n'existe pas dans le code. L'export se fait
   par téléchargement ZIP (fichiers `.FIT`) / ICS depuis la page Plan. Le token
   Garmin est seedé une fois via `python -m domestique_ai.export.garmin_connect`.
+- **Durcissement API** (audit Strix 10/2026) : doc Swagger/OpenAPI désactivée
+  (`docs_url=None`…), middleware `BodySizeLimitMiddleware` (413 au-delà de 64 Mo),
+  caps import TCX (`DOMESTIQUE_AI_TCX_MAX_FILE_MB`, `DOMESTIQUE_AI_TCX_MAX_FILES`),
+  uvicorn lancé avec `--no-server-header --no-access-log`, scrub Sentry (query
+  string + `Authorization`) et exports de plan tracés (`admin_audit`). Détail :
+  `domestique_ai/api/AGENTS.md`.
 
 ## Architecture
 

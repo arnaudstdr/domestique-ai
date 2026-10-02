@@ -777,6 +777,43 @@ def get_api_token() -> str | None:
     return raw.strip() if raw and raw.strip() else None
 
 
+def _int_env_min(name: str, default: int, minimum: int = 1) -> int:
+    """Lecture d'un entier d'env borné par ``minimum`` (fallback ``default``)."""
+    raw = os.getenv(name)
+    if raw is None or raw.strip() == "":
+        return default
+    try:
+        value = int(raw)
+    except ValueError:
+        logger.warning("%s=%r invalide — fallback %d.", name, raw, default)
+        return default
+    return max(minimum, value)
+
+
+def get_max_request_body_mb() -> int:
+    """Taille maximale d'un corps de requête HTTP, en Mo.
+
+    ``DOMESTIQUE_AI_MAX_REQUEST_BODY_MB`` (défaut 64). Contrôlée sur le
+    ``Content-Length`` par ``BodySizeLimitMiddleware`` — refuse une requête
+    avant que Starlette ne bufferise son multipart en mémoire.
+    """
+    return _int_env_min("DOMESTIQUE_AI_MAX_REQUEST_BODY_MB", 64)
+
+
+def get_tcx_max_file_mb() -> int:
+    """Taille maximale d'un fichier TCX importé, en Mo.
+
+    ``DOMESTIQUE_AI_TCX_MAX_FILE_MB`` (défaut 5). Au-delà, le fichier est
+    rejeté individuellement — le reste du lot continue.
+    """
+    return _int_env_min("DOMESTIQUE_AI_TCX_MAX_FILE_MB", 5)
+
+
+def get_tcx_max_files() -> int:
+    """Nombre maximal de fichiers par import TCX (``DOMESTIQUE_AI_TCX_MAX_FILES``, défaut 20)."""
+    return _int_env_min("DOMESTIQUE_AI_TCX_MAX_FILES", 20)
+
+
 def get_calendar_feed_key() -> str | None:
     """Clé secrète du flux d'abonnement iCalendar (``DOMESTIQUE_AI_CALENDAR_FEED_KEY``).
 

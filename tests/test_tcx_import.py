@@ -181,3 +181,49 @@ def test_import_tcx_endpoint_reports_parse_error(client: TestClient) -> None:
     body = r.json()
     assert body["errors"] == 1
     assert body["results"][0]["status"] == "error"
+
+
+def test_import_tcx_rejects_oversized_file(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Un fichier au-delà du plafond est rejeté sans être parsé ni persisté."""
+    monkeypatch.setenv("DOMESTIQUE_AI_TCX_MAX_FILE_MB", "1")
+    big = b"<TrainingCenterDatabase>" + b"x" * (1024 * 1024)
+    r = client.post(
+        "/api/activities/import/tcx",
+        files=[("files", ("big.tcx", big, "application/xml"))],
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert body["imported"] == 0
+    assert body["errors"] == 1
+    assert body["results"][0]["status"] == "error"
+    assert "volumineux" in body["results"][0]["reason"]
+
+
+def test_import_tcx_rejects_too_many_files(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Le nombre de fichiers par import est borné (413)."""
+    monkeypatch.setenv("DOMESTIQUE_AI_TCX_MAX_FILES", "1")
+    files = [
+        ("files", ("a.tcx", _TCX.encode(), "application/xml")),
+        ("files", ("b.tcx", _TCX.encode(), "application/xml")),
+    ]
+    r = client.post("/api/activities/import/tcx", files=files)
+    assert r.status_code == 413
+
+
+def test_request_body_limit_rejects_oversized_payload(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Le middleware global refuse en 413 avant tout parsing multipart."""
+    monkeypatch.setenv("DOMESTIQUE_AI_MAX_REQUEST_BODY_MB", "1")
+    monkeypatch.setenv("DOMESTIQUE_AI_TCX_MAX_FILE_MB", "10")
+    payload = _TCX.encode() + b"x" * (1024 * 1024)
+    r = client.post(
+        "/api/activities/import/tcx",
+        files=[("files", ("big.tcx", payload, "application/xml"))],
+    )
+    assert r.status_code == 413
+    assert "volumineuse" in r.json()["detail"]

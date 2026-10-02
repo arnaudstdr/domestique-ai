@@ -283,6 +283,7 @@ def rotate_subscription(request: Request) -> SubscriptionFeed:
 
 @router.get("/feed.ics")
 def get_plan_feed(
+    request: Request,
     key: str = "",
     athlete: str | None = None,
 ) -> Response:
@@ -294,13 +295,15 @@ def get_plan_feed(
     change à chaque revue hebdo.
 
     Auth : ce chemin est exempté du middleware Bearer (les clients calendrier
-    ne peuvent pas envoyer de header Authorization). Deux modes de clé :
+    ne peuvent pas envoyer de header Authorization). Trois modes de clé :
 
-    1. **Token par athlète** (recommandé, exposé par ``GET /api/plan/subscription``) :
+    1. **Header** ``Authorization: Bearer <token>`` (clients modernes) —
+       prioritaire s'il est présent et qu'aucun ``?key=`` n'est fourni.
+    2. **Token par athlète** (recommandé, exposé par ``GET /api/plan/subscription``) :
        le token identifie directement l'athlète, ``?athlete=`` est ignoré.
-    2. **Clé globale** ``DOMESTIQUE_AI_CALENDAR_FEED_KEY`` (compat ascendante) :
+    3. **Clé globale** ``DOMESTIQUE_AI_CALENDAR_FEED_KEY`` (compat ascendante) :
        auth partagée, ``?athlete=<public_id>`` cible un athlète du roster (défaut :
-       bootstrap). Sans clé globale configurée, seul le mode 1 fonctionne.
+       bootstrap). Sans clé globale configurée, seuls les modes 1/2 fonctionnent.
     """
     import hmac
 
@@ -313,6 +316,11 @@ def get_plan_feed(
     )
     from domestique_ai.llm.plan_storage import list_decisions, load_active_plan
     from domestique_ai.platform_db import get_user_by_feed_token, get_user_by_public_id
+
+    if not key:
+        authorization = request.headers.get("authorization", "")
+        if authorization.lower().startswith("bearer "):
+            key = authorization[len("bearer ") :].strip()
 
     target = get_user_by_feed_token(key) if key else None
     if target is not None:
@@ -633,9 +641,32 @@ async def post_plan_llm(
     )
 
 
+def _record_export_audit(request: Request, ctx: AthleteContext, action: str, plan_id: int) -> None:
+    """Trace un export de plan dans ``admin_audit`` (best-effort).
+
+    Un coach peut exporter le plan d'un athlète de son roster : l'écriture
+    laisse une trace consultable par l'admin (``GET /api/admin/audit``). Un
+    échec d'audit ne doit jamais bloquer le téléchargement. ``ctx.public_id``
+    est vide pour le bootstrap → pas de cible.
+    """
+    from domestique_ai.platform_db import record_admin_audit
+
+    try:
+        actor = get_current_user(request)
+        record_admin_audit(
+            actor,
+            action,
+            target={"public_id": ctx.public_id} if ctx.public_id else None,
+            details={"plan_id": plan_id},
+        )
+    except Exception:  # noqa: BLE001 — l'audit ne casse pas l'export
+        log.warning("Audit export plan %s échoué (plan_id=%s).", action, plan_id, exc_info=True)
+
+
 @router.get("/{plan_id}/export.ics")
 def export_plan_ics(
     plan_id: int,
+    request: Request,
     ctx: AthleteContext = Depends(get_athlete_context),  # noqa: B008
 ) -> Response:
     """Renvoie le plan au format iCalendar (RFC 5545).
@@ -643,7 +674,8 @@ def export_plan_ics(
     Le fichier généré s'importe directement dans Google Calendar, Apple
     Calendar et Outlook. Les ``UID`` sont stables (clé ``plan-<id>-<date>``),
     donc réimporter le fichier après modification met à jour les événements
-    existants au lieu d'en créer des doublons.
+    existants au lieu d'en créer des doublons. L'export est tracé dans le
+    journal d'audit (consentement/visibilité : cf. finding vuln-0003).
     """
     plan = load_plan(plan_id, db_path=ctx.db_path)
     if plan is None:
@@ -653,6 +685,7 @@ def export_plan_ics(
         )
     payload = plan_to_ics(plan, plan_id=plan_id)
     filename = f"plan_{plan[0].date}_{plan[-1].date}.ics"
+    _record_export_audit(request, ctx, "plan_export_ics", plan_id)
     return Response(
         content=payload,
         media_type="text/calendar; charset=utf-8",
@@ -663,13 +696,15 @@ def export_plan_ics(
 @router.get("/{plan_id}/export.zip")
 def export_plan_zip(
     plan_id: int,
+    request: Request,
     ctx: AthleteContext = Depends(get_athlete_context),  # noqa: B008
 ) -> Response:
     """Renvoie un ZIP des fichiers `.FIT` du plan (un par séance).
 
     Si l'athlète a un profil HR (repos/max), les fichiers FIT utilisent des
     plages BPM custom (Karvonen). Sinon ils utilisent les zones HR Garmin
-    standard configurées sur la montre.
+    standard configurées sur la montre. L'export est tracé dans le journal
+    d'audit (consentement/visibilité : cf. finding vuln-0003).
     """
     plan = load_plan(plan_id, db_path=ctx.db_path)
     if plan is None:
@@ -679,6 +714,7 @@ def export_plan_zip(
         )
     payload = plan_to_zip(plan, hr_rest=ctx.hr_rest, hr_max=ctx.hr_max)
     filename = f"plan_{plan[0].date}_{plan[-1].date}.zip"
+    _record_export_audit(request, ctx, "plan_export_zip", plan_id)
     return Response(
         content=payload,
         media_type="application/zip",

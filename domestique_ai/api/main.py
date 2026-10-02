@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import time
 import uuid
@@ -68,6 +69,7 @@ from domestique_ai.api.scheduler import start_scheduler, stop_scheduler
 from domestique_ai.config import (
     REPO_ROOT,
     get_api_token,
+    get_max_request_body_mb,
     get_sentry_dsn,
     get_sentry_enabled,
     get_sentry_send_pii,
@@ -105,7 +107,40 @@ app = FastAPI(
         "aux métriques matinales et au coach LLM."
     ),
     lifespan=lifespan,
+    # La doc (Swagger/ReDoc) et le schéma OpenAPI sont volontairement absents :
+    # le BearerAuthMiddleware ne filtre que ``/api/*``, donc ces routes
+    # publiques contourneraient l'authentification (fuite de la surface d'API).
+    # Le schéma reste générable hors HTTP via ``app.openapi()`` pour l'outillage.
+    docs_url=None,
+    redoc_url=None,
+    openapi_url=None,
 )
+
+
+_SENTRY_REDACTED = "[Filtered]"
+
+
+def _scrub_sentry_event(event: dict, hint: dict) -> dict:  # noqa: ARG001
+    """Retire les secrets des événements Sentry avant envoi.
+
+    Les tokens transitent parfois en query string (flux webcal ``?key=``) et le
+    header ``Authorization`` porte le Bearer : on les remplace systématiquement,
+    même quand ``SENTRY_SEND_PII`` est actif.
+    """
+    request = event.get("request")
+    if not isinstance(request, dict):
+        return event
+    if request.get("query_string") is not None:
+        request["query_string"] = _SENTRY_REDACTED
+    url = request.get("url")
+    if isinstance(url, str) and "?" in url:
+        request["url"] = url.split("?", 1)[0]
+    headers = request.get("headers")
+    if isinstance(headers, dict):
+        for name in list(headers):
+            if name.lower() == "authorization":
+                headers[name] = _SENTRY_REDACTED
+    return event
 
 
 def _init_sentry() -> None:
@@ -113,7 +148,9 @@ def _init_sentry() -> None:
 
     L'integrations FastAPI/Starlette sont activées automatiquement via le
     package ``sentry-sdk[fastapi]``. ``send_default_pii`` expose headers/IP —
-    activé par défaut, désactivable via ``SENTRY_SEND_PII=0``.
+    activé par défaut, désactivable via ``SENTRY_SEND_PII=0``. Dans tous les
+    cas, ``before_send`` scrubbe la query string et le header ``Authorization``
+    (tokens webcal/Bearer).
     """
     if not get_sentry_enabled():
         log.info("Sentry désactivé (SENTRY_ENABLED=0).")
@@ -129,6 +166,7 @@ def _init_sentry() -> None:
             dsn=dsn,
             send_default_pii=get_sentry_send_pii(),
             traces_sample_rate=1.0,
+            before_send=_scrub_sentry_event,
         )
         log.info("Sentry initialisé (DSN configuré).")
     except Exception:  # noqa: BLE001 — ne doit jamais empêcher le démarrage
@@ -288,11 +326,63 @@ class CacheControlMiddleware:
         await self.app(scope, receive, send_with_cache)
 
 
+class BodySizeLimitMiddleware:
+    """Rejette en 413 les requêtes dont le corps dépasse la limite configurée.
+
+    Le contrôle porte sur ``Content-Length`` : c'est le seul point où on peut
+    refuser **avant** que Starlette ne bufferise le multipart (fichiers en
+    mémoire puis ``SpooledTemporaryFile``). Un corps chunked sans
+    ``Content-Length`` n'est pas borné ici — les handlers d'upload (avatar,
+    import TCX) appliquent en plus leur propre plafond après lecture.
+    """
+
+    def __init__(self, app: ASGIApp) -> None:
+        self.app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        raw_length = _extract_header(scope, b"content-length")
+        length: int | None = None
+        if raw_length is not None:
+            try:
+                length = int(raw_length)
+            except ValueError:
+                length = None
+
+        max_bytes = get_max_request_body_mb() * 1024 * 1024
+        if length is not None and length > max_bytes:
+            await self._send_413(send, max_bytes)
+            return
+
+        await self.app(scope, receive, send)
+
+    @staticmethod
+    async def _send_413(send: Send, max_bytes: int) -> None:
+        body = json.dumps(
+            {"detail": f"Requête trop volumineuse ({max_bytes // (1024 * 1024)} Mo maximum)."}
+        ).encode("utf-8")
+        await send(
+            {
+                "type": "http.response.start",
+                "status": 413,
+                "headers": [
+                    (b"content-type", b"application/json"),
+                    (b"content-length", str(len(body)).encode("latin-1")),
+                ],
+            }
+        )
+        await send({"type": "http.response.body", "body": body})
+
+
 # Ordre de la stack (de l'intérieur vers l'extérieur, donc inverse de
 # l'ordre d'ajout) :
-#   handler → BearerAuth → RequestLogging → CORS → CacheControl
-# Ainsi le RequestLogging trace aussi les 401 émis par BearerAuth, et CORS
-# répond aux preflights avant tout filtrage applicatif.
+#   handler → BearerAuth → RequestLogging → CORS → CacheControl → BodySizeLimit
+# Ainsi le RequestLogging trace aussi les 401 émis par BearerAuth, CORS répond
+# aux preflights avant tout filtrage applicatif, et BodySizeLimit refuse les
+# corps trop gros avant même l'authentification.
 app.add_middleware(
     BearerAuthMiddleware,
     token=get_api_token(),
@@ -307,6 +397,7 @@ app.add_middleware(
     expose_headers=["x-request-id"],
 )
 app.add_middleware(CacheControlMiddleware)
+app.add_middleware(BodySizeLimitMiddleware)
 
 # Routeur d'identité : non gaté (gère lui-même /me, accept-invite public, etc.).
 app.include_router(auth_router.router)

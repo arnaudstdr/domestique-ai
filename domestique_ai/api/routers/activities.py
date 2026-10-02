@@ -24,7 +24,7 @@ from domestique_ai.api.schemas import (
     TcxImportResponse,
 )
 from domestique_ai.athlete_context import AthleteContext
-from domestique_ai.config import garmin_token_dir_for
+from domestique_ai.config import garmin_token_dir_for, get_tcx_max_file_mb, get_tcx_max_files
 from domestique_ai.ingestion.db import (
     activity_id_for_source_uid,
     delete_activity,
@@ -592,19 +592,42 @@ def import_tcx_activities(
     Dédup par hash sha1 du contenu (clé ``<hash>:<index>`` pour les fichiers
     multi-activités). Un fichier en erreur n'interrompt pas les autres — le
     résultat est détaillé fichier par fichier.
+
+    Limites anti-DoS : nombre de fichiers borné (``DOMESTIQUE_AI_TCX_MAX_FILES``)
+    et taille unitaire plafonnée (``DOMESTIQUE_AI_TCX_MAX_FILE_MB``), le fichier
+    n'étant lu qu'à hauteur du plafond (+1 octet pour détecter le dépassement).
     """
     results: list[TcxImportFileResult] = []
     imported = skipped = error_count = 0
 
+    max_files = get_tcx_max_files()
+    if len(files) > max_files:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail=f"Trop de fichiers ({max_files} maximum par import).",
+        )
+    max_file_bytes = get_tcx_max_file_mb() * 1024 * 1024
+
     for upload in files:
         filename = (upload.filename or "fichier.tcx").strip() or "fichier.tcx"
         try:
-            content = upload.file.read()
+            content = upload.file.read(max_file_bytes + 1)
         except Exception as exc:  # noqa: BLE001 — entrée illisible
             error_count += 1
             results.append(
                 TcxImportFileResult(
                     filename=filename, status="error", reason=f"Lecture impossible : {exc}"
+                )
+            )
+            continue
+
+        if len(content) > max_file_bytes:
+            error_count += 1
+            results.append(
+                TcxImportFileResult(
+                    filename=filename,
+                    status="error",
+                    reason=f"Fichier trop volumineux ({get_tcx_max_file_mb()} Mo maximum).",
                 )
             )
             continue

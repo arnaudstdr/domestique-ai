@@ -479,6 +479,33 @@ def test_app_routes_registered() -> None:
     assert not missing, f"Endpoints manquants : {missing}"
 
 
+def test_api_docs_are_disabled() -> None:
+    """La doc et le schéma OpenAPI ne doivent pas être exposés (surface d'attaque)."""
+    from domestique_ai.api.main import app
+
+    assert app.docs_url is None
+    assert app.redoc_url is None
+    assert app.openapi_url is None
+
+
+def test_sentry_event_scrubbing_removes_secrets() -> None:
+    """Le scrubber Sentry retire query string et header Authorization."""
+    from domestique_ai.api.main import _scrub_sentry_event
+
+    event = {
+        "request": {
+            "url": "https://app.example/api/plan/feed.ics?key=SECRET",
+            "query_string": "key=SECRET",
+            "headers": {"Authorization": "Bearer SECRET2", "Host": "app.example"},
+        }
+    }
+    scrubbed = _scrub_sentry_event(event, {})
+    assert scrubbed["request"]["query_string"] == "[Filtered]"
+    assert "SECRET" not in scrubbed["request"]["url"]
+    assert scrubbed["request"]["headers"]["Authorization"] == "[Filtered]"
+    assert scrubbed["request"]["headers"]["Host"] == "app.example"
+
+
 def test_morning_metrics_table_initialized(client: TestClient, tmp_path: Path) -> None:
     """Garantit qu'aucune migration n'a été cassée par l'API."""
     db = Path(tmp_path / "api_test.db")

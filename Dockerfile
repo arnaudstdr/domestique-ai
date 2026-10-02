@@ -51,4 +51,6 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
 
 CMD ["uvicorn", "domestique_ai.api.main:app", \
      "--host", "0.0.0.0", \
-     "--port", "8501"]
+     "--port", "8501", \
+     "--no-server-header", \
+     "--no-access-log"]

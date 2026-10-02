@@ -103,6 +103,18 @@ def test_export_plan_zip_not_found(client: TestClient) -> None:
     assert r.status_code == 404
 
 
+def test_export_plan_zip_records_audit(client: TestClient) -> None:
+    """L'export ZIP laisse une trace dans le journal d'audit (vuln-0003)."""
+    from domestique_ai.platform_db import list_admin_audit
+
+    created = client.post("/api/plan", json={"sessions_per_week": 3}).json()
+    assert client.get(f"/api/plan/{created['id']}/export.zip").status_code == 200
+
+    entries = list_admin_audit(actions=["plan_export_zip"])
+    assert len(entries) == 1
+    assert entries[0]["details"]["plan_id"] == created["id"]
+
+
 def test_get_active_plan(client: TestClient) -> None:
     created = client.post("/api/plan", json={"sessions_per_week": 4}).json()
     r = client.get("/api/plan/active")

@@ -172,7 +172,10 @@ SQLite autorise les trois.
   (`platform_db.record_admin_audit`, appelé via `admin/_common.audit`) :
   `role_change`, `reset_2fa`, `unlock_account`, `verify_email`,
   `password_reset`, `logout_all`, `delete_account`, `feedback_status`,
-  `settings_update`, `invitation_create`, `invitation_revoke`. FK `SET NULL` +
+  `settings_update`, `invitation_create`, `invitation_revoke`. Deux actions
+  hors panneau admin y sont écrites par `plan.py` : `plan_export_ics` et
+  `plan_export_zip` (exports d'un plan, y compris par un coach sur un athlète de
+  son roster — best-effort, jamais bloquant, détails `{plan_id}`). FK `SET NULL` +
   snapshot `public_id` → l'historique survit à
   la suppression d'un compte (l'audit de suppression est écrit **avant** le
   DELETE). Jamais de secret dans les détails. Consultable via `GET /audit` :
@@ -278,6 +281,26 @@ stockant une **data URL** `data:image/<type>;base64,…`, `NULL` par défaut.
   paramètre `?athlete=` (`withAthlete` les exclut) — un coach en consultation
   n'édite jamais la photo de l'athlète.
 
+## Durcissement HTTP (surface & corps de requête)
+
+- **Documentation désactivée** — `FastAPI(docs_url=None, redoc_url=None,
+  openapi_url=None)` : `/docs`, `/redoc` et `/openapi.json` ne sont pas exposés
+  (le gate Bearer ne filtre que `/api/*` ; ces routes publiques contourneraient
+  l'auth). Le schéma reste générable hors HTTP via `app.openapi()` — utilisé par
+  `scripts/strix-audit.sh` pour fournir le contrat au scan.
+- **Taille des requêtes** — `BodySizeLimitMiddleware` (le plus externe de la
+  stack) refuse en **413** tout `Content-Length` supérieur à
+  `DOMESTIQUE_AI_MAX_REQUEST_BODY_MB` (défaut 64) avant le parsing multipart.
+  Complément applicatif : import TCX borné par `DOMESTIQUE_AI_TCX_MAX_FILE_MB`
+  (défaut 5 Mo/fichier — rejet par fichier) et `DOMESTIQUE_AI_TCX_MAX_FILES`
+  (défaut 20 — 413 au-delà) ; avatar ≤ 500 Ko.
+- **Headers serveur** — lancer uvicorn avec `--no-server-header` (pas de
+  fingerprint `server: uvicorn`) et `--no-access-log` (le
+  `RequestLoggingMiddleware` maison ne logge que le path → pas de fuite du token
+  webcal `?key=` dans les logs).
+- **Sentry** — `_scrub_sentry_event` (`before_send`) retire la query string et
+  le header `Authorization` des événements, même quand `SENTRY_SEND_PII=1`.
+
 ## Inscription publique, vérification d'email, lien coach & mot de passe oublié
 
 Socle identité étendu (au-delà de l'entrée par invitation). Toute la logique DB
@@ -372,6 +395,10 @@ flux.
   identifie directement l'athlète : pas de clé globale exposée, pas de
   `?athlete=`. `POST /api/plan/subscription/rotate` régénère/révoque le token du
   **compte courant**.
+- **Header Bearer (clients modernes)** : `Authorization: Bearer <feed_token>`
+  est accepté en alternative au `?key=` (prioritaire si `key` absent). Le token
+  en query reste nécessaire pour Calendrier Apple/Google — d'où
+  `--no-access-log` et le scrub Sentry (cf. « Durcissement HTTP »).
 - **Compat clé globale** : `GET /api/plan/feed.ics?key=<DOMESTIQUE_AI_CALENDAR_FEED_KEY>
   [&athlete=<public_id>]` reste supporté pour les abonnements existants. Le flux
   n'exige plus la clé globale : le mode token par athlète fonctionne sans elle.

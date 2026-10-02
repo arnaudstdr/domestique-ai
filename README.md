@@ -400,14 +400,14 @@ ollama serve                    # or point OLLAMA_HOST at a remote endpoint
 
 ```bash
 # Backend API (port 8501) — also serves the React build if present
-uvicorn domestique_ai.api.main:app --reload --port 8501
+uvicorn domestique_ai.api.main:app --reload --no-server-header --no-access-log --port 8501
 
 # Frontend dev (separate terminal) — http://localhost:5173
 cd frontend && npm install && npm run dev
 
 # Production: build the front, FastAPI serves it via StaticFiles
 cd frontend && npm run build
-uvicorn domestique_ai.api.main:app --port 8501   # → http://localhost:8501
+uvicorn domestique_ai.api.main:app --no-server-header --no-access-log --port 8501   # → http://localhost:8501
 ```
 
 The first load redirects to `/login` — sign in with your **email**, **password**

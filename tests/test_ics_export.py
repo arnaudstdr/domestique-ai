@@ -383,6 +383,29 @@ def test_endpoint_returns_404_when_plan_missing(tmp_path, monkeypatch, api_auth_
     assert response.status_code == 404
 
 
+def test_export_ics_records_audit(tmp_path, monkeypatch, api_auth_headers):
+    """L'export ICS laisse une trace dans le journal d'audit (vuln-0003)."""
+    from fastapi.testclient import TestClient
+
+    from domestique_ai.api.main import app
+    from domestique_ai.llm import plan_storage
+    from domestique_ai.platform_db import list_admin_audit
+
+    monkeypatch.setenv("DOMESTIQUE_AI_DB_PATH", str(tmp_path / "ics_audit.db"))
+    plan_id = plan_storage.save_plan(
+        [_make_workout(date="2026-05-25")],
+        target_date=dt.date(2026, 6, 15),
+        target_event_type="cyclosportive",
+        sessions_per_week=4,
+    )
+    client = TestClient(app, headers=api_auth_headers)
+    assert client.get(f"/api/plan/{plan_id}/export.ics").status_code == 200
+
+    entries = list_admin_audit(actions=["plan_export_ics"])
+    assert len(entries) == 1
+    assert entries[0]["details"]["plan_id"] == plan_id
+
+
 # Le test ci-dessus protège la branche `summary in text` en cas d'évolution
 # future du Workout — mais on évite de pinner une chaîne précise pour ne pas
 # casser sur un simple changement de nommage.
@@ -489,6 +512,41 @@ def test_feed_accepts_per_athlete_token_without_global_key(tmp_path, monkeypatch
 
     assert client.get("/api/plan/feed.ics?key=wrong").status_code == 404
     response = client.get(f"/api/plan/feed.ics?key={token}")
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/calendar")
+    assert response.content.decode("utf-8").count("BEGIN:VEVENT") == 2
+
+
+def test_feed_accepts_bearer_header_token(tmp_path, monkeypatch, api_auth_headers):
+    """Le token peut aussi être passé en header ``Authorization: Bearer`` (clients modernes)."""
+    from fastapi.testclient import TestClient
+
+    from domestique_ai.api.main import app
+    from domestique_ai.export.ics import rolling_weeks_window
+    from domestique_ai.llm import plan_storage
+    from domestique_ai.platform_db import get_or_create_bootstrap_coach, get_or_create_feed_token
+
+    monkeypatch.setenv("DOMESTIQUE_AI_DB_PATH", str(tmp_path / "feed_bearer.db"))
+    monkeypatch.delenv("DOMESTIQUE_AI_CALENDAR_FEED_KEY", raising=False)
+    start, _ = rolling_weeks_window(dt.date.today())
+    plan_storage.save_plan(
+        [
+            _make_workout(date=start.isoformat(), name="Endurance"),
+            _make_workout(date=(start + dt.timedelta(days=2)).isoformat(), name="Tempo"),
+        ],
+        target_date=dt.date(2026, 7, 1),
+        target_event_type="cyclosportive",
+        sessions_per_week=4,
+    )
+    bootstrap = get_or_create_bootstrap_coach()
+    token = get_or_create_feed_token(bootstrap["id"])
+    client = TestClient(app, headers=api_auth_headers)
+
+    assert (
+        client.get("/api/plan/feed.ics", headers={"Authorization": "Bearer wrong"}).status_code
+        == 404
+    )
+    response = client.get("/api/plan/feed.ics", headers={"Authorization": f"Bearer {token}"})
     assert response.status_code == 200
     assert response.headers["content-type"].startswith("text/calendar")
     assert response.content.decode("utf-8").count("BEGIN:VEVENT") == 2
