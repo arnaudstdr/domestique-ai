@@ -2,6 +2,8 @@
 # strix-audit.sh — audit de sécurité Strix de domestique-ai (local, données jetables).
 # Ne contient aucun secret : le token API est relu depuis .env à chaque run,
 # la clé OpenRouter vient de OPENROUTER_API_KEY ou ~/.strix/cli-config.json.
+# Les appels LLM passent par un proxy headroom dédié (défaut) : compression du
+# contexte + CCR réversible ; --no-headroom pour un audit direct OpenRouter.
 
 set -euo pipefail
 
@@ -25,6 +27,15 @@ fi
 MODEL="${STRIX_LLM:-$DEFAULT_MODEL}"
 EXTRA_ARGS=()
 SERVER_PID=""
+HEADROOM_ENABLED=1
+HEADROOM_PORT="8789"
+HEADROOM_MODE="cache"
+HEADROOM_LOSSY=0
+HEADROOM_BIN=""
+HEADROOM_PID=""
+HEADROOM_STARTED=0
+STRIX_CONFIG_FILE=""
+STRIX_MCP_CONFIG_FILE=""
 
 die() { echo "Erreur: $*" >&2; exit 1; }
 
@@ -42,6 +53,7 @@ Sous-commandes :
   view     ouvre le dashboard des résultats
   clean    supprime le dossier d'audit
   quota    affiche le quota OpenRouter restant (free + crédits)
+  savings  affiche les tokens économisés par headroom (ledger partagé)
 
 Options :
   --mode quick|standard|deep   profondeur du scan (défaut : quick)
@@ -55,6 +67,10 @@ Options :
   --keep-server                laisse uvicorn tourner après le scan
   --reuse-server               scanne l'app déjà en écoute (instance existante !)
   --yes                        ne pas demander confirmation (clean, setup)
+  --no-headroom                audit direct OpenRouter, sans compression
+  --headroom-port N            port du proxy headroom dédié (défaut : 8789)
+  --headroom-mode token|cache  priorité compression (token) ou prefix-cache (cache)
+  --headroom-lossy             désactive le CCR (pas de headroom_retrieve)
   -- ARGS...                   arguments passés tels quels à strix
 
 Exemples :
@@ -62,6 +78,8 @@ Exemples :
   scripts/strix-audit.sh run --ollama --keep-server
   scripts/strix-audit.sh run --model openrouter/poolside/laguna-s-2.1 --budget 5
   scripts/strix-audit.sh run --mode standard --turns 400 -- --scan-mode standard
+  scripts/strix-audit.sh run --no-headroom          # comparaison sans compression
+  scripts/strix-audit.sh savings -- --json          # (via headroom savings)
 
 Variables : OPENROUTER_API_KEY, STRIX_LLM, DOMESTIQUE_REPO (si hors repo).
 USAGE
@@ -69,7 +87,7 @@ USAGE
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    setup|prepare|serve|scan|run|resume|view|clean|quota|help) CMD="$1"; shift ;;
+    setup|prepare|serve|scan|run|resume|view|clean|quota|savings|help) CMD="$1"; shift ;;
     --mode) RUN_MODE="$2"; shift 2 ;;
     --turns) MAX_TURNS="$2"; shift 2 ;;
     --model) MODEL="$2"; shift 2 ;;
@@ -80,6 +98,10 @@ while [[ $# -gt 0 ]]; do
     --ollama) OLLAMA_PRESET=1; MODEL="ollama/devstral-small-2:24b-cloud"; shift ;;
     --keep-server) KEEP_SERVER=1; shift ;;
     --reuse-server) REUSE_SERVER=1; shift ;;
+    --no-headroom) HEADROOM_ENABLED=0; shift ;;
+    --headroom-port) HEADROOM_PORT="$2"; shift 2 ;;
+    --headroom-mode) HEADROOM_MODE="$2"; shift 2 ;;
+    --headroom-lossy) HEADROOM_LOSSY=1; shift ;;
     --yes) ASSUME_YES=1; shift ;;
     -h|--help) CMD="help"; shift ;;
     --) shift; EXTRA_ARGS=("$@"); break ;;
@@ -87,6 +109,10 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 CMD="${CMD:-run}"
+case "$HEADROOM_MODE" in
+  token|cache) ;;
+  *) die "--headroom-mode attendu: token|cache (reçu: $HEADROOM_MODE)" ;;
+esac
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="${DOMESTIQUE_REPO:-$(cd "$SCRIPT_DIR/.." && pwd)}"
@@ -142,6 +168,11 @@ PY
     echo "→ Config existante: $cfg"
   else
     echo "→ OPENROUTER_API_KEY non définie et $cfg absent — la config LLM reste à ta charge"
+  fi
+  if [[ -n "$(headroom_bin)" ]]; then
+    echo "→ headroom: $(headroom_bin) (compression active par défaut)"
+  else
+    echo "→ headroom absent — scans sans compression (installer: uv tool install 'headroom-ai[all]')"
   fi
   docker pull ghcr.io/usestrix/strix-sandbox:1.3.0 >/dev/null 2>&1 || echo "→ (image sandbox tirée au premier run)"
 }
@@ -245,7 +276,117 @@ stop_server() {
   kill "$SERVER_PID" 2>/dev/null || true
   echo "→ uvicorn arrêté"
 }
-trap stop_server EXIT
+
+# --- headroom : compression de contexte -------------------------------------
+# Les appels LLM de Strix partent du CLI sur l'hôte (le sandbox Docker ne fait
+# que l'exécution d'outils) : un LLM_API_BASE local suffit. Instance dédiée
+# (backend OpenRouter) pour ne pas toucher au proxy opencode sur 8787.
+
+headroom_bin() {
+  if [[ -z "$HEADROOM_BIN" ]]; then
+    HEADROOM_BIN="$(command -v headroom 2>/dev/null || true)"
+    if [[ -z "$HEADROOM_BIN" && -x "$HOME/.local/bin/headroom" ]]; then
+      HEADROOM_BIN="$HOME/.local/bin/headroom"
+    fi
+  fi
+  printf '%s' "$HEADROOM_BIN"
+}
+
+headroom_enabled() {
+  [[ "$HEADROOM_ENABLED" -eq 1 && "$OLLAMA_PRESET" -eq 0 && -n "$(headroom_bin)" ]]
+}
+
+stop_headroom() {
+  [[ "$HEADROOM_STARTED" -eq 1 && -n "${HEADROOM_PID:-}" ]] || return 0
+  pkill -P "$HEADROOM_PID" 2>/dev/null || true
+  kill "$HEADROOM_PID" 2>/dev/null || true
+  local i
+  for i in $(seq 1 20); do
+    curl -fsS "http://127.0.0.1:$HEADROOM_PORT/healthz" >/dev/null 2>&1 || break
+    sleep 0.25
+  done
+  echo "→ headroom arrêté (:${HEADROOM_PORT})"
+}
+
+cleanup() { stop_headroom; stop_server; }
+trap cleanup EXIT
+
+start_headroom() {
+  local key="$1" bin; bin="$(headroom_bin)"
+  if curl -fsS "http://127.0.0.1:$HEADROOM_PORT/healthz" >/dev/null 2>&1; then
+    echo "→ headroom déjà en écoute sur :$HEADROOM_PORT (réutilisé)"
+    return 0
+  fi
+  mkdir -p "$AUDIT_DIR"
+  local extra=()
+  [[ -n "$BUDGET" ]] && extra+=(--budget "$BUDGET" --budget-period daily)
+  [[ "$HEADROOM_LOSSY" -eq 1 ]] && extra+=(--no-ccr)
+  echo "→ Démarrage headroom :$HEADROOM_PORT (openrouter, mode $HEADROOM_MODE, log: $AUDIT_DIR/headroom.log)"
+  (
+    exec env OPENROUTER_API_KEY="$key" HEADROOM_MODE="$HEADROOM_MODE" \
+      "$bin" proxy \
+      --port "$HEADROOM_PORT" \
+      --backend openrouter \
+      --mode "$HEADROOM_MODE" \
+      --no-telemetry \
+      --no-rate-limit \
+      ${extra[@]+"${extra[@]}"} \
+      >"$AUDIT_DIR/headroom.log" 2>&1
+  ) &
+  HEADROOM_PID=$!
+  HEADROOM_STARTED=1
+  local i
+  for i in $(seq 1 60); do
+    if curl -fsS "http://127.0.0.1:$HEADROOM_PORT/healthz" >/dev/null 2>&1; then
+      echo "→ headroom prêt (CCR $([[ "$HEADROOM_LOSSY" -eq 1 ]] && echo désactivé || echo actif))"
+      return 0
+    fi
+    if ! kill -0 "$HEADROOM_PID" 2>/dev/null; then
+      die "headroom a quitté au démarrage — voir $AUDIT_DIR/headroom.log"
+    fi
+    sleep 0.5
+  done
+  die "headroom non joignable sur :$HEADROOM_PORT — voir $AUDIT_DIR/headroom.log"
+}
+
+write_strix_config() {
+  local key="$1" m="$MODEL"
+  case "$m" in
+    openrouter/*) m="openai/${m#openrouter/}" ;;
+    openai/*) ;;
+    *) m="openai/$m" ;;
+  esac
+  STRIX_CONFIG_FILE="$AUDIT_DIR/strix-config.json"
+  ( umask 077
+    python3 - "$STRIX_CONFIG_FILE" "$m" "$key" "$HEADROOM_PORT" <<'PY'
+import json, sys
+path, model, key, port = sys.argv[1:5]
+json.dump({"env": {
+    "STRIX_LLM": model,
+    "LLM_API_KEY": key,
+    "LLM_API_BASE": f"http://127.0.0.1:{port}/v1",
+    "STRIX_TELEMETRY": "0",
+}}, open(path, "w"), indent=2)
+PY
+  )
+  echo "→ Strix via headroom : $m → http://127.0.0.1:$HEADROOM_PORT/v1 (config: $STRIX_CONFIG_FILE)"
+}
+
+write_mcp_config() {
+  [[ "$HEADROOM_LOSSY" -eq 0 ]] || return 0
+  STRIX_MCP_CONFIG_FILE="$AUDIT_DIR/mcp-servers.json"
+  python3 - "$STRIX_MCP_CONFIG_FILE" "$(headroom_bin)" "$HEADROOM_PORT" <<'PY'
+import json, sys
+path, bin_path, port = sys.argv[1:4]
+json.dump([{
+    "name": "headroom",
+    "transport": "stdio",
+    "command": bin_path,
+    "args": ["mcp", "serve", "--proxy-url", f"http://127.0.0.1:{port}"],
+}], open(path, "w"), indent=2)
+PY
+  echo "→ CCR : headroom_retrieve via MCP ($STRIX_MCP_CONFIG_FILE)"
+}
 
 fetch_spec() {
   mkdir -p "$AUDIT_DIR"
@@ -258,6 +399,21 @@ fetch_spec() {
 }
 
 configure_llm() {
+  if headroom_enabled; then
+    local key; key="$(openrouter_key)"
+    if [[ -n "$key" ]]; then
+      start_headroom "$key"
+      write_strix_config "$key"
+      write_mcp_config
+      if [[ "$MODEL" != *":free" && -z "$BUDGET" ]]; then
+        echo "  ⚠️  Modèle payant sans --budget : ajoute --budget 5 pour plafonner (appliqué au proxy headroom)."
+      fi
+      return 0
+    fi
+    echo "  ⚠️  headroom demandé mais aucune clé OpenRouter trouvée — audit direct sans compression"
+  elif [[ "$HEADROOM_ENABLED" -eq 1 && "$OLLAMA_PRESET" -eq 0 ]]; then
+    echo "  ⚠️  headroom introuvable — audit direct sans compression (--no-headroom pour masquer)"
+  fi
   export STRIX_LLM="$MODEL"
   if [[ "$OLLAMA_PRESET" -eq 1 ]]; then
     export LLM_API_BASE="http://localhost:11434"
@@ -319,6 +475,12 @@ except Exception as e:
 PY
 }
 
+show_savings() {
+  local bin; bin="$(headroom_bin)"
+  [[ -n "$bin" ]] || die "headroom introuvable"
+  "$bin" savings ${EXTRA_ARGS[@]+"${EXTRA_ARGS[@]}"}
+}
+
 run_scan() {
   need strix
   curl -fsS "http://localhost:$PORT/api/health" >/dev/null 2>&1 \
@@ -335,6 +497,8 @@ run_scan() {
     --max-turns "$MAX_TURNS"
     --instruction-file "$AUDIT_DIR/instructions.md"
   )
+  [[ -n "$STRIX_CONFIG_FILE" ]] && args+=(--config "$STRIX_CONFIG_FILE")
+  [[ -n "$STRIX_MCP_CONFIG_FILE" ]] && args+=(--mcp-config "$STRIX_MCP_CONFIG_FILE")
   [[ -n "$BUDGET" ]] && args+=(--max-budget "$BUDGET")
   echo "→ Scan Strix ($RUN_MODE, max $MAX_TURNS tours${BUDGET:+, budget \$$BUDGET})"
   local status=0
@@ -370,6 +534,8 @@ run_resume() {
   configure_llm
   check_quota
   local args=(--resume "$run" --max-turns "$MAX_TURNS")
+  [[ -n "$STRIX_CONFIG_FILE" ]] && args+=(--config "$STRIX_CONFIG_FILE")
+  [[ -n "$STRIX_MCP_CONFIG_FILE" ]] && args+=(--mcp-config "$STRIX_MCP_CONFIG_FILE")
   [[ -n "$BUDGET" ]] && args+=(--max-budget "$BUDGET")
   echo "→ Reprise du run $run ($MODEL, max $MAX_TURNS tours${BUDGET:+, budget \$$BUDGET})"
   local status=0
@@ -420,5 +586,6 @@ case "$CMD" in
     remove_audit_dir
     ;;
   quota) check_quota ;;
+  savings) show_savings ;;
   help|*) usage ;;
 esac

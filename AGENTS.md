@@ -98,6 +98,25 @@ cd frontend && npm run build
 uvicorn domestique_ai.api.main:app --no-server-header --no-access-log --port 8501   # → http://localhost:8501
 ```
 
+### Audit de sécurité (strix + headroom)
+
+`scripts/strix-audit.sh` orchestre un pentest Strix local (copie jetable du code
+et des données dans `/tmp/domestique-audit`). Depuis 10/2026, les appels LLM de
+Strix passent par un proxy **headroom dédié** (port `8789`, `--backend
+openrouter`, mode `cache`) : `STRIX_LLM` est converti en `openai/<modèle>` avec
+`LLM_API_BASE=http://127.0.0.1:8789/v1` dans un `--config` temporaire (le
+`~/.strix/cli-config.json` global n'est pas modifié), et le CCR est réversible
+via le serveur MCP `headroom` injecté par `--mcp-config`. Les appels LLM partent
+du CLI hôte, pas du sandbox Docker — pas de `host.docker.internal` à gérer.
+
+- `--no-headroom` : audit direct OpenRouter (comparaison) ; `--headroom-lossy` :
+  pas de CCR ; `--headroom-mode token|cache` ; `--headroom-port N`.
+- `scripts/strix-audit.sh savings` : ledger headroom **partagé avec opencode**
+  (voir aussi `headroom savings --json`).
+- Caveat : avec le préfixe `openai/`, Strix n'estime plus le coût OpenRouter —
+  `--budget` est alors appliqué par le proxy headroom (`--budget-period daily`).
+  La recherche Perplexity ne passe pas par headroom.
+
 ## Stack web
 
 L'UI est une **PWA FastAPI + React** (Streamlit a été retiré) :
