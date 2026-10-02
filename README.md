@@ -26,7 +26,7 @@ data — and **rewrites your plan week after week** as your body responds.
 <br/>
 ![CI](https://github.com/arnaudstdr/domestique-ai/actions/workflows/ci.yml/badge.svg)
 [![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
-![Tests](https://img.shields.io/badge/tests-1069-success)
+![Tests](https://img.shields.io/badge/tests-1077-success)
 ![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)
 
 <br/>
@@ -337,7 +337,7 @@ Postgres would add operational weight for no benefit at this scale.
 
 ## Quality &amp; rigor
 
-- **1,069 tests across 66 modules** — load math, HR zones, Garmin ingestion
+- **1,077 tests across 66 modules** — load math, HR zones, Garmin ingestion
   (mocked, no network), Google Health, de-duplication, FIT/ICS export, webcal,
   coach tools and memory, overtraining, trends, plan generation and its
   validators, the adaptive daily/weekly loops, the similar-ride engine and the
@@ -345,12 +345,43 @@ Postgres would add operational weight for no benefit at this scale.
 - **CI on every push** (3 jobs): Ruff (`check` + `format --check`) and pytest on
   Python 3.12, frontend `tsc` + Vite build on Node 20, and a **Semgrep** scan
   with 7 project rules (taint-mode SQL injection, SSRF, command injection…).
+- **AI pentesting (Strix)** — authenticated grey-box DAST runs against the live
+  app, see [Security testing](#security-testing-strix) below.
 - Tests isolate state with `tmp_path` fixtures — **no shared DB, no flakiness**.
 
 ```bash
 .venv/bin/python -m pytest          # run the suite
 .venv/bin/python -m ruff check .    # lint
 ```
+
+### Security testing (Strix)
+
+The API is DAST-tested with [Strix](https://github.com/usestrix/strix) — an
+open-source autonomous AI pentester that runs a Kali Docker sandbox and
+validates findings with real proof-of-concept exploits. The reusable harness
+lives in `scripts/strix-audit.sh`: it copies the code and databases to a
+throw-away workspace, boots the app on disposable data with outbound
+integrations disabled, hands Strix the live target plus an OpenAPI contract
+generated locally (the schema is deliberately not served over HTTP), and keeps
+each report under `strix_runs/<run>/`.
+
+```bash
+export OPENROUTER_API_KEY="sk-or-v1-…"   # or use `--ollama` (Ollama Cloud)
+scripts/strix-audit.sh setup             # check Docker/Strix, write ~/.strix config
+scripts/strix-audit.sh run --port 8502 --budget 3
+scripts/strix-audit.sh view              # local dashboard: findings + report
+```
+
+The 2026-10-02 authenticated grey-box run (quick mode) surfaced no critical or
+high issue and no auth bypass. Every medium finding was fixed or mitigated:
+
+| Finding | Severity | Resolution |
+| - | - | - |
+| `/docs`, `/redoc`, `/openapi.json` reachable unauthenticated | Medium | Disabled (`docs_url=None`…) |
+| Unbounded TCX upload → memory DoS | Medium | Global 413 body cap, 5 MB/file and 20-file limits |
+| Per-athlete calendar `feed_token` in the URL query string | Medium | No access log, Sentry scrubbing, `Authorization: Bearer` supported |
+| Coach bulk-export of an athlete's plan without trace | Medium | `plan_export_ics` / `plan_export_zip` recorded in the audit log |
+| `server: uvicorn` fingerprint header | Info | `--no-server-header` on every launch |
 
 ---
 
