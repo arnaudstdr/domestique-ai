@@ -1,10 +1,29 @@
 rules:
   # --- Secrets / credentials ---
   - id: hardcoded-password
-    pattern: |
-      $VAR = "..."
-      ...
-      $PASSWORD = $VAR
+    patterns:
+      # Garde-fou anti-faux-positif : ne déclencher que si le nom de la
+      # constante OU de la variable cible évoque un secret. Sans ça, toute
+      # constante chaîne réutilisée dans une affectation était signalée (ex.
+      # le placeholder de redaction `_SENTRY_REDACTED = "[Filtered]"` repris
+      # dans `headers[name] = _SENTRY_REDACTED`).
+      - pattern-either:
+          - patterns:
+              - pattern: |
+                  $VAR = "..."
+                  ...
+                  $PASSWORD = $VAR
+              - metavariable-regex:
+                  metavariable: $VAR
+                  regex: (?i)(password|passwd|pwd|secret|token|api[_-]?key)
+          - patterns:
+              - pattern: |
+                  $VAR = "..."
+                  ...
+                  $PASSWORD = $VAR
+              - metavariable-regex:
+                  metavariable: $PASSWORD
+                  regex: (?i)(password|passwd|pwd|secret|token|api[_-]?key)
     message: >
       Possible hardcoded password. Use environment variables or a secrets manager.
     languages: [python]
