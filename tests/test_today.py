@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import importlib
 from pathlib import Path
 
 import pytest
@@ -323,6 +324,26 @@ def test_llm_decision_is_used_when_available(tmp_path, monkeypatch):
     assert result["workout"]["kind"] == "tempo"
     assert result["workout"]["duration_min"] == 75
     assert result["signals"]["llm_confidence"] == 0.8
+
+
+def test_today_llm_call_is_schema_constrained(monkeypatch):
+    """La séance du jour passe un schéma JSON au SDK (décodage contraint)."""
+    captured: dict = {}
+
+    def fake_chat(messages, **kwargs):
+        captured.update(kwargs)
+        return {"kind": "tempo", "duration_min": 60, "rationale": "ok", "confidence": 0.7}
+
+    monkeypatch.setattr("domestique_ai.llm.ollama_client.chat_structured_sync", fake_chat)
+    # Le fixture autouse a remplacé _decide_kind_with_llm : on recharge le
+    # module pour récupérer l'implémentation réelle (qui fait l'import local).
+    importlib.reload(today_mod)
+    result = today_mod._decide_kind_with_llm({})
+    assert result is not None and result["kind"] == "tempo"
+    schema = captured["schema"]
+    assert schema is today_mod._TODAY_SCHEMA
+    assert schema["properties"]["kind"]["enum"] == list(today_mod._KIND_VALUES)
+    assert schema["required"] == ["kind", "duration_min", "rationale"]
 
 
 def test_llm_invalid_json_falls_back(tmp_path, monkeypatch):

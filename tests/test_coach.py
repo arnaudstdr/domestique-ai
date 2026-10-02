@@ -153,6 +153,33 @@ def test_build_initial_messages_trims_long_history(monkeypatch):
     assert messages[1]["content"] == f"m{40 - coach_module.MAX_HISTORY_MESSAGES}"
 
 
+def test_build_initial_messages_caps_single_message_chars(monkeypatch):
+    """Un message trop long est tronqué (cap fixe, cache-friendly)."""
+    monkeypatch.setattr(
+        "domestique_ai.llm.daily_brief.build_coach_context",
+        lambda *args, **kwargs: "",
+    )
+    history = [{"role": "user", "content": "x" * 5_000}]
+    messages = build_initial_messages(history, "go")
+    assert len(messages[1]["content"]) == coach_module.MAX_HISTORY_MESSAGE_CHARS
+
+
+def test_build_initial_messages_caps_history_total_chars(monkeypatch):
+    """Le budget global garde les messages les plus récents, entiers."""
+    monkeypatch.setattr(
+        "domestique_ai.llm.daily_brief.build_coach_context",
+        lambda *args, **kwargs: "",
+    )
+    per = coach_module.MAX_HISTORY_MESSAGE_CHARS
+    history = [{"role": "user", "content": f"m{i}" + "x" * per} for i in range(20)]
+    messages = build_initial_messages(history, "go")
+    kept = messages[1:-1]
+    total = sum(len(m["content"]) for m in kept)
+    assert total <= coach_module.MAX_HISTORY_TOTAL_CHARS
+    assert len(kept) < len(history)
+    assert kept[-1]["content"].startswith("m19")
+
+
 def test_system_prompt_covers_health_topics():
     """Le coach se positionne cycliste ET assistant santé."""
     assert "coach cycliste" in SYSTEM_PROMPT

@@ -68,6 +68,24 @@ _MAX_DURATION_MIN = 240
 
 _KIND_VALUES = ("recovery", "endurance", "tempo", "intervals")
 
+# Schéma JSON passé au SDK : décodage contraint → moins de retries « JSON
+# invalide » (qui renvoient tout le prompt). La validation Python ci-dessous
+# reste la garde finale (bornes, types).
+_TODAY_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "kind": {"type": "string", "enum": list(_KIND_VALUES)},
+        "duration_min": {
+            "type": "integer",
+            "minimum": _MIN_DURATION_MIN,
+            "maximum": _MAX_DURATION_MIN,
+        },
+        "rationale": {"type": "string"},
+        "confidence": {"type": "number", "minimum": 0.0, "maximum": 1.0},
+    },
+    "required": ["kind", "duration_min", "rationale"],
+}
+
 
 # ---------------------------------------------------------------------------
 # Helpers conservés (rétrocompat)
@@ -509,7 +527,9 @@ def _decide_kind_with_llm(dossier: dict[str, Any]) -> dict[str, Any] | None:
             ),
         },
     ]
-    response = chat_structured_sync(messages, timeout_s=20.0, label=usage.WORKOUT_TODAY)
+    response = chat_structured_sync(
+        messages, timeout_s=20.0, schema=_TODAY_SCHEMA, label=usage.WORKOUT_TODAY
+    )
     if response is None:
         return None
 

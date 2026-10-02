@@ -50,6 +50,17 @@ _LLM_SYSTEM_PROMPT = (
     "- Ton : direct, factuel, pas de blabla motivationnel."
 )
 
+# Schéma JSON passé au SDK : le décodage est contraint, ce qui évite les
+# retries « JSON invalide » (qui renvoient tout le prompt une seconde fois).
+_BRIEF_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "summary": {"type": "string"},
+        "tip": {"type": "string"},
+    },
+    "required": ["summary"],
+}
+
 
 def _round_tsb(tsb: float) -> int:
     """Bucket TSB pour clé de cache (pas de 5 points → 4 buckets autour de 0)."""
@@ -325,7 +336,9 @@ def _generate_brief_with_llm(signals: dict[str, Any]) -> dict[str, str] | None:
             ),
         },
     ]
-    response = chat_structured_sync(messages, timeout_s=15.0, label=usage.DAILY_BRIEF)
+    response = chat_structured_sync(
+        messages, timeout_s=15.0, schema=_BRIEF_SCHEMA, label=usage.DAILY_BRIEF
+    )
     if not response:
         return None
     summary = response.get("summary")

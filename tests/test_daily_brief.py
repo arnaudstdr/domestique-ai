@@ -269,6 +269,22 @@ def test_llm_payload_is_slim(stable_signals):
     assert "structure" not in workout
 
 
+def test_brief_llm_call_is_schema_constrained(monkeypatch):
+    """Le brief passe un schéma JSON au SDK (décodage contraint, moins de retries)."""
+    captured: dict = {}
+
+    def fake_chat(messages, **kwargs):
+        captured.update(kwargs)
+        return {"summary": "Forme correcte.", "tip": "Bois régulièrement."}
+
+    monkeypatch.setattr(daily_brief, "chat_structured_sync", fake_chat)
+    result = daily_brief._generate_brief_with_llm({})
+    assert result == {"summary": "Forme correcte.", "tip": "Bois régulièrement."}
+    assert captured["schema"] is daily_brief._BRIEF_SCHEMA
+    assert captured["schema"]["required"] == ["summary"]
+    assert set(captured["schema"]["properties"]) == {"summary", "tip"}
+
+
 # ---------- Cache journalier -------------------------------------------------
 
 

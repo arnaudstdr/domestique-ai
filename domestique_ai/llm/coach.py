@@ -26,6 +26,12 @@ MAX_TOOL_LOOPS = 5
 # Au-delà, on s'appuie sur le résumé roulant de la session (injecté via le bloc
 # mémoire) pour ne pas laisser le contexte exploser.
 MAX_HISTORY_MESSAGES = 24
+# Plafonds en caractères de l'historique verbatim : un pavé collé par l'athlète
+# (ou une réponse verbeuse) survivrait au simple comptage de messages. Le cap
+# par message est fixe (jamais de budget dynamique) pour ne pas casser le cache
+# de prompt Ollama ; le cap global garde les messages les plus récents entiers.
+MAX_HISTORY_MESSAGE_CHARS = 2_000
+MAX_HISTORY_TOTAL_CHARS = 16_000
 
 SYSTEM_PROMPT = """Tu es un coach cycliste francophone et un assistant santé.
 
@@ -130,7 +136,9 @@ def build_initial_messages(
     passés pertinents, construit par ``llm.memory``) est ajouté en message
     ``system`` à **chaque tour**, nouvelle session ou non. Au-delà de
     ``MAX_HISTORY_MESSAGES`` messages, l'historique verbatim est tronqué aux
-    plus récents — le résumé roulant prend le relais via le bloc mémoire.
+    plus récents — le résumé roulant prend le relais via le bloc mémoire. Chaque
+    message est aussi plafonné à ``MAX_HISTORY_MESSAGE_CHARS`` et la fenêtre à
+    ``MAX_HISTORY_TOTAL_CHARS`` (messages entiers, les plus récents d'abord).
 
     Ordre volontaire : ``system → contexte → historique → mémoire → user``. Le
     bloc mémoire (dont la section RAG dépend de la question) est placé **après**
@@ -157,8 +165,27 @@ def build_initial_messages(
             for msg in history
             if msg.get("role") in ("user", "assistant") and msg.get("content")
         ]
-        for msg in clean[-MAX_HISTORY_MESSAGES:]:
-            base.append({"role": msg["role"], "content": msg["content"]})
+        # Tronque chaque message (cap fixe, cache-friendly) puis ne garde que la
+        # fenêtre récente sous le budget global, messages entiers.
+        recent = [
+            {
+                "role": msg["role"],
+                "content": (
+                    msg["content"] if isinstance(msg["content"], str) else str(msg["content"])
+                )[:MAX_HISTORY_MESSAGE_CHARS],
+            }
+            for msg in clean[-MAX_HISTORY_MESSAGES:]
+        ]
+        window: list[dict[str, Any]] = []
+        total = 0
+        for msg in reversed(recent):
+            size = len(msg["content"])
+            if window and total + size > MAX_HISTORY_TOTAL_CHARS:
+                break
+            window.append(msg)
+            total += size
+        window.reverse()
+        base.extend(window)
     if memory_block:
         base.append({"role": "system", "content": memory_block})
     base.append({"role": "user", "content": user_message})
