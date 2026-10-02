@@ -470,16 +470,22 @@ def _transcript(
     *,
     limit_chars: int = 500,
     max_total_chars: int = _MAX_TRANSCRIPT_CHARS,
+    since_id: int | None = None,
 ) -> str:
     """Transcript borné : 500 c par message, budget global en gardant le récent.
 
     On parcourt du plus récent au plus ancien et on s'arrête quand le budget
     est épuisé (puis on remet dans l'ordre chronologique) — les échanges
     récents portent l'état courant, c'est eux qu'il faut résumer en priorité.
+
+    ``since_id`` ne garde que les messages strictement plus récents que cet id
+    (résumé incrémental) ; par défaut le transcript complet est renvoyé.
     """
     lines: list[str] = []
     total = 0
     for msg in reversed(messages):
+        if since_id is not None and int(msg.get("id") or 0) <= since_id:
+            continue
         role = msg.get("role")
         content = (msg.get("payload") or {}).get("content") or ""
         content = content.strip()
@@ -493,6 +499,21 @@ def _transcript(
         total += len(line)
     lines.reverse()
     return "\n".join(lines)
+
+
+def _previous_summary_hint(existing: dict[str, Any] | None) -> str:
+    """Contexte du résumé précédent, pour un résumé incrémental.
+
+    Sans lui, réécrire le résumé à partir des seuls nouveaux messages ferait
+    perdre l'historique ancien de la session.
+    """
+    summary = str((existing or {}).get("summary") or "").strip()
+    if not summary:
+        return ""
+    return (
+        "Résumé précédent de la session (à actualiser en intégrant les nouveaux "
+        f"échanges, sans le répéter inutilement) :\n{summary}\n\n"
+    )
 
 
 def get_session_summary(
@@ -534,6 +555,10 @@ def summarize_session(
     résumé (``last_summarized_message_id``) : ``updated`` vaut alors ``False``
     et le résumé existant est renvoyé tel quel. Retourne ``None`` si la session
     est vide ou si la génération échoue.
+
+    Le prompt est **incrémental** : seuls les messages postérieurs au dernier
+    résumé sont renvoyés, avec le résumé précédent comme contexte — le coût de
+    l'appel ne croît plus linéairement avec la session.
     """
     messages = _load_messages_with_ids(session_id, db_path=db_path, ctx=ctx)
     if not messages:
@@ -547,7 +572,7 @@ def summarize_session(
         result["updated"] = False
         return result
 
-    transcript = _transcript(messages)
+    transcript = _transcript(messages, since_id=int(last_id))
     if not transcript:
         return None
 
@@ -560,6 +585,7 @@ def summarize_session(
         "Renvoie UNIQUEMENT un JSON valide de la forme :\n"
         '{"summary": "3 à 5 phrases factuelles en français", '
         '"topics": ["thème1", "thème2"]}\n\n'
+        f"{_previous_summary_hint(existing)}"
         f"Conversation :\n{transcript}"
     )
     parsed = chat_structured_sync(
@@ -660,6 +686,9 @@ def summarize_and_extract_facts(
     au modèle. Même garde ``last_summarized_message_id`` : sans nouveaux
     messages, retourne ``{"updated": False, ...}`` sans aucun appel.
 
+    Comme ``summarize_session``, l'appel est **incrémental** (nouveaux messages
+    + résumé précédent en contexte).
+
     Best-effort : retourne ``None`` si la génération échoue (l'appelant garde
     le résumé existant).
     """
@@ -676,7 +705,7 @@ def summarize_and_extract_facts(
         result["facts"] = []
         return result
 
-    transcript = _transcript(messages)
+    transcript = _transcript(messages, since_id=int(last_id))
     if not transcript:
         return None
 
@@ -714,6 +743,7 @@ def summarize_and_extract_facts(
         "- Faits : uniquement ce qui est explicitement dit et utile à long "
         "terme ; n'invente rien ; ignore l'état passager (fatigue du jour).\n"
         '- Si aucun fait durable : "facts": [].\n\n'
+        f"{_previous_summary_hint(existing)}"
         f"Conversation :\n{transcript}"
     )
     parsed = chat_structured_sync(

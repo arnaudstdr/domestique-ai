@@ -110,6 +110,57 @@ def test_summarize_session_persists_and_skips_when_unchanged(tmp_path, monkeypat
     assert stored["summary"].startswith("Le cycliste")
 
 
+def test_summarize_session_is_incremental(tmp_path, monkeypatch):
+    """Le 2ᵉ résumé ne renvoie que les nouveaux messages + le résumé précédent."""
+    _use_tmp_db(tmp_path, monkeypatch)
+    prompts: list[str] = []
+
+    def fake_llm(messages, **kwargs):
+        prompts.append(messages[0]["content"])
+        return {"summary": f"Résumé {len(prompts)}.", "topics": []}
+
+    monkeypatch.setattr(memory, "chat_structured_sync", fake_llm)
+    session = new_session_id()
+    append_message(session, "user", {"role": "user", "content": "Ancien message secret"})
+    append_message(session, "assistant", {"role": "assistant", "content": "Ancienne réponse"})
+
+    first = memory.summarize_session(session)
+    assert first is not None and first["updated"] is True
+    assert "Ancien message secret" in prompts[0]
+    assert "Résumé précédent" not in prompts[0]
+
+    append_message(session, "user", {"role": "user", "content": "Nouveau message frais"})
+    append_message(session, "assistant", {"role": "assistant", "content": "Nouvelle réponse"})
+
+    second = memory.summarize_session(session)
+    assert second is not None and second["updated"] is True
+    assert "Nouveau message frais" in prompts[1]
+    assert "Ancien message secret" not in prompts[1]
+    assert "Résumé 1." in prompts[1]
+
+
+def test_finalize_is_incremental(tmp_path, monkeypatch):
+    """La finalisation ne renvoie que les messages postérieurs au résumé roulant."""
+    _use_tmp_db(tmp_path, monkeypatch)
+    prompts: list[str] = []
+
+    def fake_llm(messages, **kwargs):
+        prompts.append(messages[0]["content"])
+        return {"summary": f"Résumé {len(prompts)}.", "topics": [], "facts": []}
+
+    monkeypatch.setattr(memory, "chat_structured_sync", fake_llm)
+    session = new_session_id()
+    append_message(session, "user", {"role": "user", "content": "Vieille info"})
+    memory.summarize_session(session)
+
+    append_message(session, "user", {"role": "user", "content": "Info récente"})
+    result = memory.summarize_and_extract_facts(session)
+    assert result is not None and result["updated"] is True
+    assert "Info récente" in prompts[1]
+    assert "Vieille info" not in prompts[1]
+    assert "Résumé 1." in prompts[1]
+
+
 def test_summarize_empty_session_returns_none(tmp_path, monkeypatch):
     _use_tmp_db(tmp_path, monkeypatch)
     assert memory.summarize_session("nobody") is None
@@ -344,6 +395,17 @@ def test_transcript_caps_total_chars():
     text = memory._transcript(messages, max_total_chars=2000)
     assert text.count("[CYCLISTE]") == 3
     assert len(text) <= 2000
+
+
+def test_transcript_since_id_filters_old_messages():
+    messages = [
+        {"id": 1, "role": "user", "payload": {"content": "vieux"}},
+        {"id": 2, "role": "assistant", "payload": {"content": "vieux aussi"}},
+        {"id": 3, "role": "user", "payload": {"content": "récent"}},
+    ]
+    text = memory._transcript(messages, since_id=2)
+    assert "récent" in text
+    assert "vieux" not in text
 
 
 def test_finalize_disabled_returns_zero(tmp_path, monkeypatch):
