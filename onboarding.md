@@ -141,7 +141,7 @@ Toujours sur la page **Profil**, section **« Garmin Connect »**.
 
 | À savoir | Détail |
 | --- | --- |
-| Garmin ne remonte que les **activités** | Sommeil, HRV, poids, SpO2 viennent de **Google Health** ou de la saisie manuelle |
+| Garmin remonte les **activités + la santé** | Sommeil, HRV, FC repos, SpO2, pas, calories et poids sont synchronisés automatiquement (page **Santé**, toutes les 6 h) |
 | Pas de push vers Garmin | L'export de ton plan se fait par téléchargement ZIP (.FIT) ou calendrier (.ICS) depuis la page Plan |
 | « Connexion Garmin expirée ou rejetée » | Clique sur **« Reconnecter Garmin »** et refais la connexion |
 | Pas de compte Garmin ? | Ajoute une activité manuellement ou importe un fichier d'activité (.tcx) depuis la page **Activités** |
@@ -150,14 +150,20 @@ Toujours sur la page **Profil**, section **« Garmin Connect »**.
 
 ## Étape 5 — Données de santé (athlète — recommandé)
 
-Page **Santé** (icône cœur en bas).
+Page **Santé** (icône cœur en bas). La carte **« Sources de données »** indique
+d'où viennent les métriques et leur fraîcheur.
 
-- **Avec Google Health** : clique sur **« Connecter Google Health »**, autorise
-  l'accès, puis **« Sync maintenant »** (7 jours). Tu récupères le sommeil, le
-  HRV, la FC repos, le poids, les pas, la SpO2, etc. — qui alimentent le score
-  de forme du jour (readiness).
-- **Sans Google Health** : carte **« Saisie du jour »**, renseigne la **Date** et
-  les valeurs utiles (**HRV**, **FC repos**, **Sommeil**, **Score sommeil**,
+- **Avec une montre Garmin** (déjà connectée à l'étape 4) : clique sur
+  **« Sync santé »** (7 jours). Sommeil, HRV, FC repos, poids, pas, SpO2,
+  respiration sont récupérés — avec, en bonus, le score de sommeil, le training
+  readiness et la body battery natifs de la montre.
+- **Avec Google Health** (bracelet Fitbit / Pixel Watch) : clique sur
+  **« Connecter Google Health »**, autorise l'accès, puis **« Sync maintenant »**.
+- **Les deux connectés ?** Choisis la source préférée : **Automatique** (Garmin
+  prioritaire, Google Health complète les jours manquants), **Garmin** ou
+  **Google Health**.
+- **Sans montre connectée** : carte **« Saisie du jour »**, renseigne la **Date**
+  et les valeurs utiles (**HRV**, **FC repos**, **Sommeil**, **Score sommeil**,
   **Stress**, **Poids**), puis **« Enregistrer »**. Tout est optionnel, mais plus
   tu remplis, meilleures sont les recommandations du matin.
 
@@ -262,7 +268,7 @@ Page **Plan**.
 - [ ] 3. **Profil → Infos perso** : FTP, sexe, FC repos, FC max, poids,
       % LTHR, niveau → **Enregistrer le profil**
 - [ ] 4. **Profil → Garmin Connect** : connecter puis **Synchroniser maintenant**
-- [ ] 5. Santé : Google Health ou saisie manuelle
+- [ ] 5. Santé : Garmin (sync auto), Google Health ou saisie manuelle
 - [ ] 6. Profil → Disponibilité hebdo
 - [ ] 7. Plan : objectif puis génération du plan
 

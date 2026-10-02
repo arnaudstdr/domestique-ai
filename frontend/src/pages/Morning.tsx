@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 import {
   Bar,
   BarChart,
@@ -21,14 +22,18 @@ import {
 } from "lucide-react";
 import { api, ApiError } from "../api/client";
 import type {
+  HealthProvider,
+  HealthProviderStatus,
+  HealthSourcesResponse,
   MorningEntry,
   MorningResponse,
-  GoogleHealthStatusResponse,
 } from "../api/types";
 import StatStrip from "../components/StatStrip";
+import type { StatItem } from "../components/StatStrip";
 import ReadinessBadge from "../components/ReadinessBadge";
 import { CHART, axisProps, legendStyle, tooltipStyle } from "../chartTheme";
 import { useToast } from "../hooks/useToast";
+import { useViewing } from "../hooks/useViewing";
 
 const MANUAL_METRICS: {
   key: keyof MetricForm;
@@ -54,6 +59,12 @@ const ADVANCED_METRICS: {
   { key: "skin_temp_delta_c", label: "Δ temp. peau", unit: "°C" },
   { key: "steps", label: "Pas", unit: "" },
   { key: "active_calories", label: "Calories act.", unit: "kcal" },
+];
+
+const PROVIDER_OPTIONS: { value: HealthProvider; label: string }[] = [
+  { value: "auto", label: "Automatique" },
+  { value: "garmin", label: "Garmin" },
+  { value: "google_health", label: "Google Health" },
 ];
 
 const SLEEP_STAGES: { key: keyof MorningEntry; label: string; color: string }[] = [
@@ -86,18 +97,20 @@ export default function Morning() {
   const [date, setDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [form, setForm] = useState<MetricForm>(EMPTY);
   const [saving, setSaving] = useState(false);
-  const [ghStatus, setGhStatus] = useState<GoogleHealthStatusResponse | null>(null);
+  const [sources, setSources] = useState<HealthSourcesResponse | null>(null);
   const [syncing, setSyncing] = useState(false);
+  const [syncingGarmin, setSyncingGarmin] = useState(false);
   const { push } = useToast();
+  const viewing = useViewing();
 
   async function refresh() {
     try {
-      const [morningData, statusData] = await Promise.all([
+      const [morningData, sourcesData] = await Promise.all([
         api.morning.get(90),
-        api.googleHealth.status(),
+        api.morning.sources(),
       ]);
       setData(morningData);
-      setGhStatus(statusData);
+      setSources(sourcesData);
       const existing = morningData.history.find((e: MorningEntry) => e.date === date);
       if (existing) {
         setForm({
@@ -169,80 +182,203 @@ export default function Morning() {
     }
   }
 
+  async function connectGoogleHealth() {
+    try {
+      const { auth_url } = await api.googleHealth.auth();
+      window.location.assign(auth_url);
+    } catch (err) {
+      const msg = err instanceof ApiError ? err.message : String(err);
+      push(`Erreur : ${msg}`, "error");
+    }
+  }
+
+  async function syncGarminHealth() {
+    setSyncingGarmin(true);
+    try {
+      const result = await api.garmin.healthSync(7);
+      push(result.message, result.success ? "success" : "error");
+      await refresh();
+    } catch (err) {
+      const msg = err instanceof ApiError ? err.message : String(err);
+      push(`Sync échouée : ${msg}`, "error");
+    } finally {
+      setSyncingGarmin(false);
+    }
+  }
+
+  async function changeProvider(provider: HealthProvider) {
+    try {
+      setSources(await api.morning.setProvider(provider));
+      push("Source des métriques mise à jour.", "success");
+    } catch (err) {
+      const msg = err instanceof ApiError ? err.message : String(err);
+      push(`Erreur : ${msg}`, "error");
+    }
+  }
+
   const latestEntry = data?.history[data.history.length - 1] ?? null;
 
   return (
     <div className="stagger space-y-4">
-      <div className="card space-y-3">
+      <div className="card space-y-4">
         <div className="flex items-start justify-between gap-3">
           <h2 className="flex items-center gap-2 font-display text-lg font-bold tracking-tight">
             <Sunrise className="h-5 w-5 text-accent" strokeWidth={1.75} aria-hidden="true" />
-            Google Health
+            Sources de données
           </h2>
-          {ghStatus?.authenticated ? (
-            <div className="flex items-center gap-2">
-              <span className="inline-flex h-2 w-2 rounded-full bg-emerald-500" />
-              <span className="text-xs text-muted">Connecté</span>
-            </div>
-          ) : ghStatus?.configured ? (
-            <div className="flex items-center gap-2">
-              <span className="inline-flex h-2 w-2 rounded-full bg-amber-500" />
-              <span className="text-xs text-muted">Non connecté</span>
-            </div>
-          ) : null}
-        </div>
-
-        {ghStatus?.configured === false && (
-          <p className="text-sm text-muted">
-            L'intégration Google Health n'est pas configurée côté serveur.
-          </p>
-        )}
-
-        <div className="flex flex-wrap gap-2">
-          {!ghStatus?.authenticated ? (
-            <button
-              onClick={async () => {
-                try {
-                  const { auth_url } = await api.googleHealth.auth();
-                  window.location.assign(auth_url);
-                } catch (err) {
-                  const msg = err instanceof ApiError ? err.message : String(err);
-                  push(`Erreur : ${msg}`, "error");
-                }
-              }}
-              className="btn-primary inline-flex items-center gap-2"
-            >
-              <Activity className="h-4 w-4" strokeWidth={1.75} />
-              Connecter Google Health
-            </button>
-          ) : (
-            <>
-              <button
-                onClick={syncGoogleHealth}
-                disabled={syncing}
-                className="btn-primary inline-flex items-center gap-2"
-              >
-                <RefreshCw
-                  className={`h-4 w-4 ${syncing ? "animate-spin" : ""}`}
-                  strokeWidth={1.75}
-                />
-                {syncing ? "Sync…" : "Sync maintenant"}
-              </button>
-              <button
-                onClick={disconnectGoogleHealth}
-                className="btn-ghost inline-flex items-center gap-2"
-              >
-                <Unlink className="h-4 w-4" strokeWidth={1.75} />
-                Déconnecter
-              </button>
-            </>
+          {sources && (
+            <span className="rounded-full bg-overlay/[0.06] px-2 py-0.5 text-[10px] font-medium text-muted">
+              {sources.provider_effective === "garmin"
+                ? "Garmin actif"
+                : sources.provider_effective === "google_health"
+                  ? "Google Health actif"
+                  : "Saisie manuelle"}
+            </span>
           )}
         </div>
 
-        {ghStatus?.last_sync_at && (
-          <p className="text-xs text-muted">
-            Dernière sync : {new Date(ghStatus.last_sync_at).toLocaleString("fr-FR")}
-          </p>
+        {sources === null ? (
+          <p className="text-sm text-muted">Chargement des sources…</p>
+        ) : (
+          <>
+            <div className="space-y-2 rounded-xl border border-border/60 p-3">
+              <ProviderHeader name="Garmin" status={sources.garmin} />
+              {sources.garmin.connected ? (
+                <>
+                  <p className="text-xs text-muted">
+                    Sommeil, HRV, FC repos, SpO2, respiration, pas, calories et poids —
+                    synchronisés avec ton compte Garmin (scores calculés localement).
+                  </p>
+                  <div className="flex flex-wrap gap-2">
+                    {!viewing && (
+                      <button
+                        onClick={syncGarminHealth}
+                        disabled={syncingGarmin}
+                        className="btn-primary inline-flex items-center gap-2"
+                      >
+                        <RefreshCw
+                          className={`h-4 w-4 ${syncingGarmin ? "animate-spin" : ""}`}
+                          strokeWidth={1.75}
+                        />
+                        {syncingGarmin ? "Sync…" : "Sync santé"}
+                      </button>
+                    )}
+                    {!viewing && (
+                      <Link to="/profil" className="btn-ghost inline-flex items-center gap-2">
+                        Gérer
+                      </Link>
+                    )}
+                  </div>
+                  {sources.garmin.last_sync_at && (
+                    <p className="text-xs text-muted">
+                      Dernière sync santé :{" "}
+                      {new Date(sources.garmin.last_sync_at).toLocaleString("fr-FR")}
+                    </p>
+                  )}
+                  {sources.garmin.last_error && (
+                    <p className="text-xs text-amber-600">
+                      Dernière erreur : {sources.garmin.last_error}
+                    </p>
+                  )}
+                </>
+              ) : (
+                <>
+                  <p className="text-xs text-muted">
+                    Connecte ton compte Garmin dans les réglages pour récupérer aussi le
+                    sommeil et la récupération de ta montre.
+                  </p>
+                  {!viewing && (
+                    <Link to="/profil" className="btn-primary inline-flex items-center gap-2">
+                      <Activity className="h-4 w-4" strokeWidth={1.75} />
+                      Connecter Garmin
+                    </Link>
+                  )}
+                </>
+              )}
+            </div>
+
+            <div className="space-y-2 rounded-xl border border-border/60 p-3">
+              <ProviderHeader name="Google Health" status={sources.google_health} />
+              {sources.google_health.configured === false ? (
+                <p className="text-xs text-muted">
+                  L'intégration Google Health n'est pas configurée côté serveur.
+                </p>
+              ) : sources.google_health.connected ? (
+                <>
+                  <div className="flex flex-wrap gap-2">
+                    {!viewing && (
+                      <>
+                        <button
+                          onClick={syncGoogleHealth}
+                          disabled={syncing}
+                          className="btn-primary inline-flex items-center gap-2"
+                        >
+                          <RefreshCw
+                            className={`h-4 w-4 ${syncing ? "animate-spin" : ""}`}
+                            strokeWidth={1.75}
+                          />
+                          {syncing ? "Sync…" : "Sync maintenant"}
+                        </button>
+                        <button
+                          onClick={disconnectGoogleHealth}
+                          className="btn-ghost inline-flex items-center gap-2"
+                        >
+                          <Unlink className="h-4 w-4" strokeWidth={1.75} />
+                          Déconnecter
+                        </button>
+                      </>
+                    )}
+                  </div>
+                  {sources.google_health.last_sync_at && (
+                    <p className="text-xs text-muted">
+                      Dernière sync :{" "}
+                      {new Date(sources.google_health.last_sync_at).toLocaleString("fr-FR")}
+                    </p>
+                  )}
+                </>
+              ) : (
+                <>
+                  <p className="text-xs text-muted">
+                    Alternative bracelet Fitbit / Pixel Watch (OAuth Google).
+                  </p>
+                  {!viewing && (
+                    <button
+                      onClick={connectGoogleHealth}
+                      className="btn-ghost inline-flex items-center gap-2"
+                    >
+                      <Activity className="h-4 w-4" strokeWidth={1.75} />
+                      Connecter Google Health
+                    </button>
+                  )}
+                </>
+              )}
+            </div>
+
+            {!viewing && sources.garmin.connected && sources.google_health.connected && (
+              <div className="space-y-2">
+                <span className="text-xs text-muted">
+                  Source des métriques automatiques
+                </span>
+                <div className="flex flex-wrap gap-2">
+                  {PROVIDER_OPTIONS.map((option) => (
+                    <button
+                      key={option.value}
+                      onClick={() => changeProvider(option.value)}
+                      className={
+                        sources.provider === option.value ? "btn-primary" : "btn-ghost"
+                      }
+                    >
+                      {option.label}
+                    </button>
+                  ))}
+                </div>
+                <p className="text-[11px] text-muted">
+                  En automatique, Garmin est prioritaire ; Google Health complète les
+                  jours sans données Garmin.
+                </p>
+              </div>
+            )}
+          </>
         )}
       </div>
 
@@ -328,20 +464,26 @@ export default function Morning() {
       {data && (
         <>
           <div className="card space-y-3">
-            <h3 className="label-eyebrow">Métriques avancées</h3>
+            <div className="flex items-center justify-between gap-2">
+              <h3 className="label-eyebrow">Métriques avancées</h3>
+              <SourceBadge entry={latestEntry} />
+            </div>
             <StatStrip
               columns="3-responsive"
-              items={ADVANCED_METRICS.map((m) => {
-                const value = latestEntry?.[m.key];
-                return {
-                  label: m.label,
-                  value:
-                    value == null
-                      ? "—"
-                      : Number(value).toFixed(m.key === "skin_temp_delta_c" ? 2 : 0),
-                  unit: m.unit || undefined,
-                };
-              })}
+              items={[
+                ...ADVANCED_METRICS.map((m) => {
+                  const value = latestEntry?.[m.key];
+                  return {
+                    label: m.label,
+                    value:
+                      value == null
+                        ? "—"
+                        : Number(value).toFixed(m.key === "skin_temp_delta_c" ? 2 : 0),
+                    unit: m.unit || undefined,
+                  };
+                }),
+                ...bonusMetricItems(latestEntry),
+              ]}
             />
           </div>
 
@@ -349,10 +491,13 @@ export default function Morning() {
             hasSleepStages(latestEntry) || parseSleepStages(latestEntry) != null
           ) && (
             <div className="card space-y-3">
-              <h3 className="label-eyebrow flex items-center gap-2">
-                <BedDouble className="h-4 w-4 text-accent" strokeWidth={1.75} />
-                Sommeil (dernière nuit)
-              </h3>
+              <div className="flex items-center justify-between gap-2">
+                <h3 className="label-eyebrow flex items-center gap-2">
+                  <BedDouble className="h-4 w-4 text-accent" strokeWidth={1.75} />
+                  Sommeil (dernière nuit)
+                </h3>
+                <SourceBadge entry={latestEntry} />
+              </div>
               {hasSleepStages(latestEntry) && (
                 <div className="grid grid-cols-2 gap-2">
                   {SLEEP_STAGES.map((s) => {
@@ -433,6 +578,66 @@ export default function Morning() {
       )}
     </div>
   );
+}
+
+function ProviderHeader({ name, status }: { name: string; status: HealthProviderStatus }) {
+  const dot = status.connected
+    ? "bg-emerald-500"
+    : status.configured
+      ? "bg-amber-500"
+      : "bg-gray-400";
+  return (
+    <div className="flex items-center justify-between gap-2">
+      <span className="text-sm font-medium">{name}</span>
+      <span className="flex items-center gap-2">
+        <span className={`inline-flex h-2 w-2 rounded-full ${dot}`} />
+        <span className="text-xs text-muted">
+          {status.connected ? "Connecté" : status.configured ? "Non connecté" : "Non configuré"}
+        </span>
+      </span>
+    </div>
+  );
+}
+
+const SOURCE_LABELS: Record<string, string> = {
+  garmin: "Garmin",
+  google_health: "Google Health",
+};
+
+function SourceBadge({ entry }: { entry: MorningEntry | null }) {
+  if (!entry) return null;
+  const label = entry.source ? (SOURCE_LABELS[entry.source] ?? entry.source) : "Manuel / historique";
+  return (
+    <span className="shrink-0 rounded-full bg-overlay/[0.06] px-2 py-0.5 text-[10px] font-medium text-muted">
+      {label}
+    </span>
+  );
+}
+
+function bonusMetricItems(entry: MorningEntry | null): StatItem[] {
+  if (!entry) return [];
+  const items: StatItem[] = [];
+  if (entry.garmin_sleep_score != null) {
+    items.push({
+      label: "Score sommeil natif",
+      value: String(entry.garmin_sleep_score),
+      unit: "/100",
+    });
+  }
+  if (entry.garmin_readiness_score != null) {
+    items.push({
+      label: "Readiness natif",
+      value: String(entry.garmin_readiness_score),
+      unit: "/100",
+    });
+  }
+  if (entry.garmin_body_battery_min != null || entry.garmin_body_battery_max != null) {
+    items.push({
+      label: "Body battery",
+      value: `${entry.garmin_body_battery_min ?? "—"}–${entry.garmin_body_battery_max ?? "—"}`,
+    });
+  }
+  return items;
 }
 
 function StressBadge({ score }: { score: number }) {

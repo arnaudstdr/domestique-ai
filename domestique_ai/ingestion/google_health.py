@@ -977,10 +977,11 @@ def sync_google_health_morning_metrics(
     Retourne un résumé : ``{"synced_dates": [...], "skipped_dates": [...]}``.
     """
     from domestique_ai.processing.morning_metrics import (
-        calculate_readiness_score,
-        calculate_sleep_score,
-        calculate_stress_score,
+        HEALTH_PROVIDER_GOOGLE,
+        build_provider_morning_payload,
         fetch_morning_entry,
+        get_health_provider,
+        has_auto_metrics,
         save_morning_entry,
     )
 
@@ -988,6 +989,11 @@ def sync_google_health_morning_metrics(
         end_date = dt.date.today()
     if start_date is None:
         start_date = end_date - dt.timedelta(days=7)
+
+    # En mode "auto" ou "garmin", les jours déjà écrits par Garmin ne sont pas
+    # écrasés : Google ne sert que de remplissage des trous.
+    provider = get_health_provider(db_path=db_path)
+    garmin_wins = provider != HEALTH_PROVIDER_GOOGLE
 
     # Diagnostic : un legacyUserId présent confirme que les données Fitbit
     # sont bien rattachées au compte Google Health.
@@ -1013,97 +1019,23 @@ def sync_google_health_morning_metrics(
 
     for date_str, data in data_by_date.items():
         existing = fetch_morning_entry(date_str, db_path=db_path)
-        manual_sleep_score = (
-            existing is not None
-            and existing.get("sleep_score") is not None
-            and existing.get("sleep_score_computed") == 0
-        )
 
-        if manual_sleep_score:
-            sleep_score = existing.get("sleep_score")
-            sleep_score_computed = 0
-        else:
-            sleep_score = calculate_sleep_score(
-                data.get("sleep_hours"),
-                data.get("sleep_deep_min"),
-                data.get("sleep_rem_min"),
-                data.get("sleep_light_min"),
-                data.get("sleep_awake_min"),
-            )
-            sleep_score_computed = 1 if sleep_score is not None else None
-
-        readiness_score = calculate_readiness_score(
-            data.get("hrv_ms"),
-            data.get("resting_hr"),
-            data.get("sleep_hours"),
-            db_path=db_path,
-        )
-
-        # Une valeur de stress saisie à la main (flag != 1, y compris les lignes
-        # historiques au flag NULL) n'est jamais écrasée par le score calculé.
-        manual_stress_score = (
-            existing is not None
-            and existing.get("stress_score") is not None
-            and existing.get("stress_score_computed") != 1
-        )
-        if manual_stress_score:
-            stress_score = existing.get("stress_score")
-            stress_score_computed = 0
-        else:
-            stress_score = calculate_stress_score(
-                data.get("hrv_ms"),
-                data.get("resting_hr"),
-                data.get("sleep_hours"),
-                sleep_score,
-                data.get("respiratory_rate_avg_bpm"),
-                data.get("skin_temp_delta_c"),
-                data.get("steps"),
-                data.get("active_calories"),
-                db_path=db_path,
-            )
-            stress_score_computed = 1 if stress_score is not None else None
-
-        kwargs: dict[str, Any] = {
-            "date": date_str,
-            "hrv_ms": data.get("hrv_ms"),
-            "resting_hr": data.get("resting_hr"),
-            "sleep_hours": data.get("sleep_hours"),
-            "sleep_score": sleep_score,
-            "sleep_score_computed": sleep_score_computed,
-            "spo2_avg_pct": data.get("spo2_avg_pct"),
-            "respiratory_rate_avg_bpm": data.get("respiratory_rate_avg_bpm"),
-            "skin_temp_delta_c": data.get("skin_temp_delta_c"),
-            "sleep_deep_min": data.get("sleep_deep_min"),
-            "sleep_rem_min": data.get("sleep_rem_min"),
-            "sleep_light_min": data.get("sleep_light_min"),
-            "sleep_awake_min": data.get("sleep_awake_min"),
-            "sleep_stages": data.get("sleep_stages"),
-            "steps": data.get("steps"),
-            "active_calories": data.get("active_calories"),
-            "readiness_score": readiness_score,
-            "stress_score": stress_score,
-            "stress_score_computed": stress_score_computed,
-            "weight_kg": data.get("weight_kg"),
-        }
-
-        # On ne stocke que les dates ayant au moins une métrique automatique.
-        metric_values = {k: v for k, v in kwargs.items() if k != "date"}
-        if all(v is None for v in metric_values.values()):
+        if (
+            garmin_wins
+            and existing is not None
+            and existing.get("source") == "garmin"
+            and has_auto_metrics(existing)
+        ):
             skipped.append(date_str)
             continue
 
-        # Conserve les champs manuels existants (notes, poids) si présents
-        # et non fournis par la source auto (ex. balance absente ce jour-là).
-        # Le stress est traité plus haut (calculé ou préservé selon le flag).
-        if existing:
-            for manual_field in ("notes", "weight_kg"):
-                if (
-                    existing.get(manual_field) is not None
-                    and metric_values.get(manual_field) is None
-                ):
-                    kwargs[manual_field] = existing[manual_field]
+        kwargs = build_provider_morning_payload(existing, data, db_path=db_path)
+        if kwargs is None:
+            skipped.append(date_str)
+            continue
 
-        save_morning_entry(db_path=db_path, **kwargs)
+        kwargs["source"] = HEALTH_PROVIDER_GOOGLE
+        save_morning_entry(date_str, db_path=db_path, **kwargs)
         synced.append(date_str)
 
     log.info(

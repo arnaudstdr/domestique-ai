@@ -475,6 +475,42 @@ def get_google_health_first_run_delay_minutes() -> int:
     return max(0, v)
 
 
+def get_garmin_health_auto_sync_minutes() -> int:
+    """Période de l'auto-sync santé Garmin en minutes (défaut 360 = 6h).
+
+    ``0`` désactive complètement l'auto-sync. Les données de récupération
+    n'évoluent qu'une fois par jour : pas besoin de la cadence des activités.
+    """
+    raw = os.getenv("DOMESTIQUE_AI_GARMIN_HEALTH_AUTO_SYNC_MINUTES")
+    if raw is None or raw.strip() == "":
+        return 360
+    try:
+        v = int(raw)
+    except ValueError:
+        logger.warning(
+            "DOMESTIQUE_AI_GARMIN_HEALTH_AUTO_SYNC_MINUTES=%r invalide — fallback 360.",
+            raw,
+        )
+        return 360
+    return max(0, v)
+
+
+def get_garmin_health_first_run_delay_minutes() -> int:
+    """Délai avant le 1er auto-sync santé Garmin après démarrage (défaut 10)."""
+    raw = os.getenv("DOMESTIQUE_AI_GARMIN_HEALTH_FIRST_RUN_DELAY_MIN")
+    if raw is None or raw.strip() == "":
+        return 10
+    try:
+        v = int(raw)
+    except ValueError:
+        logger.warning(
+            "DOMESTIQUE_AI_GARMIN_HEALTH_FIRST_RUN_DELAY_MIN=%r invalide — fallback 10.",
+            raw,
+        )
+        return 10
+    return max(0, v)
+
+
 def get_scheduler_timezone() -> str:
     """Fuseau appliqué aux jobs CronTrigger (check du matin, revue hebdo).
 

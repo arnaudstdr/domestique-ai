@@ -1,7 +1,7 @@
 # AGENTS.md — `domestique_ai/ingestion/`
 
 Ingestion des activités (Garmin, TCX, saisie manuelle) et des métriques de
-récupération (Google Health), et couche de persistance SQLite.
+récupération (Google Health, Garmin Santé), et couche de persistance SQLite.
 
 Guide racine (invariants globaux, DB, conventions) : `AGENTS.md`.
 Couches aval : `processing/AGENTS.md`, `llm/AGENTS.md`, `api/AGENTS.md`.
@@ -127,3 +127,52 @@ DOMESTIQUE_AI_GOOGLE_HEALTH_AUTO_SYNC_MINUTES=360
 
 **Auto-sync** : un job APScheduler supplémentaire récupère les 7 derniers jours
 toutes les 6 heures par défaut. Il est indépendant du sync Garmin.
+
+## Garmin Health — métriques de récupération via la montre Garmin
+
+Alternative à Google Health, **même sink** (`morning_metrics`) et **mêmes
+scores locaux** (parité de comportement) : `ingestion/garmin_health.py` lit la
+santé depuis le compte Garmin déjà connecté (activités) et alimente la page
+Santé. Repli sur les valeurs embarquées dans `dailySleepDTO` (`avgSleepHRV`,
+`avgSpO2`, `avgRespirationValue`) si un endpoint dédié ne répond pas.
+
+- **Mapping** : sommeil + stades + `sleep_stages_json` (hypnogramme) via
+  `get_sleep_data` (clé = date de réveil, comme Google) ; HRV via
+  `get_hrv_data` ; FC repos / pas / calories / body battery via `get_stats` ;
+  SpO2 via `get_spo2_data` ; respiration via `get_respiration_data` ; poids via
+  `get_body_composition` (range) ; readiness natif via
+  `get_morning_training_readiness`. La température cutanée n'est pas exposée de
+  façon fiable → laissée `None`.
+- **Colonnes bonus** (valeurs natives Garmin, hors calculs, affichées en info
+  secondaire) : `garmin_sleep_score`, `garmin_readiness_score`,
+  `garmin_body_battery_min/max`.
+- **Fenêtre** : 7 j par défaut, **30 j max** (`MAX_SYNC_DAYS`) — API non
+  officielle, appels séquentiels (~6/jour + 1 range poids).
+- **Endpoints** : `POST /api/garmin/health/sync?days=` (synchrone, 404 si
+  Garmin non connecté, 502 sinon) ; statut agrégé dans
+  `GET /api/morning/sources`. Statut durable dans `sync_meta` de la base
+  athlète (`garmin_health_last_sync_at` / `garmin_health_last_error`).
+- **Auto-sync** : job `garmin_health_auto_sync` (défaut 6 h,
+  `DOMESTIQUE_AI_GARMIN_HEALTH_AUTO_SYNC_MINUTES=0` pour couper), ciblé sur
+  les athlètes avec tokens Garmin, plus pré-syncs dans le check du matin et la
+  revue hebdo (symétrie Google Health).
+
+### Provenance et préférence de provider (Garmin vs Google Health)
+
+- `morning_metrics.source` trace le provider automatique de la ligne
+  (`garmin` | `google_health` | `NULL` = saisie manuelle/historique).
+- Préférence par athlète dans `sync_meta` (`health_provider` ∈
+  `auto|garmin|google_health`, helpers `get/set_health_provider` +
+  `resolve_health_provider` dans `processing/morning_metrics.py`) :
+  **`auto` = Garmin prioritaire**, Google Health ne remplit que les jours sans
+  données Garmin (`source` absente ou `google_health`) ; `garmin` coupe la sync
+  auto Google des métriques ; `google_health` court-circuite la sync Garmin.
+- **Aucun provider n'écrase l'autre avec `None`** : le payload d'écriture
+  commun (`build_provider_morning_payload`) complète les métriques absentes du
+  fetch par la valeur existante, et la SQL préserve `source`, `garmin_*` et
+  `sleep_stages_json` via `COALESCE`.
+- Un jour Garmin **sans métrique de récupération** (pesage seul) passe par
+  `set_weight()` (upsert ciblé) : la ligne garde la provenance de l'autre
+  provider, qui continue de la remplir.
+- Scores manuels (`sleep_score_computed=0`, `stress_score_computed != 1`)
+  toujours préservés, quel que soit le provider.

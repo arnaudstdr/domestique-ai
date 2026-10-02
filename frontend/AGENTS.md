@@ -129,6 +129,15 @@ ce sheet (plus de carte de recherche en haut de page).
 - **Santé** — page `/sante`, composant `pages/Morning.tsx` (onglet `HeartPulse`
   dans `BottomNav`). Le **domaine backend reste nommé `morning`** (voir
   `ingestion/AGENTS.md`) : ne pas « aligner » le front sur le nom UI.
+  La carte **« Sources de données »** (remplace l'ancienne carte Google Health)
+  affiche l'état Garmin et Google Health (`GET /api/morning/sources`), les
+  actions « Sync santé » (Garmin) / « Sync maintenant » (Google), le lien
+  Gérer → `/profil`, et le sélecteur de provider quand les deux sont connectés
+  (`PUT /api/morning/sources/provider`). Le badge de provenance des cartes
+  avancées/sommeil vient de `MorningEntry.source` (Garmin / Google Health /
+  Manuel), et les colonnes bonus `garmin_*` (score sommeil, readiness, body
+  battery) s'affichent en métriques secondaires quand présentes. Aucune action
+  d'écriture n'est proposée en consultation coach (`useViewing`).
 - **Tendances** — page `/tendances` (agrégats `GET /api/metrics/trends` +
   projection FTP).
 - **Feedback** — page `/feedback` (bouton `Megaphone` dans l'en-tête, à côté

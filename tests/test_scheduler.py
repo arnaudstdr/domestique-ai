@@ -104,6 +104,7 @@ def test_interval_negative_clamped_to_zero(monkeypatch):
 
 def test_start_scheduler_disabled_when_interval_zero(monkeypatch):
     monkeypatch.setenv("DOMESTIQUE_AI_GARMIN_AUTO_SYNC_MINUTES", "0")
+    monkeypatch.setenv("DOMESTIQUE_AI_GARMIN_HEALTH_AUTO_SYNC_MINUTES", "0")
     monkeypatch.setenv("DOMESTIQUE_AI_GOOGLE_HEALTH_AUTO_SYNC_MINUTES", "0")
     monkeypatch.setenv("SESSION_IDLE_FINALIZE_MINUTES", "0")
     scheduler._scheduler = None
@@ -274,9 +275,36 @@ def test_scheduler_registers_only_healthcheck_when_sync_disabled(monkeypatch):
 def test_scheduler_noop_when_everything_disabled(monkeypatch):
     """Tout désactivé — aucun scheduler créé."""
     monkeypatch.setenv("DOMESTIQUE_AI_GARMIN_AUTO_SYNC_MINUTES", "0")
+    monkeypatch.setenv("DOMESTIQUE_AI_GARMIN_HEALTH_AUTO_SYNC_MINUTES", "0")
     monkeypatch.setenv("DOMESTIQUE_AI_GOOGLE_HEALTH_AUTO_SYNC_MINUTES", "0")
     monkeypatch.delenv("HEALTHCHECKS_PING_URL", raising=False)
     monkeypatch.setenv("SESSION_IDLE_FINALIZE_MINUTES", "0")
     scheduler._scheduler = None
     scheduler.start_scheduler()
+    assert scheduler._scheduler is None
+
+
+def test_garmin_health_interval_default(monkeypatch):
+    monkeypatch.delenv("DOMESTIQUE_AI_GARMIN_HEALTH_AUTO_SYNC_MINUTES", raising=False)
+    assert scheduler._garmin_health_auto_sync_interval_minutes() == 360
+
+
+def test_garmin_health_interval_zero_disables(monkeypatch):
+    monkeypatch.setenv("DOMESTIQUE_AI_GARMIN_HEALTH_AUTO_SYNC_MINUTES", "0")
+    assert scheduler._garmin_health_auto_sync_interval_minutes() == 0
+
+
+def test_garmin_health_start_scheduler_lifecycle(monkeypatch):
+    monkeypatch.setenv("DOMESTIQUE_AI_GARMIN_AUTO_SYNC_MINUTES", "0")
+    monkeypatch.setenv("DOMESTIQUE_AI_GOOGLE_HEALTH_AUTO_SYNC_MINUTES", "0")
+    monkeypatch.setenv("DOMESTIQUE_AI_GARMIN_HEALTH_AUTO_SYNC_MINUTES", "120")
+    monkeypatch.setenv("DOMESTIQUE_AI_GARMIN_HEALTH_FIRST_RUN_DELAY_MIN", "60")
+    scheduler._scheduler = None
+    try:
+        scheduler.start_scheduler()
+        assert scheduler._scheduler is not None
+        job = scheduler._scheduler.get_job("garmin_health_auto_sync")
+        assert job is not None
+    finally:
+        scheduler.stop_scheduler()
     assert scheduler._scheduler is None

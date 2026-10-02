@@ -644,3 +644,111 @@ def test_sync_writes_weight_and_preserves_manual(client: GoogleHealthClient, tmp
 
     assert fetch_morning_entry("2026-05-10", db_path=db_path)["weight_kg"] == 71.0
     assert fetch_morning_entry("2026-05-11", db_path=db_path)["weight_kg"] == 70.5
+
+
+def _hrv_side_effect(day: int, value: float):
+    def side_effect(method, url, **kwargs):
+        if DATA_TYPE_DAILY_HRV in url:
+            return _mock_response(
+                {
+                    "dataPoints": [
+                        {
+                            "dataSource": {},
+                            "dailyHeartRateVariability": {
+                                "date": {"year": 2026, "month": 5, "day": day},
+                                "averageHeartRateVariabilityMilliseconds": value,
+                            },
+                        }
+                    ]
+                }
+            )
+        return _mock_response({"dataPoints": []})
+
+    return side_effect
+
+
+def test_sync_google_skips_days_written_by_garmin(client: GoogleHealthClient, tmp_path: Path):
+    """En mode auto (Garmin prioritaire), Google ne remplace pas Garmin."""
+    import datetime as dt
+
+    from domestique_ai.ingestion.db import init_db
+    from domestique_ai.processing.morning_metrics import (
+        fetch_morning_entry,
+        save_morning_entry,
+    )
+
+    db_path = tmp_path / "test.db"
+    init_db(db_path)
+    save_morning_entry("2026-05-10", hrv_ms=60.0, source="garmin", db_path=db_path)
+
+    with patch("requests.request", side_effect=_hrv_side_effect(10, 45.0)):
+        result = sync_google_health_morning_metrics(
+            client,
+            start_date=dt.date(2026, 5, 10),
+            end_date=dt.date(2026, 5, 10),
+            db_path=db_path,
+        )
+
+    assert result["skipped_dates"] == ["2026-05-10"]
+    entry = fetch_morning_entry("2026-05-10", db_path=db_path)
+    assert entry["hrv_ms"] == 60.0
+    assert entry["source"] == "garmin"
+
+
+def test_sync_google_fills_garmin_weight_only_day(client: GoogleHealthClient, tmp_path: Path):
+    """Un jour Garmin avec seulement un pesage ne bloque pas le remplissage Google."""
+    import datetime as dt
+
+    from domestique_ai.ingestion.db import init_db
+    from domestique_ai.processing.morning_metrics import (
+        fetch_morning_entry,
+        save_morning_entry,
+    )
+
+    db_path = tmp_path / "test.db"
+    init_db(db_path)
+    save_morning_entry("2026-05-10", weight_kg=71.0, source="garmin", db_path=db_path)
+
+    with patch("requests.request", side_effect=_hrv_side_effect(10, 45.0)):
+        result = sync_google_health_morning_metrics(
+            client,
+            start_date=dt.date(2026, 5, 10),
+            end_date=dt.date(2026, 5, 10),
+            db_path=db_path,
+        )
+
+    assert result["synced_dates"] == ["2026-05-10"]
+    entry = fetch_morning_entry("2026-05-10", db_path=db_path)
+    assert entry["hrv_ms"] == 45.0
+    assert entry["weight_kg"] == 71.0  # pesage Garmin préservé
+    assert entry["source"] == "google_health"
+
+
+def test_sync_google_overwrites_garmin_when_preferred(client: GoogleHealthClient, tmp_path: Path):
+    """Préférence ``google_health`` : Google reprend la main sur les jours Garmin."""
+    import datetime as dt
+
+    from domestique_ai.ingestion.db import init_db
+    from domestique_ai.processing.morning_metrics import (
+        fetch_morning_entry,
+        save_morning_entry,
+        set_health_provider,
+    )
+
+    db_path = tmp_path / "test.db"
+    init_db(db_path)
+    set_health_provider("google_health", db_path=db_path)
+    save_morning_entry("2026-05-10", hrv_ms=60.0, source="garmin", db_path=db_path)
+
+    with patch("requests.request", side_effect=_hrv_side_effect(10, 45.0)):
+        result = sync_google_health_morning_metrics(
+            client,
+            start_date=dt.date(2026, 5, 10),
+            end_date=dt.date(2026, 5, 10),
+            db_path=db_path,
+        )
+
+    assert result["synced_dates"] == ["2026-05-10"]
+    entry = fetch_morning_entry("2026-05-10", db_path=db_path)
+    assert entry["hrv_ms"] == 45.0
+    assert entry["source"] == "google_health"
