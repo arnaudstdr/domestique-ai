@@ -24,6 +24,7 @@ import statistics
 from typing import Any
 
 from domestique_ai.athlete_context import AthleteContext, context_from_env
+from domestique_ai.config import llm_decision_reason_enabled
 from domestique_ai.llm import usage
 from domestique_ai.processing.plan_builder import Workout
 
@@ -254,7 +255,7 @@ def _refine_reason_with_llm(decision: str, reason: str, signals: dict[str, Any])
             {"role": "user", "content": prompt},
         ]
         result = chat_structured_sync(
-            messages, timeout_s=15.0, options={"format": schema}, label=usage.DECISION_REASON
+            messages, timeout_s=15.0, schema=schema, label=usage.DECISION_REASON
         )
         if isinstance(result, dict) and result.get("reason"):
             return str(result["reason"])[:220]
@@ -281,6 +282,10 @@ def evaluate_daily_decision(
 
     ctx = ctx or context_from_env()
     today = today or _dt.date.today()
+    if use_llm and not llm_decision_reason_enabled():
+        # Flag plateforme : la décision reste calculée par les règles, seule la
+        # rédaction LLM de la raison est désactivée.
+        use_llm = False
     signals = _collect_signals(today, ctx)
 
     planned = get_planned_workout(today.isoformat(), ctx=ctx)
@@ -325,30 +330,39 @@ def evaluate_daily_decision(
         workout = adjusted.to_dict()
         if use_llm:
             reason = _refine_reason_with_llm(decision, reason, signals)
-    else:
-        if use_llm:
-            reason = _refine_reason_with_llm(decision, reason, signals)
+    # Décision ``go`` : la raison déterministe suffit (aucun appel LLM — la
+    # raison n'est jamais persistée dans ce cas).
 
     persisted = False
     plan_id = planned.get("plan_id")
     if persist and decision in ("adjust", "rest") and plan_id is not None:
-        from domestique_ai.llm.plan_storage import save_day_decision
+        from domestique_ai.llm.plan_storage import get_day_decision, save_day_decision
 
-        try:
-            save_day_decision(
-                plan_id,
-                today.isoformat(),
-                "adjusted" if decision == "adjust" else "rest",
-                workout=Workout.from_dict(workout) if workout else None,
-                reason=reason,
-                decided_by="daily_check",
-                db_path=ctx.db_path,
-            )
+        persisted_value = "adjusted" if decision == "adjust" else "rest"
+        existing: dict[str, Any] | None = None
+        with contextlib.suppress(Exception):
+            existing = get_day_decision(plan_id, today.isoformat(), db_path=ctx.db_path)
+        if existing is not None and existing.get("decision") == persisted_value:
+            # Décision déjà persistée (souvent par le job du matin, avec une
+            # raison raffinée par le LLM) : ne pas l'écraser avec la version
+            # déterministe des recalculs `use_llm=False` du dashboard.
             persisted = True
-            with contextlib.suppress(Exception):
-                invalidate_today_cache(today.isoformat(), db_path=ctx.db_path)
-        except Exception:  # noqa: BLE001
-            persisted = False
+        else:
+            try:
+                save_day_decision(
+                    plan_id,
+                    today.isoformat(),
+                    persisted_value,
+                    workout=Workout.from_dict(workout) if workout else None,
+                    reason=reason,
+                    decided_by="daily_check",
+                    db_path=ctx.db_path,
+                )
+                persisted = True
+                with contextlib.suppress(Exception):
+                    invalidate_today_cache(today.isoformat(), db_path=ctx.db_path)
+            except Exception:  # noqa: BLE001
+                persisted = False
 
     return {
         "date": today.isoformat(),

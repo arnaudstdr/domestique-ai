@@ -124,15 +124,20 @@ def test_build_initial_messages_injects_memory_block_new_session(monkeypatch):
 
 
 def test_build_initial_messages_injects_memory_block_with_history(monkeypatch):
-    """Le bloc mémoire accompagne aussi les tours suivants (continuité)."""
+    """Le bloc mémoire accompagne les tours suivants, placé APRÈS l'historique.
+
+    Ordre ``system → history → mémoire → user`` : le préfixe system+historique
+    reste stable d'un tour à l'autre (cache de prompt Ollama), seule la mémoire
+    (dont le RAG dépend de la question) varie en fin de prompt.
+    """
     history = [{"role": "user", "content": "Hello"}]
     messages = build_initial_messages(
         history, "Et demain ?", memory_block="MÉMOIRE PERSISTANTE : objectif juin"
     )
     roles = [m["role"] for m in messages]
-    # system + mémoire + history + user
-    assert roles == ["system", "system", "user", "user"]
-    assert "objectif juin" in messages[1]["content"]
+    assert roles == ["system", "user", "system", "user"]
+    assert "objectif juin" in messages[2]["content"]
+    assert messages[-1]["content"] == "Et demain ?"
 
 
 def test_build_initial_messages_trims_long_history(monkeypatch):

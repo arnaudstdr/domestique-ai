@@ -21,8 +21,9 @@ from domestique_ai.llm.daily_brief import (
 
 
 @pytest.fixture(autouse=True)
-def _isolated_cache():
-    """Réinitialise le cache entre chaque test."""
+def _isolated_cache(tmp_path, monkeypatch):
+    """Isole le cache persistant : DB temporaire par test."""
+    monkeypatch.setenv("DOMESTIQUE_AI_DB_PATH", str(tmp_path / "brief.db"))
     clear_cache()
     yield
     clear_cache()
@@ -222,12 +223,50 @@ def test_build_daily_brief_uses_llm_when_available(stable_signals, monkeypatch):
     assert brief["coach_tip"] == "Bois régulièrement sur la sortie."
 
 
+def test_daily_brief_flag_disables_llm(stable_signals, monkeypatch):
+    """DOMESTIQUE_AI_LLM_DAILY_BRIEF=0 → fallback déterministe, aucun appel."""
+    monkeypatch.setenv("DOMESTIQUE_AI_LLM_DAILY_BRIEF", "0")
+
+    def boom(signals):
+        raise AssertionError("le LLM ne doit pas être appelé")
+
+    monkeypatch.setattr(daily_brief, "_generate_brief_with_llm", boom)
+    brief = build_daily_brief(today=dt.date(2026, 5, 21))
+    assert brief["source"] == "fallback"
+    assert brief["summary"] and brief["coach_tip"]
+
+
 def test_build_daily_brief_falls_back_when_llm_returns_none(stable_signals, monkeypatch):
     monkeypatch.setattr(daily_brief, "_generate_brief_with_llm", lambda signals: None)
     brief = build_daily_brief(today=dt.date(2026, 5, 21))
     assert brief["source"] == "fallback"
     # Le tip retombe sur le template déterministe — jamais vide.
     assert brief["coach_tip"]
+
+
+def test_llm_payload_is_slim(stable_signals):
+    """Le prompt LLM ne reçoit qu'un sous-ensemble compact des signaux."""
+    from domestique_ai.llm.daily_brief import _collect_signals, _llm_payload
+
+    signals = _collect_signals(dt.date(2026, 5, 21))
+    payload = _llm_payload(signals)
+    assert set(payload) == {
+        "date",
+        "tsb",
+        "tsb_zone",
+        "ctl",
+        "atl",
+        "primary_alert",
+        "today_workout",
+        "sleep_hours_7d",
+        "week_tss_planned",
+        "week_tss_done",
+        "week_adherence_pct",
+    }
+    workout = payload["today_workout"]
+    # Le workout imbriqué complet (structure, signals, rationale) est exclu.
+    assert set(workout) == {"rest_day", "kind", "duration_min"}
+    assert "structure" not in workout
 
 
 # ---------- Cache journalier -------------------------------------------------
@@ -262,13 +301,18 @@ def test_build_daily_brief_refresh_bypasses_cache(stable_signals, monkeypatch):
     assert fresh["source"] == "llm"
 
 
-def test_build_daily_brief_purges_old_cache_keys(stable_signals, monkeypatch):
+def test_build_daily_brief_purges_old_cache_keys(stable_signals, monkeypatch, tmp_path):
+    from domestique_ai.llm import brief_cache
+
     monkeypatch.setattr(daily_brief, "_generate_brief_with_llm", lambda s: {"summary": "x"})
     build_daily_brief(today=dt.date(2026, 5, 20))
     build_daily_brief(today=dt.date(2026, 5, 21))
-    # Le cache ne doit plus contenir d'entrée pour la veille.
-    # Clé = (db_path, date ISO, bucket TSB, hash alertes) → la date est en [1].
-    assert all(key[1] == "2026-05-21" for key in daily_brief._BRIEF_CACHE)
+    # Le cache ne doit plus contenir d'entrée pour la veille (purge au save).
+    db = tmp_path / "brief.db"
+    tsb_bucket = _round_tsb(5.2)
+    alerts_hash = _hash_alerts([])
+    assert brief_cache.load("2026-05-20", tsb_bucket, alerts_hash, db_path=db) is None
+    assert brief_cache.load("2026-05-21", tsb_bucket, alerts_hash, db_path=db) is not None
 
 
 # ---------- coach tip --------------------------------------------------------

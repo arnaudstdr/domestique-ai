@@ -131,6 +131,13 @@ def build_initial_messages(
     ``system`` à **chaque tour**, nouvelle session ou non. Au-delà de
     ``MAX_HISTORY_MESSAGES`` messages, l'historique verbatim est tronqué aux
     plus récents — le résumé roulant prend le relais via le bloc mémoire.
+
+    Ordre volontaire : ``system → contexte → historique → mémoire → user``. Le
+    bloc mémoire (dont la section RAG dépend de la question) est placé **après**
+    l'historique pour que le préfixe ``system + historique`` reste stable d'un
+    tour à l'autre — c'est lui qu'Ollama peut servir depuis son cache de prompt
+    (tokens *cached* facturés moins cher), y compris entre les itérations de la
+    boucle de tool-calling d'un même tour.
     """
     base: list[dict[str, Any]] = [{"role": "system", "content": SYSTEM_PROMPT}]
     if not history:
@@ -144,8 +151,6 @@ def build_initial_messages(
             context = ""
         if context:
             base.append({"role": "system", "content": context})
-    if memory_block:
-        base.append({"role": "system", "content": memory_block})
     if history:
         clean = [
             msg
@@ -154,6 +159,8 @@ def build_initial_messages(
         ]
         for msg in clean[-MAX_HISTORY_MESSAGES:]:
             base.append({"role": msg["role"], "content": msg["content"]})
+    if memory_block:
+        base.append({"role": "system", "content": memory_block})
     base.append({"role": "user", "content": user_message})
     return base
 

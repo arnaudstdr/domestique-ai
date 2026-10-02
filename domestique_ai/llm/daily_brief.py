@@ -5,9 +5,10 @@ Agrège l'état du jour (TSB, alerte saillante, séance suggérée) et génère 
 phrase de synthèse courte via LLM. Le LLM ne fait que reformuler des données
 structurées déjà calculées — aucune valeur chiffrée ne peut être inventée.
 
-Cache en mémoire (clé ``date + tsb_arrondi + hash_alertes``) avec TTL qui
-expire au changement de jour : un seul appel Ollama par jour et par état,
-peu importe combien de fois le Dashboard est ouvert.
+Cache **persistant** en DB (clé ``date + tsb_arrondi + hash_alertes``, table
+``daily_brief_cache`` du SQLite athlète) : un seul appel Ollama par jour et par
+état, peu importe combien de fois le Dashboard est ouvert — y compris après un
+redémarrage du process.
 
 Fallback déterministe si Ollama injoignable ou JSON mal formé : on
 construit une phrase template à partir des signaux structurés.
@@ -19,11 +20,11 @@ import datetime as _dt
 import hashlib
 import json
 import logging
-import threading
 from typing import Any
 
 from domestique_ai.athlete_context import AthleteContext, context_from_env
-from domestique_ai.llm import usage
+from domestique_ai.config import llm_daily_brief_enabled
+from domestique_ai.llm import brief_cache, usage
 from domestique_ai.llm.ollama_client import chat_structured_sync
 from domestique_ai.processing.morning_metrics import (
     detect_morning_alerts,
@@ -33,11 +34,6 @@ from domestique_ai.processing.overtraining import detect_overtraining_signals
 from domestique_ai.processing.today import propose_workout_today
 
 log = logging.getLogger(__name__)
-
-# Clé : (db_path athlète, date ISO, bucket TSB, hash alertes). Le db_path isole
-# le cache par athlète ; la date permet la purge des jours antérieurs.
-_BRIEF_CACHE: dict[tuple[str, str, int, str], dict[str, Any]] = {}
-_BRIEF_LOCK = threading.Lock()
 
 _LLM_SYSTEM_PROMPT = (
     "Tu es un coach d'endurance francophone. Tu dois produire DEUX phrases "
@@ -281,9 +277,44 @@ def _build_fallback_tip(signals: dict[str, Any]) -> str:
     return "Soigne l'échauffement et mélange les allures sans forcer."
 
 
+def _llm_payload(signals: dict[str, Any]) -> dict[str, Any]:
+    """Sous-ensemble compact des signaux envoyé au LLM.
+
+    Le dossier complet (workout imbriqué avec structure/signals/rationale,
+    historique sommeil détaillé, statuts semaine…) reste dans la réponse API
+    pour le front ; le prompt n'a besoin que des faits citables.
+    """
+    workout = signals.get("workout") or {}
+    if workout.get("rest_day"):
+        workout_part: dict[str, Any] = {"rest_day": True}
+    else:
+        w = workout.get("workout") or {}
+        workout_part = {
+            "rest_day": False,
+            "kind": w.get("kind"),
+            "duration_min": w.get("duration_min"),
+        }
+    alert = signals.get("primary_alert")
+    return {
+        "date": signals.get("today"),
+        "tsb": signals.get("tsb"),
+        "tsb_zone": signals.get("tsb_zone"),
+        "ctl": signals.get("ctl"),
+        "atl": signals.get("atl"),
+        "primary_alert": alert.get("message") if alert else None,
+        "today_workout": workout_part,
+        "sleep_hours_7d": [
+            p.get("hours") for p in (signals.get("sleep_history") or []) if isinstance(p, dict)
+        ],
+        "week_tss_planned": signals.get("week_tss_planned"),
+        "week_tss_done": signals.get("week_tss_done"),
+        "week_adherence_pct": signals.get("week_adherence_pct"),
+    }
+
+
 def _generate_brief_with_llm(signals: dict[str, Any]) -> dict[str, str] | None:
     """Demande au LLM une phrase d'état + un conseil. ``None`` si échec."""
-    payload = json.dumps(signals, ensure_ascii=False, default=str)
+    payload = json.dumps(_llm_payload(signals), ensure_ascii=False, default=str)
     messages = [
         {"role": "system", "content": _LLM_SYSTEM_PROMPT},
         {
@@ -382,22 +413,21 @@ def build_daily_brief(
     target = today or _dt.date.today()
     signals = _collect_signals(target, ctx)
     alert_signature = [signals["primary_alert"]["message"]] if signals.get("primary_alert") else []
-    cache_key = (
-        str(ctx.db_path),
-        target.isoformat(),
-        _round_tsb(signals.get("tsb") or 0.0),
-        _hash_alerts(alert_signature),
-    )
+    cache_date = target.isoformat()
+    cache_tsb = _round_tsb(signals.get("tsb") or 0.0)
+    cache_alerts = _hash_alerts(alert_signature)
 
     if not refresh:
-        with _BRIEF_LOCK:
-            cached = _BRIEF_CACHE.get(cache_key)
+        cached = brief_cache.load(cache_date, cache_tsb, cache_alerts, db_path=ctx.db_path)
         if cached is not None:
             return {**cached, "source": "cache"}
 
     summary: str | None = None
     tip: str | None = None
     source = "fallback"
+    if use_llm and not llm_daily_brief_enabled():
+        # Flag plateforme : LLM désactivé → fallback déterministe direct.
+        use_llm = False
     if use_llm:
         generated = _generate_brief_with_llm(signals)
         if generated:
@@ -451,13 +481,9 @@ def build_daily_brief(
         payload["sleep_score"] = None
         payload["sleep_baseline"] = None
         payload["sleep_delta_pct"] = None
-    with _BRIEF_LOCK:
-        # On purge le cache des jours antérieurs : on n'y revient jamais et ça
-        # évite de grossir indéfiniment.
-        for key in list(_BRIEF_CACHE):
-            if key[1] != target.isoformat():
-                del _BRIEF_CACHE[key]
-        _BRIEF_CACHE[cache_key] = payload
+    brief_cache.save(
+        cache_date, cache_tsb, cache_alerts, payload, source=source, db_path=ctx.db_path
+    )
     return payload
 
 
@@ -506,9 +532,8 @@ def build_coach_context(today: _dt.date | None = None, *, ctx: AthleteContext | 
 
 
 def clear_cache() -> None:
-    """Vide le cache en mémoire (utile pour les tests)."""
-    with _BRIEF_LOCK:
-        _BRIEF_CACHE.clear()
+    """Purge le cache persistant (utile pour les tests)."""
+    brief_cache.clear()
 
 
 __all__ = ["build_coach_context", "build_daily_brief", "clear_cache"]

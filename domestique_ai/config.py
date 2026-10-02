@@ -662,6 +662,42 @@ def get_ollama_embed_model() -> str:
     return os.getenv("OLLAMA_EMBED_MODEL", "nomic-embed-text")
 
 
+def _env_enabled(name: str, *, default: bool = True) -> bool:
+    """Lecture d'un flag booléen d'env (``1/true/yes/on``), défaut configurable."""
+    raw = os.getenv(name)
+    if raw is None or raw.strip() == "":
+        return default
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def llm_daily_brief_enabled() -> bool:
+    """Rédaction LLM du brief quotidien (``DOMESTIQUE_AI_LLM_DAILY_BRIEF``).
+
+    Défaut ``True``. À ``0``, le brief bascule sur les phrases déterministes —
+    aucun appel Ollama (le cache et les données restent identiques).
+    """
+    return _env_enabled("DOMESTIQUE_AI_LLM_DAILY_BRIEF", default=True)
+
+
+def llm_workout_today_enabled() -> bool:
+    """Choix LLM de la séance du jour (``DOMESTIQUE_AI_LLM_WORKOUT_TODAY``).
+
+    Défaut ``True``. À ``0``, le choix bascule sur les règles déterministes
+    (``_decide_kind_fallback``), cache et payload inchangés.
+    """
+    return _env_enabled("DOMESTIQUE_AI_LLM_WORKOUT_TODAY", default=True)
+
+
+def llm_decision_reason_enabled() -> bool:
+    """Rédaction LLM de la raison du check du matin
+    (``DOMESTIQUE_AI_LLM_DECISION_REASON``).
+
+    Défaut ``True``. À ``0``, la raison déterministe des règles est conservée
+    (la décision elle-même est toujours calculée par les règles).
+    """
+    return _env_enabled("DOMESTIQUE_AI_LLM_DECISION_REASON", default=True)
+
+
 def get_session_summary_every_messages() -> int:
     """Seuil de messages déclenchant un résumé roulant de session.
 

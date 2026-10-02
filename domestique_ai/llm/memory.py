@@ -21,12 +21,14 @@ from __future__ import annotations
 import datetime as dt
 import json
 import sqlite3
+from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
 from domestique_ai.athlete_context import AthleteContext
 from domestique_ai.config import (
     get_db_path,
+    get_ollama_embed_model,
     get_session_idle_finalize_minutes,
     get_session_summary_every_messages,
 )
@@ -45,13 +47,20 @@ _CATEGORY_LABELS = {
 }
 
 # Budgets d'injection (bornent le prompt sans étouffer le contexte courant).
-_MAX_FACTS = 40
+# Les faits sont sélectionnés par pertinence (top _MAX_FACTS vs la question,
+# épinglés toujours inclus) au lieu d'être tous injectés.
+_MAX_FACTS = 20
 _MAX_SUMMARIES = 5
 _MAX_RAG_HITS = 4
 _MAX_FACT_CHARS = 300
-_MAX_SUMMARY_CHARS = 700
+_MAX_SUMMARY_CHARS = 500
 _MAX_RAG_CHARS = 400
 _FACT_DEDUP_THRESHOLD = 0.9
+# Garde-fou absolu sur le bloc mémoire injecté à chaque tour.
+_MAX_MEMORY_BLOCK_CHARS = 8_000
+# Plafond global du transcript envoyé aux appels de résumé/extraction : sans
+# lui, le prompt croît linéairement avec la session (12k+ tokens à 120 messages).
+_MAX_TRANSCRIPT_CHARS = 24_000
 
 
 def _resolve_db_path(db_path: Path | None, ctx: AthleteContext | None) -> Path:
@@ -85,7 +94,7 @@ def _pack(vec: list[float]) -> bytes:
     return np.asarray(vec, dtype="<f4").tobytes()
 
 
-def _cosine(query: list[float], rows: list[sqlite3.Row], k: int) -> list[tuple[float, sqlite3.Row]]:
+def _cosine(query: list[float], rows: list[Any], k: int) -> list[tuple[float, Any]]:
     """Top-k cosinus entre ``query`` et les embeddings BLOB de ``rows``.
 
     Les vecteurs de dimension différente de la requête (changement de modèle
@@ -107,6 +116,25 @@ def _cosine(query: list[float], rows: list[sqlite3.Row], k: int) -> list[tuple[f
         scored.append((float(np.dot(q, v)) / denom, row))
     scored.sort(key=lambda item: item[0], reverse=True)
     return scored[:k]
+
+
+@lru_cache(maxsize=512)
+def _embed_query_cached(model: str, query: str) -> tuple[float, ...]:
+    """Embedding de requête mémoïsé (déterministe pour un modèle donné).
+
+    Évite un appel Ollama pour la même recherche (chat + recherche live du
+    front). Lève si Ollama est indisponible : ``lru_cache`` ne mémorise pas les
+    exceptions, une panne transitoire n'empoisonne donc pas le cache.
+    """
+    embs = embed_texts_sync([query], label=usage.EMBED_QUERY)
+    if not embs:
+        raise RuntimeError("embedding indisponible")
+    return tuple(float(v) for v in embs[0])
+
+
+def clear_embedding_cache() -> None:
+    """Vide le cache d'embeddings de requête (tests, changement de modèle)."""
+    _embed_query_cached.cache_clear()
 
 
 # --------------------------------------------------------------------------- #
@@ -195,6 +223,107 @@ def remember_fact(
         "content": content,
         "deduplicated": deduplicated,
     }
+
+
+def remember_facts_batch(
+    items: list[tuple[str, str]],
+    *,
+    ctx: AthleteContext | None = None,
+    source_session_id: str | None = None,
+    db_path: Path | None = None,
+) -> list[dict[str, Any]]:
+    """Enregistre un lot de faits avec **un seul** appel d'embeddings.
+
+    Même dédup que ``remember_fact`` (cosine > ``_FACT_DEDUP_THRESHOLD``), mais
+    compare aussi les faits du lot entre eux pour éviter les doublons quand
+    l'extraction en propose plusieurs proches. Best-effort : si les embeddings
+    échouent, les faits sont quand même stockés sans vecteur.
+    """
+    clean: list[tuple[str, str]] = []
+    for category, content in items:
+        content = (content or "").strip()
+        if not content:
+            continue
+        if category not in MEMORY_CATEGORIES:
+            category = "personal"
+        clean.append((category, content))
+    if not clean:
+        return []
+
+    embedded = embed_texts_sync([content for _cat, content in clean], label=usage.EMBED_FACT)
+    vectors: list[list[float] | None] = (
+        list(embedded) if embedded and len(embedded) == len(clean) else [None] * len(clean)
+    )
+
+    now = _now()
+    conn = _connect(db_path, ctx)
+    stored: list[dict[str, Any]] = []
+    try:
+        existing = conn.execute(
+            "SELECT id, content, embedding FROM coach_memory WHERE active = 1"
+        ).fetchall()
+        pending: list[dict[str, Any]] = []
+        for (category, content), vec in zip(clean, vectors, strict=False):
+            match_id: int | None = None
+            if vec:
+                hits = _cosine(vec, [*existing, *pending], 1)
+                if hits and hits[0][0] >= _FACT_DEDUP_THRESHOLD:
+                    match_id = int(hits[0][1]["id"])
+
+            if match_id is not None:
+                conn.execute(
+                    "UPDATE coach_memory SET category = ?, content = ?, embedding = ?, "
+                    "updated_at = ? WHERE id = ?",
+                    (category, content, _pack(vec) if vec else None, now, match_id),
+                )
+                fact_id = match_id
+                deduplicated = True
+                for entry in pending:
+                    if entry["id"] == fact_id:
+                        entry["embedding"] = _pack(vec) if vec else None
+                        break
+            else:
+                cursor = conn.execute(
+                    "INSERT INTO coach_memory "
+                    "(category, content, embedding, source_session_id, pinned, active, "
+                    " created_at, updated_at) VALUES (?, ?, ?, ?, 0, 1, ?, ?)",
+                    (
+                        category,
+                        content,
+                        _pack(vec) if vec else None,
+                        source_session_id,
+                        now,
+                        now,
+                    ),
+                )
+                fact_id = int(cursor.lastrowid)
+                deduplicated = False
+                if vec:
+                    pending.append({"id": fact_id, "embedding": _pack(vec)})
+
+            conn.execute(
+                "DELETE FROM memory_vectors WHERE source_type = 'fact' AND ref_id = ?",
+                (fact_id,),
+            )
+            if vec:
+                conn.execute(
+                    "INSERT INTO memory_vectors "
+                    "(source_type, ref_id, session_id, text, embedding, created_at) "
+                    "VALUES ('fact', ?, NULL, ?, ?, ?)",
+                    (fact_id, content, _pack(vec), now),
+                )
+            stored.append(
+                {
+                    "id": fact_id,
+                    "category": category,
+                    "content": content,
+                    "deduplicated": deduplicated,
+                }
+            )
+        conn.commit()
+    finally:
+        conn.close()
+    return stored
 
 
 def list_facts(
@@ -336,16 +465,33 @@ def _load_messages_with_ids(
     return out
 
 
-def _transcript(messages: list[dict[str, Any]], *, limit_chars: int = 500) -> str:
+def _transcript(
+    messages: list[dict[str, Any]],
+    *,
+    limit_chars: int = 500,
+    max_total_chars: int = _MAX_TRANSCRIPT_CHARS,
+) -> str:
+    """Transcript borné : 500 c par message, budget global en gardant le récent.
+
+    On parcourt du plus récent au plus ancien et on s'arrête quand le budget
+    est épuisé (puis on remet dans l'ordre chronologique) — les échanges
+    récents portent l'état courant, c'est eux qu'il faut résumer en priorité.
+    """
     lines: list[str] = []
-    for msg in messages:
+    total = 0
+    for msg in reversed(messages):
         role = msg.get("role")
         content = (msg.get("payload") or {}).get("content") or ""
         content = content.strip()
         if role not in ("user", "assistant") or not content:
             continue
         label = "CYCLISTE" if role == "user" else "COACH"
-        lines.append(f"[{label}] {content[:limit_chars]}")
+        line = f"[{label}] {content[:limit_chars]}"
+        if lines and total + len(line) > max_total_chars:
+            break
+        lines.append(line)
+        total += len(line)
+    lines.reverse()
     return "\n".join(lines)
 
 
@@ -429,6 +575,39 @@ def summarize_session(
         topics = []
     topics = [str(t).strip() for t in topics if str(t).strip()][:8]
 
+    _persist_summary(
+        session_id,
+        summary,
+        topics,
+        message_count=len(messages),
+        max_id=max_id,
+        existing=existing,
+        ctx=ctx,
+        db_path=db_path,
+    )
+
+    return {
+        "session_id": session_id,
+        "summary": summary,
+        "topics": topics,
+        "message_count": len(messages),
+        "updated": True,
+        "final": final,
+    }
+
+
+def _persist_summary(
+    session_id: str,
+    summary: str,
+    topics: list[str],
+    *,
+    message_count: int,
+    max_id: int,
+    existing: dict[str, Any] | None,
+    ctx: AthleteContext | None,
+    db_path: Path | None,
+) -> None:
+    """UPSERT du résumé + embedding associé (best-effort, ne lève jamais côté appelant)."""
     now = _now()
     conn = _connect(db_path, ctx)
     try:
@@ -445,7 +624,7 @@ def summarize_session(
                 session_id,
                 summary,
                 json.dumps(topics, ensure_ascii=False),
-                len(messages),
+                message_count,
                 max_id,
                 (existing or {}).get("created_at") or now,
                 now,
@@ -467,13 +646,123 @@ def summarize_session(
     finally:
         conn.close()
 
+
+def summarize_and_extract_facts(
+    session_id: str,
+    *,
+    ctx: AthleteContext | None = None,
+    db_path: Path | None = None,
+) -> dict[str, Any] | None:
+    """Finalisation d'une session en **un seul** appel LLM : résumé + faits.
+
+    Remplace le couple ``summarize_session(final=True)`` +
+    ``extract_facts_from_session()``, qui renvoyait deux fois le même transcript
+    au modèle. Même garde ``last_summarized_message_id`` : sans nouveaux
+    messages, retourne ``{"updated": False, ...}`` sans aucun appel.
+
+    Best-effort : retourne ``None`` si la génération échoue (l'appelant garde
+    le résumé existant).
+    """
+    messages = _load_messages_with_ids(session_id, db_path=db_path, ctx=ctx)
+    if not messages:
+        return None
+
+    existing = get_session_summary(session_id, ctx=ctx, db_path=db_path)
+    last_id = (existing or {}).get("last_summarized_message_id") or 0
+    max_id = max(m["id"] for m in messages)
+    if existing and max_id <= int(last_id):
+        result = dict(existing)
+        result["updated"] = False
+        result["facts"] = []
+        return result
+
+    transcript = _transcript(messages)
+    if not transcript:
+        return None
+
+    schema = {
+        "type": "object",
+        "properties": {
+            "summary": {"type": "string"},
+            "topics": {"type": "array", "items": {"type": "string"}},
+            "facts": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "category": {"type": "string"},
+                        "content": {"type": "string"},
+                    },
+                    "required": ["category", "content"],
+                },
+            },
+        },
+        "required": ["summary"],
+    }
+    prompt = (
+        "Tu finalises une session de coaching entre un cycliste et son coach, "
+        "pour la mémoire long terme du coach.\n\n"
+        "Renvoie UNIQUEMENT un JSON valide de la forme :\n"
+        '{"summary": "3 à 5 phrases factuelles en français", '
+        '"topics": ["thème1", "thème2"], '
+        '"facts": [{"category": "preference|constraint|goal|agreement|personal", '
+        '"content": "fait durable"}]}\n\n'
+        "Règles :\n"
+        "- Résumé : concentre-toi sur les éléments durables (état de forme, "
+        "séances, ressenti, décisions prises, objectifs évoqués, contraintes), "
+        "pas sur les banalités.\n"
+        "- Faits : uniquement ce qui est explicitement dit et utile à long "
+        "terme ; n'invente rien ; ignore l'état passager (fatigue du jour).\n"
+        '- Si aucun fait durable : "facts": [].\n\n'
+        f"Conversation :\n{transcript}"
+    )
+    parsed = chat_structured_sync(
+        [{"role": "user", "content": prompt}],
+        timeout_s=45.0,
+        schema=schema,
+        label=usage.SESSION_FINALIZE,
+    )
+    if not parsed:
+        return None
+    summary = str(parsed.get("summary") or "").strip()
+    if not summary:
+        return None
+    topics = parsed.get("topics")
+    if not isinstance(topics, list):
+        topics = []
+    topics = [str(t).strip() for t in topics if str(t).strip()][:8]
+
+    _persist_summary(
+        session_id,
+        summary,
+        topics,
+        message_count=len(messages),
+        max_id=max_id,
+        existing=existing,
+        ctx=ctx,
+        db_path=db_path,
+    )
+
+    facts: list[dict[str, Any]] = []
+    raw_facts = parsed.get("facts")
+    if isinstance(raw_facts, list):
+        items: list[tuple[str, str]] = []
+        for item in raw_facts:
+            if not isinstance(item, dict):
+                continue
+            content = str(item.get("content") or "").strip()
+            category = str(item.get("category") or "personal").strip()
+            if content:
+                items.append((category, content))
+        facts = remember_facts_batch(items, ctx=ctx, source_session_id=session_id, db_path=db_path)
+
     return {
         "session_id": session_id,
         "summary": summary,
         "topics": topics,
+        "facts": facts,
         "message_count": len(messages),
         "updated": True,
-        "final": final,
     }
 
 
@@ -485,8 +774,10 @@ def extract_facts_from_session(
 ) -> list[dict[str, Any]]:
     """Extrait les faits durables d'une session et les mémorise.
 
-    Appelée uniquement à la finalisation (inactivité ou explicite) pour borner
-    le coût LLM. Retourne la liste des faits créés/mis à jour.
+    La finalisation passe par ``summarize_and_extract_facts`` (un seul appel
+    LLM pour résumé + faits) ; cette fonction reste disponible pour une
+    extraction isolée (tests, usage explicite). Retourne la liste des faits
+    créés/mis à jour.
     """
     messages = _load_messages_with_ids(session_id, db_path=db_path, ctx=ctx)
     transcript = _transcript(messages)
@@ -518,24 +809,20 @@ def extract_facts_from_session(
     if not isinstance(raw_facts, list):
         return []
 
-    stored: list[dict[str, Any]] = []
+    items: list[tuple[str, str]] = []
     for item in raw_facts:
         if not isinstance(item, dict):
             continue
         content = str(item.get("content") or "").strip()
         category = str(item.get("category") or "personal").strip()
-        if not content:
-            continue
-        result = remember_fact(
-            category,
-            content,
-            ctx=ctx,
-            source_session_id=session_id,
-            db_path=db_path,
-        )
-        if "error" not in result:
-            stored.append(result)
-    return stored
+        if content:
+            items.append((category, content))
+    return remember_facts_batch(
+        items,
+        ctx=ctx,
+        source_session_id=session_id,
+        db_path=db_path,
+    )
 
 
 # --------------------------------------------------------------------------- #
@@ -622,9 +909,6 @@ def get_relevant_memory(
     query = (query or "").strip()
     if not query:
         return []
-    emb = embed_texts_sync([query], label=usage.EMBED_QUERY)
-    if not emb:
-        return []
 
     conn = _connect(db_path, ctx)
     try:
@@ -636,8 +920,17 @@ def get_relevant_memory(
         ).fetchall()
     finally:
         conn.close()
+    # Rien à comparer : inutile de payer un embedding (cas d'un athlète sans
+    # historique indexé, à chaque tour de chat).
+    if not rows:
+        return []
 
-    hits = _cosine(emb[0], rows, k)
+    try:
+        emb = _embed_query_cached(get_ollama_embed_model(), query)
+    except RuntimeError:
+        return []
+
+    hits = _cosine(list(emb), rows, k)
     return [
         {
             "source_type": row["source_type"],
@@ -650,6 +943,56 @@ def get_relevant_memory(
     ]
 
 
+def _select_facts(
+    query: str,
+    *,
+    ctx: AthleteContext | None = None,
+    db_path: Path | None = None,
+) -> list[dict[str, Any]]:
+    """Faits à injecter : épinglés toujours, puis top pertinence vs ``query``.
+
+    Repli sur les plus récents si la recherche sémantique est indisponible
+    (pas de vecteurs, Ollama KO) ou si ``query`` est vide.
+    """
+    facts = list_facts(active_only=True, ctx=ctx, db_path=db_path)
+    if not facts:
+        return []
+    pinned = [f for f in facts if f.get("pinned")]
+    if not query or len(facts) <= _MAX_FACTS:
+        return facts[:_MAX_FACTS]
+
+    ranked_ids: list[int] = []
+    try:
+        hits = get_relevant_memory(query, k=_MAX_FACTS, types=("fact",), ctx=ctx, db_path=db_path)
+        ranked_ids = [int(h["ref_id"]) for h in hits if h.get("ref_id") is not None]
+    except Exception:  # noqa: BLE001
+        ranked_ids = []
+
+    by_id = {int(f["id"]): f for f in facts}
+    selected: list[dict[str, Any]] = []
+    seen: set[int] = set()
+    for fact in pinned:
+        fid = int(fact["id"])
+        selected.append(fact)
+        seen.add(fid)
+    for fid in ranked_ids:
+        if len(selected) >= _MAX_FACTS:
+            break
+        fact = by_id.get(fid)
+        if fact is not None and fid not in seen:
+            selected.append(fact)
+            seen.add(fid)
+    # Complète avec les plus récents si la sélection par pertinence est courte.
+    for fact in facts:
+        if len(selected) >= _MAX_FACTS:
+            break
+        fid = int(fact["id"])
+        if fid not in seen:
+            selected.append(fact)
+            seen.add(fid)
+    return selected
+
+
 def build_memory_block(
     query: str,
     *,
@@ -658,15 +1001,15 @@ def build_memory_block(
 ) -> str:
     """Assemble le bloc mémoire injecté dans le prompt système du coach.
 
-    Contient : faits durables (toujours), résumés des sessions récentes, et
-    passages passés pertinents pour ``query`` (recherche sémantique). Chaque
-    partie est isolée en try/except : une panne de mémoire ne casse jamais le
-    chat, elle dégrade le bloc.
+    Contient : faits durables (épinglés + top pertinence pour ``query``),
+    résumés des sessions récentes, et passages passés pertinents (recherche
+    sémantique). Chaque partie est isolée en try/except : une panne de mémoire
+    ne casse jamais le chat, elle dégrade le bloc.
     """
     sections: list[str] = []
 
     try:
-        facts = list_facts(active_only=True, ctx=ctx, db_path=db_path)[:_MAX_FACTS]
+        facts = _select_facts(query, ctx=ctx, db_path=db_path)
     except Exception:  # noqa: BLE001
         facts = []
     if facts:
@@ -725,12 +1068,15 @@ def build_memory_block(
 
     if not sections:
         return ""
-    return (
-        "MÉMOIRE PERSISTANTE (issue de tes échanges passés avec l'athlète) et "
-        "profil courant.\n"
-        "Utilise-la pour la continuité, mais ne prétends jamais te souvenir "
-        "d'autre chose que de ce qui figure ici ou dans les tools.\n\n" + "\n\n".join(sections)
+    block = "MÉMOIRE PERSISTANTE (issue de tes échanges passés avec l'athlète) :\n\n" + "\n\n".join(
+        sections
     )
+    # Garde-fou absolu : coupe sur une fin de ligne pour ne jamais dépasser le
+    # budget injecté à chaque tour.
+    if len(block) > _MAX_MEMORY_BLOCK_CHARS:
+        cut = block.rfind("\n", 0, _MAX_MEMORY_BLOCK_CHARS)
+        block = block[: cut if cut > 0 else _MAX_MEMORY_BLOCK_CHARS]
+    return block
 
 
 # --------------------------------------------------------------------------- #
@@ -800,9 +1146,8 @@ def finalize_idle_sessions(
         if (row["messages"] or 0) < 2:
             continue
         try:
-            summary = summarize_session(session_id, final=True, ctx=ctx, db_path=db_path)
-            if summary and summary.get("updated"):
-                extract_facts_from_session(session_id, ctx=ctx, db_path=db_path)
+            result = summarize_and_extract_facts(session_id, ctx=ctx, db_path=db_path)
+            if result and result.get("updated"):
                 finalized += 1
         except Exception:  # noqa: BLE001 — une session en erreur ne bloque pas les autres
             continue

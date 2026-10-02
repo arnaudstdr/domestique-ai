@@ -99,6 +99,47 @@ def test_llm_week_plan_rejects_invalid_date():
         )
 
 
+def test_plan_week_passes_json_schema(monkeypatch):
+    """Le schéma JSON est passé au SDK (décodage contraint → moins de retries)."""
+    captured: dict = {}
+    responses = [
+        _llm_response(
+            [
+                {"date": "2026-05-25", "kind": "recovery", "duration_min": 45},
+                {"date": "2026-05-26", "kind": "tempo", "duration_min": 60},
+                {"date": "2026-05-28", "kind": "intervals", "duration_min": 60},
+                {"date": "2026-05-31", "kind": "endurance", "duration_min": 90},
+            ]
+        )
+    ]
+
+    async def fake(*args, **kwargs):
+        captured.update(kwargs)
+        return responses.pop(0) if responses else None
+
+    monkeypatch.setattr(pg, "chat_structured", fake)
+    ctx = _ctx(today=dt.date(2026, 5, 25), target_date=dt.date(2026, 6, 1))
+    _plan, weeks = _run(pg.collect_plan(ctx))
+    assert weeks[0].source == "llm"
+    assert captured["schema"] is pg._PLAN_WEEK_SCHEMA
+
+
+def test_generation_context_state_text_is_memoized(monkeypatch):
+    """Le bloc « État réel » est calculé une fois par génération, pas par semaine."""
+    calls = {"n": 0}
+
+    def fake_format(state):
+        calls["n"] += 1
+        return "ÉTAT RÉEL"
+
+    monkeypatch.setattr(pg, "format_state_block", fake_format)
+    ctx = _ctx()
+    ctx.coach_state = {"ctl": 60.0}
+    assert ctx.state_text() == "ÉTAT RÉEL"
+    assert ctx.state_text() == "ÉTAT RÉEL"
+    assert calls["n"] == 1
+
+
 # ---------- _expand_to_workout (high-level → Workout complet) ----------------
 
 
@@ -154,6 +195,64 @@ def test_generate_plan_uses_llm_when_response_is_valid(monkeypatch):
     assert len(weeks) == 1
     assert weeks[0].source == "llm"
     assert {w.kind for w in plan} == {"recovery", "tempo", "intervals", "endurance"}
+
+
+def test_plan_week_reuses_cache(monkeypatch, tmp_path):
+    """Même entrée (état, objectif, dates, modèle) → aucun second appel LLM."""
+    calls = {"n": 0}
+    responses = [
+        _llm_response(
+            [
+                {"date": "2026-05-25", "kind": "recovery", "duration_min": 45},
+                {"date": "2026-05-26", "kind": "tempo", "duration_min": 60},
+                {"date": "2026-05-28", "kind": "intervals", "duration_min": 60},
+                {"date": "2026-05-31", "kind": "endurance", "duration_min": 90},
+            ]
+        )
+    ]
+
+    async def fake(*args, **kwargs):
+        calls["n"] += 1
+        return responses.pop(0) if responses else None
+
+    monkeypatch.setattr(pg, "chat_structured", fake)
+    ctx = _ctx(today=dt.date(2026, 5, 25), target_date=dt.date(2026, 6, 1))
+    ctx.db_path = tmp_path / "plan.db"
+
+    plan1, weeks1 = _run(pg.collect_plan(ctx))
+    assert calls["n"] == 1
+    assert weeks1[0].source == "llm"
+
+    plan2, weeks2 = _run(pg.collect_plan(ctx))
+    assert calls["n"] == 1  # servi par le cache
+    assert weeks2[0].source == "llm"
+    assert [w.kind for w in plan1] == [w.kind for w in plan2]
+
+
+def test_plan_week_cache_invalidated_on_input_change(monkeypatch, tmp_path):
+    """Un changement d'état (CTL) invalide le cache."""
+    calls = {"n": 0}
+
+    async def fake(*args, **kwargs):
+        calls["n"] += 1
+        return _llm_response(
+            [
+                {"date": "2026-05-25", "kind": "recovery", "duration_min": 45},
+                {"date": "2026-05-26", "kind": "tempo", "duration_min": 60},
+                {"date": "2026-05-28", "kind": "intervals", "duration_min": 60},
+                {"date": "2026-05-31", "kind": "endurance", "duration_min": 90},
+            ]
+        )
+
+    monkeypatch.setattr(pg, "chat_structured", fake)
+    ctx = _ctx(today=dt.date(2026, 5, 25), target_date=dt.date(2026, 6, 1))
+    ctx.db_path = tmp_path / "plan.db"
+    _run(pg.collect_plan(ctx))
+    assert calls["n"] == 1
+
+    ctx.ctl_current = 75.0  # état différent
+    _run(pg.collect_plan(ctx))
+    assert calls["n"] == 2
 
 
 def test_generate_falls_back_when_llm_returns_none(monkeypatch):

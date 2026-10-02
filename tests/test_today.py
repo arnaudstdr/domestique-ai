@@ -370,6 +370,58 @@ def test_cache_hit_short_circuits_llm(tmp_path, monkeypatch):
     assert second["source"] == "cache"
 
 
+def test_flag_disables_llm_decision(tmp_path, monkeypatch):
+    """DOMESTIQUE_AI_LLM_WORKOUT_TODAY=0 → règles déterministes, aucun appel."""
+    _patch_paths(tmp_path, monkeypatch)
+    _set_availability(
+        tmp_path,
+        "days:\n  monday:\n    max_duration_min: 90\n    context: indoor\n",
+    )
+    _patch_tsb(monkeypatch, 0.0)
+    monkeypatch.setenv("DOMESTIQUE_AI_LLM_WORKOUT_TODAY", "0")
+
+    def boom(_dossier):
+        raise AssertionError("le LLM ne doit pas être appelé")
+
+    monkeypatch.setattr(today_mod, "_decide_kind_with_llm", boom)
+    result = propose_workout_today(today=dt.date(2026, 1, 5))
+    assert result["source"] == "fallback"
+    assert result["workout"]["kind"]
+
+
+def test_cache_key_distinguishes_available_min(tmp_path, monkeypatch):
+    """Deux disponibilités différentes le même jour ne partagent pas le cache."""
+    _patch_paths(tmp_path, monkeypatch)
+    _set_availability(
+        tmp_path,
+        "days:\n  monday:\n    max_duration_min: 180\n    context: indoor\n",
+    )
+    _patch_tsb(monkeypatch, 0.0)
+
+    call_count = {"n": 0}
+
+    def counted_llm(_dossier):
+        call_count["n"] += 1
+        return {
+            "kind": "endurance",
+            "duration_min": 60,
+            "rationale": "Test dispo.",
+            "confidence": 0.7,
+        }
+
+    monkeypatch.setattr(today_mod, "_decide_kind_with_llm", counted_llm)
+
+    monday = dt.date(2026, 1, 5)
+    first = propose_workout_today(today=monday, available_min=60)
+    propose_workout_today(today=monday, available_min=120)
+    assert call_count["n"] == 2
+
+    # Re-demander la première dispo relit bien SON entrée de cache.
+    again = propose_workout_today(today=monday, available_min=60)
+    assert again["source"] == "cache"
+    assert again["workout"]["duration_min"] == first["workout"]["duration_min"]
+
+
 def test_refresh_bypasses_cache(tmp_path, monkeypatch):
     """refresh=True force la régénération."""
     _patch_paths(tmp_path, monkeypatch)

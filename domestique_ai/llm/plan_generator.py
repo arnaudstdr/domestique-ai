@@ -28,13 +28,15 @@ import datetime as _dt
 import json
 import statistics
 from collections.abc import AsyncIterator
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field, ValidationError, field_validator
 
 from domestique_ai.athlete_context import AthleteContext
-from domestique_ai.llm import usage
+from domestique_ai.config import get_ollama_model
+from domestique_ai.llm import plan_cache, usage
 from domestique_ai.llm.availability import _WEEKDAY_BY_INDEX, Availability
 from domestique_ai.llm.ollama_client import chat_structured
 from domestique_ai.processing.athlete_state import (
@@ -57,6 +59,29 @@ from domestique_ai.processing.plan_validator import validate_and_correct
 
 _VALID_KINDS = ("recovery", "endurance", "tempo", "intervals")
 _GENERATION_TIMEOUT_S = 30.0
+
+# Schéma passé au SDK Ollama (`format=`) : contraint le décodage à la forme
+# attendue et réduit fortement les retries « JSON invalide » (qui renvoient
+# tout le prompt une seconde fois).
+_PLAN_WEEK_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "workouts": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "date": {"type": "string"},
+                    "kind": {"type": "string", "enum": list(_VALID_KINDS)},
+                    "duration_min": {"type": "integer"},
+                    "notes": {"type": "string"},
+                },
+                "required": ["date", "kind", "duration_min"],
+            },
+        }
+    },
+    "required": ["workouts"],
+}
 
 
 class LLMWorkoutDraft(BaseModel):
@@ -297,8 +322,51 @@ async def _generate_week_with_llm(
     state_text: str = "",
     ceiling: str = "full",
     level: str | None = None,
+    db_path: Path | None = None,
 ) -> list[Workout] | None:
-    """Tente une génération LLM avec retry. Retourne ``None`` si échec définitif."""
+    """Tente une génération LLM avec retry. Retourne ``None`` si échec définitif.
+
+    Si ``db_path`` est fourni, la sortie validée est mise en cache
+    (``plan_llm_cache``) et rejouée sans appel LLM tant que l'entrée complète
+    (état, objectif, dates, contraintes, modèle) est identique.
+    """
+    cache_hash: str | None = None
+    if db_path is not None:
+        cache_hash = plan_cache.week_hash(
+            {
+                "model": get_ollama_model(),
+                "week_index": week_index,
+                "total_weeks": total_weeks,
+                "dates": [d.isoformat() for d in dates],
+                "objective_type": objective_type,
+                "weeks_to_event": weeks_to_event,
+                "ctl_current": ctl_current,
+                "focus": focus,
+                "is_taper": is_taper,
+                "is_recovery_week": is_recovery_week,
+                "availability": (
+                    sorted((d.weekday, d.max_duration_min, d.context) for d in availability.days)
+                    if availability is not None
+                    else None
+                ),
+                "adaptation": adaptation,
+                "emphasis": emphasis,
+                "state_text": state_text,
+                "ceiling": ceiling,
+                "level": level,
+            }
+        )
+        cached = plan_cache.load(cache_hash, db_path=db_path)
+        if cached is not None:
+            try:
+                parsed_cached = LLMWeekPlan.model_validate(cached)
+            except ValidationError:
+                parsed_cached = None
+            if parsed_cached is not None and parsed_cached.workouts:
+                return [
+                    _expand_to_workout(draft, week_index, focus) for draft in parsed_cached.workouts
+                ]
+
     system = _build_system_prompt()
     user = _build_user_prompt(
         week_index,
@@ -323,7 +391,10 @@ async def _generate_week_with_llm(
     ]
     for _attempt in range(2):
         raw = await chat_structured(
-            messages, timeout_s=_GENERATION_TIMEOUT_S, label=usage.PLAN_WEEK
+            messages,
+            timeout_s=_GENERATION_TIMEOUT_S,
+            schema=_PLAN_WEEK_SCHEMA,
+            label=usage.PLAN_WEEK,
         )
         if raw is None:
             continue
@@ -345,6 +416,8 @@ async def _generate_week_with_llm(
             continue
         if not parsed.workouts:
             continue
+        if cache_hash is not None:
+            plan_cache.save(cache_hash, raw, db_path=db_path)
         return [_expand_to_workout(draft, week_index, focus) for draft in parsed.workouts]
     return None
 
@@ -416,6 +489,18 @@ class GenerationContext:
     chronic_tsb: float | None = None  # moyenne TSB 7 j
     level: str | None = None  # niveau/expérience de l'athlète
     coach_state: dict[str, Any] | None = None  # dict agrégé (athlete_state)
+    # DB athlète : active le cache des semaines LLM (``plan_llm_cache``). Quand
+    # elle est absente (tests, contextes ad hoc), le cache est simplement sauté.
+    db_path: Path | None = None
+    # Mémoïsation interne : le bloc « État réel » est identique pour toutes les
+    # semaines d'une même génération — calculé une seule fois.
+    _state_text: str | None = field(default=None, init=False, repr=False, compare=False)
+
+    def state_text(self) -> str:
+        """Bloc « État réel » (mémoïsé par génération)."""
+        if self._state_text is None:
+            self._state_text = format_state_block(self.coach_state) if self.coach_state else ""
+        return self._state_text
 
     def ceiling_for(self, week_index: int) -> str:
         """Plafond d'intensité de la semaine ``week_index`` (reprise graduée)."""
@@ -491,7 +576,7 @@ async def _compose_one_week(
     flavor = _objective_flavor(ctx.target_event_type)
     taper_weeks = int(flavor["taper_weeks"])
     emphasis = _training_emphasis(ctx.target_event_type)
-    state_text = format_state_block(ctx.coach_state) if ctx.coach_state else ""
+    state_text = ctx.state_text()
 
     cur_week_end = cur_week_start + _dt.timedelta(days=7)
     future_dates = [
@@ -538,6 +623,7 @@ async def _compose_one_week(
                 state_text=state_text,
                 ceiling=ceiling,
                 level=ctx.level,
+                db_path=ctx.db_path,
             )
             if use_llm
             else None
@@ -786,6 +872,7 @@ def build_context_from_app_state(
         chronic_tsb=chronic_tsb,
         level=level,
         coach_state=coach_state,
+        db_path=ctx.db_path,
     )
 
 

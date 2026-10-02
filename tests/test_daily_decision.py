@@ -225,3 +225,80 @@ def test_go_when_sleep_mildly_short_but_within_normal_variation(ctx: AthleteCont
     )
     result = evaluate_daily_decision(_today(), ctx=ctx, use_llm=False, persist=False)
     assert result["decision"] == "go"
+
+
+def test_go_does_not_call_llm_reason(ctx: AthleteContext, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Décision `go` : la raison déterministe suffit, aucun appel LLM."""
+    import domestique_ai.llm.daily_decision as dd
+
+    calls = {"n": 0}
+
+    def counting(decision, reason, signals):
+        calls["n"] += 1
+        return "RAISON LLM"
+
+    monkeypatch.setattr(dd, "_refine_reason_with_llm", counting)
+    _plan_for(ctx, _today())
+    _seed_morning(ctx, _today())
+    result = evaluate_daily_decision(_today(), ctx=ctx, use_llm=True, persist=False)
+    assert result["decision"] == "go"
+    assert calls["n"] == 0
+    assert result["reason"] != "RAISON LLM"
+
+
+def test_non_go_calls_llm_reason(ctx: AthleteContext, monkeypatch: pytest.MonkeyPatch) -> None:
+    import domestique_ai.llm.daily_decision as dd
+
+    monkeypatch.setattr(dd, "_refine_reason_with_llm", lambda d, r, s: "RAISON LLM")
+    _plan_for(ctx, _today())
+    _seed_morning(ctx, _today(), readiness_score=25, baseline_readiness=30)
+    result = evaluate_daily_decision(_today(), ctx=ctx, use_llm=True, persist=False)
+    assert result["decision"] == "rest"
+    assert result["reason"] == "RAISON LLM"
+
+
+def test_flag_disables_llm_reason(ctx: AthleteContext, monkeypatch: pytest.MonkeyPatch) -> None:
+    """DOMESTIQUE_AI_LLM_DECISION_REASON=0 → raison déterministe, aucun appel."""
+    import domestique_ai.llm.daily_decision as dd
+
+    monkeypatch.setenv("DOMESTIQUE_AI_LLM_DECISION_REASON", "0")
+
+    def boom(decision, reason, signals):
+        raise AssertionError("le LLM ne doit pas être appelé")
+
+    monkeypatch.setattr(dd, "_refine_reason_with_llm", boom)
+    _plan_for(ctx, _today())
+    _seed_morning(ctx, _today(), baseline_readiness=55, readiness_score=45)
+    result = evaluate_daily_decision(_today(), ctx=ctx, use_llm=True, persist=False)
+    assert result["decision"] == "adjust"
+    assert result["reason"]
+
+
+def test_existing_same_decision_not_overwritten(ctx: AthleteContext) -> None:
+    """Un recalcul `use_llm=False` ne doit pas écraser une décision persistée
+    identique (souvent raffinée par le LLM au check du matin)."""
+    pid = _plan_for(ctx, _today())
+    _seed_morning(ctx, _today(), baseline_readiness=55, readiness_score=45)
+    first = evaluate_daily_decision(_today(), ctx=ctx, use_llm=False)
+    assert first["persisted"] is True
+
+    # Le job du matin (LLM) raffine la raison persistée…
+    from domestique_ai.llm.plan_storage import save_day_decision
+
+    save_day_decision(
+        pid,
+        _today().isoformat(),
+        "adjusted",
+        workout=Workout.from_dict(first["workout"]),
+        reason="RAISON LLM PERSISTÉE",
+        decided_by="daily_check",
+        db_path=ctx.db_path,
+    )
+
+    # …et le recalcul dashboard ne doit pas la réécrire.
+    second = evaluate_daily_decision(_today(), ctx=ctx, use_llm=False)
+    assert second["decision"] == "adjust"
+    assert second["persisted"] is True
+    decision = get_day_decision(pid, _today().isoformat(), db_path=ctx.db_path)
+    assert decision is not None
+    assert decision["reason"] == "RAISON LLM PERSISTÉE"
