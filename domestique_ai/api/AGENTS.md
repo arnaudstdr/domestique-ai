@@ -226,7 +226,8 @@ SQLite autorise les trois.
   bloquant : l'UI affiche un bandeau (`AnnouncementBanner`) plutôt qu'un gate.
 - **Middleware** — aucune exception ajoutée : `/api/admin/*` exige un Bearer, et
   un admin à mot de passe reste soumis à l'enrôlement 2FA (le bootstrap, lui,
-  reste exempté break-glass).
+  reste exempté break-glass). La période de grâce 2FA ne s'applique **jamais**
+  aux admins (`_totp_grace_active` les exclut).
 - **UI** — page `/admin` (`frontend/src/pages/Admin.tsx`), lien d'en-tête
   `ShieldCheck` visible seulement si `me.role === "admin"`. Chaque compte est
   dépliable (`components/AdminUserRow.tsx`) : fiche sécurité/activité/liens +
@@ -283,11 +284,11 @@ stockant une **data URL** `data:image/<type>;base64,…`, `NULL` par défaut.
 
 ## Tuto d'onboarding (état par utilisateur)
 
-Le guide interactif du front (profil → Garmin → 1re synchro santé) ne persiste
-côté serveur que **« terminé » / « passé »** — l'avancement des étapes est
-dérivé côté client des données réelles (`GET /api/profile`,
-`GET /api/garmin/status`, `GET /api/morning/sources`, cf.
-`frontend/AGENTS.md`).
+Le guide interactif du front (profil → Garmin → 1re synchro santé → activation
+2FA) ne persiste côté serveur que **« terminé » / « passé »** — l'avancement des
+étapes est dérivé côté client des données réelles (`GET /api/profile`,
+`GET /api/garmin/status`, `GET /api/morning/sources`, `MeResponse.totp_enabled`,
+cf. `frontend/AGENTS.md`).
 
 - **DB** — colonnes `onboarding_completed_at TEXT` / `onboarding_dismissed_at
   TEXT` sur `users` (`platform_db.py`, migration douce `_ensure_column`),
@@ -295,8 +296,10 @@ dérivé côté client des données réelles (`GET /api/profile`,
   (la complétion remet `dismissed_at` à `NULL`).
 - **Endpoint** — `POST /api/auth/me/onboarding`, body
   `{action: "complete"|"dismiss"}` → `MeResponse` à jour. Route self-only
-  (compte courant), **pas** dans `_TOTP_SETUP_ALLOWED_PATHS` : le tuto démarre
-  après l'enrôlement 2FA obligatoire.
+  (compte courant), **pas** dans `_TOTP_SETUP_ALLOWED_PATHS` : sans grâce, le
+  tuto attend l'enrôlement 2FA. Pendant la période de grâce d'un nouveau compte
+  (cf. « Grâce 2FA »), il démarre quand même — l'étape finale « Sécurise ton
+  compte » guide vers `/setup-2fa` et se valide quand `totp_enabled` passe à vrai.
 - Tests : `tests/test_platform_db.py`, `tests/test_auth_api.py`.
 
 ## Durcissement HTTP (surface & corps de requête)
@@ -381,6 +384,16 @@ est dans `platform_db.py`, les endpoints dans `api/routers/auth.py`.
   ou code de secours valide) — un simple vol de session ne suffit pas. Le
   bootstrap reste exempté (break-glass). L'enrôlement initial (2FA inactive)
   reste sans body.
+- **Grâce 2FA à la création** — les nouveaux comptes à mot de passe (signup,
+  acceptation d'invitation, CLI non-admin) reçoivent `users.totp_grace_until =
+  now + DOMESTIQUE_AI_TOTP_GRACE_DAYS` (défaut 7, `0` = désactivée) : le
+  middleware `BearerAuthMiddleware` laisse alors passer tout `/api/*` malgré
+  l'absence de TOTP (`_totp_grace_active`, jamais pour un admin). Passée la
+  deadline, le `403 totp_setup_required` reprend. `enable_totp` **et**
+  `disable_totp` effacent la deadline (l'activation clôt la grâce ; le reset
+  admin ne rouvre pas de fenêtre). Exposée par `MeResponse.totp_grace_until`
+  (bandeau UI, cf. `frontend/AGENTS.md`) ; aucun rattrapage rétroactif pour les
+  comptes existants (colonne `NULL`).
 - **Suppression de son compte** — `DELETE /api/auth/me` (authentifié,
   `DeleteAccountRequest`) : confirmation forte — mot de passe si le compte en a
   un + code TOTP/code de secours si la 2FA est active. Refuse le bootstrap

@@ -15,6 +15,14 @@ export default function TwoFactorSetup({ onDone }: { onDone: () => void }) {
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [secretCopied, setSecretCopied] = useState(false);
+
+  // Sur un seul téléphone, le QR affiché à l'écran ne peut pas être scanné :
+  // on privilégie le deep link `otpauth://` (ouvre l'app d'authentification
+  // avec le compte pré-rempli) et la copie de la clé.
+  const isMobile =
+    typeof window !== "undefined" &&
+    (navigator.maxTouchPoints > 0 || window.matchMedia?.("(pointer: coarse)").matches);
 
   useEffect(() => {
     let alive = true;
@@ -62,6 +70,16 @@ export default function TwoFactorSetup({ onDone }: { onDone: () => void }) {
       // clipboard indisponible → fallback download
     }
     downloadCodes();
+  }
+
+  async function copySecret() {
+    if (!enroll) return;
+    try {
+      await navigator.clipboard?.writeText(enroll.secret);
+      setSecretCopied(true);
+    } catch {
+      // clipboard indisponible : la clé reste sélectionnable manuellement
+    }
   }
 
   function downloadCodes() {
@@ -140,23 +158,56 @@ export default function TwoFactorSetup({ onDone }: { onDone: () => void }) {
         <h3 className="font-display text-lg font-extrabold">Activer la 2FA</h3>
       </div>
       <p className="text-sm text-fg-soft">
-        Scanne ce QR code avec ton application d'authentification (Google
+        Ajoute DomestiqueAI à ton application d'authentification (Google
         Authenticator, Authy, 1Password…), puis saisis le code à 6 chiffres.
       </p>
       {enroll ? (
-        <>
-          <img
-            src={enroll.qr_svg_data_uri}
-            alt="QR code d'enrôlement TOTP"
-            className="mx-auto h-48 w-48 rounded-xl bg-white p-2 ring-1 ring-border/10"
-          />
+        <div className="space-y-3">
+          <a href={enroll.otpauth_uri} className="btn-primary block w-full text-center">
+            Ouvrir mon application d'authentification
+          </a>
           <p className="text-center text-xs text-muted">
-            Ou saisis la clé manuellement :{" "}
+            {isMobile
+              ? "Le bouton ouvre directement ton app avec le compte pré-rempli."
+              : "Ou scanne le QR code ci-dessous depuis ton téléphone."}
+          </p>
+          {isMobile ? (
+            <details className="rounded-xl border border-border/10 bg-overlay/[0.03] p-3">
+              <summary className="cursor-pointer text-xs text-fg-soft">
+                Je scanne le QR code depuis un autre appareil
+              </summary>
+              <img
+                src={enroll.qr_svg_data_uri}
+                alt="QR code d'enrôlement TOTP"
+                className="mx-auto mt-3 h-48 w-48 rounded-xl bg-white p-2 ring-1 ring-border/10"
+              />
+            </details>
+          ) : (
+            <img
+              src={enroll.qr_svg_data_uri}
+              alt="QR code d'enrôlement TOTP"
+              className="mx-auto h-48 w-48 rounded-xl bg-white p-2 ring-1 ring-border/10"
+            />
+          )}
+          <div className="flex items-center justify-center gap-2 text-xs text-muted">
+            <span className="shrink-0">Ou saisis la clé :</span>
             <code className="select-all rounded bg-overlay/10 px-1 py-0.5 font-mono text-[11px]">
               {enroll.secret}
             </code>
-          </p>
-        </>
+            <button
+              type="button"
+              onClick={copySecret}
+              className="btn-ghost flex items-center gap-1 px-2 py-1 text-[11px]"
+            >
+              {secretCopied ? (
+                <Check className="h-3.5 w-3.5" strokeWidth={1.75} aria-hidden="true" />
+              ) : (
+                <Copy className="h-3.5 w-3.5" strokeWidth={1.75} aria-hidden="true" />
+              )}
+              {secretCopied ? "Copiée" : "Copier"}
+            </button>
+          </div>
+        </div>
       ) : (
         <p className="text-center text-xs text-muted">Génération du QR code…</p>
       )}

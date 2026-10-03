@@ -17,7 +17,7 @@ Compte environ **10 minutes** pour un athlète (hors synchronisation Garmin).
 | Ce qu'il te faut | Pour qui | Obligatoire ? |
 | --- | --- | --- |
 | Un lien d'invitation reçu par email ou par message **ou** l'inscription publique ouverte | Tous | Oui |
-| Une application d'authentification (Google Authenticator, Authy, 1Password…) | Tous | Oui (2FA obligatoire) |
+| Une application d'authentification (Google Authenticator, Authy, 1Password…) | Tous | Oui (2FA, activable sous 7 jours) |
 | Tes identifiants Garmin Connect | Athlète | Oui pour les activités |
 | Un compte Google Health (optionnel) | Athlète | Non |
 
@@ -63,13 +63,17 @@ Compte environ **10 minutes** pour un athlète (hors synchronisation Garmin).
 
 ## Étape 2 — Activer la double authentification (obligatoire)
 
-La 2FA est **obligatoire** pour tous les comptes. Elle se configure juste après la
-création du compte, et sera demandée à **chaque connexion** (code à 6 chiffres ou
-code de secours).
+La 2FA est **obligatoire** pour tous les comptes et sera demandée à **chaque
+connexion** (code à 6 chiffres ou code de secours). Pour ne pas bloquer la
+création du compte, tu disposes de **7 jours** pour l'activer : l'app reste
+utilisable, un bandeau non masquable te rappelle le temps restant (et le tuto de
+démarrage t'y guide), puis l'accès est bloqué jusqu'à l'activation.
 
-1. **Scanne le QR code** affiché avec ton application d'authentification
-   (Google Authenticator, Authy, 1Password…). Pas de scanner ? Utilise la
-   **clé manuelle** affichée sous le QR code.
+1. **Depuis ton téléphone** : appuie sur **« Ouvrir mon application
+   d'authentification »** — le compte est pré-rempli. Si tu n'en as pas, installe
+   Google Authenticator, Authy ou 1Password, puis rouvre l'assistant.
+   **Depuis un ordinateur** : scanne le QR code affiché avec ton téléphone.
+   Sans scanner ni deep link : utilise la **clé manuelle** (bouton « Copier »).
 2. Saisis le **code de vérification** à 6 chiffres généré par l'application, puis
    clique sur **« Activer »**.
 3. **L'écran « Codes de secours » s'affiche : c'est la seule et unique fois.**
@@ -292,6 +296,7 @@ Page **Plan**.
 | W/kg à « — » | Renseigne **FTP** et **Poids** |
 | « Connexion Garmin expirée ou rejetée » | **« Reconnecter Garmin »** dans Profil |
 | Plus d'accès à mon application 2FA | Utilise un **code de secours**, sinon contacte l'administrateur |
+| Bandeau « Sécurise ton compte — J-x » | La 2FA n'est pas encore active : ouvre le bandeau (ou **Profil → Sécurité**) et active-la avant la fin du compte à rebours |
 | Aucun email reçu (vérification, reset) | Regarde tes spams ; en environnement de test, l'envoi d'emails peut être désactivé |
 | La page Plan affiche un message parlant d'un fichier à renseigner | Ignore ce message : clique sur **« Modifier »** dans **« Objectif courant »** |
 

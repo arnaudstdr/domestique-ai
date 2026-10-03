@@ -398,6 +398,37 @@ def test_signup_athlete_creates_session(
     assert me.json()["email"] == "ath@b.c"
 
 
+def test_signup_gets_totp_grace_and_app_access(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Nouveau compte à mot de passe : grâce 7 j, l'app répond avant la 2FA."""
+    monkeypatch.setenv("DOMESTIQUE_AI_SIGNUP_ENABLED", "1")
+    body = _signup(client, role="coach", email="coach@b.c").json()
+    headers = _bearer(body["session_token"])
+    me = client.get("/api/auth/me", headers=headers).json()
+    assert me["has_password"] is True
+    assert me["totp_grace_until"] is not None
+    # Route verrouillée hors grâce : accessible pendant la fenêtre.
+    assert client.get("/api/data", headers=headers).status_code == 200
+    # Le tuto d'onboarding est lui aussi débloqué pendant la grâce.
+    r = client.post("/api/auth/me/onboarding", headers=headers, json={"action": "dismiss"})
+    assert r.status_code == 200
+
+
+def test_signup_grace_disabled_blocks_immediately(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("DOMESTIQUE_AI_SIGNUP_ENABLED", "1")
+    monkeypatch.setenv("DOMESTIQUE_AI_TOTP_GRACE_DAYS", "0")
+    body = _signup(client, role="coach", email="coach@b.c").json()
+    headers = _bearer(body["session_token"])
+    me = client.get("/api/auth/me", headers=headers).json()
+    assert me["totp_grace_until"] is None
+    r = client.get("/api/data", headers=headers)
+    assert r.status_code == 403
+    assert r.json()["detail"] == "totp_setup_required"
+
+
 def test_signup_coach_gets_reusable_invite_link(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:

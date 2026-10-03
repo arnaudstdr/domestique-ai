@@ -676,6 +676,7 @@ export interface MeResponse {
   display_name: string | null;
   email: string | null;
   totp_enabled: boolean;
+  totp_grace_until: string | null;
   avatar_url: string | null;
   email_verified: boolean;
   has_password: boolean;

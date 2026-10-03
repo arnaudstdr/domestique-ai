@@ -137,6 +137,7 @@ class MeResponse(BaseModel):
     display_name: str | None = None
     email: str | None = None
     totp_enabled: bool = False
+    totp_grace_until: str | None = None
     avatar_url: str | None = None
     email_verified: bool = False
     has_password: bool = False
@@ -401,6 +402,7 @@ def _me_response(user: dict) -> MeResponse:
         display_name=user.get("display_name"),
         email=user.get("email"),
         totp_enabled=bool(user.get("totp_enabled")),
+        totp_grace_until=user.get("totp_grace_until"),
         avatar_url=user.get("avatar"),
         email_verified=bool(user.get("email_verified")),
         has_password=bool(user.get("has_password")),

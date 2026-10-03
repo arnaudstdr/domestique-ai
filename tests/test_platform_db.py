@@ -169,6 +169,7 @@ def test_migration_adds_columns_and_preserves_existing_data(tmp_path):
         "password_hash",
         "totp_secret",
         "totp_enabled",
+        "totp_grace_until",
         "locked_until",
         "onboarding_completed_at",
         "onboarding_dismissed_at",
@@ -225,6 +226,37 @@ def test_totp_enable_disable_lifecycle():
     creds = pdb.get_user_credentials(user["id"])
     assert creds["totp_enabled"] is False
     assert creds["totp_secret"] is None
+
+
+def test_totp_grace_only_for_non_admin_password_accounts(monkeypatch):
+    """La grâce 2FA est posée pour un compte à mot de passe, jamais pour un admin."""
+    athlete = pdb.create_user(role="athlete", password_hash="hash")
+    assert athlete["totp_grace_until"] is not None
+    coach = pdb.create_user(role="coach", password_hash="hash")
+    assert coach["totp_grace_until"] is not None
+    admin = pdb.create_account(role="admin", password_hash="hash")
+    assert admin["totp_grace_until"] is None
+    # Sans mot de passe, rien à protéger : pas de grâce.
+    anonymous = pdb.create_user(role="athlete")
+    assert anonymous["totp_grace_until"] is None
+
+    # Grâce désactivée par config → 2FA obligatoire dès la création.
+    monkeypatch.setenv("DOMESTIQUE_AI_TOTP_GRACE_DAYS", "0")
+    disabled = pdb.create_user(role="athlete", password_hash="hash")
+    assert disabled["totp_grace_until"] is None
+
+
+def test_totp_enable_and_disable_clear_grace():
+    user = pdb.create_user(role="athlete", password_hash="hash")
+    assert user["totp_grace_until"] is not None
+
+    pdb.set_totp_secret(user["id"], "SECRET123")
+    assert pdb.enable_totp(user["id"]) is True
+    assert pdb.get_user_by_id(user["id"])["totp_grace_until"] is None
+
+    # Le reset (disable) ne rouvre pas de fenêtre sans 2FA.
+    pdb.disable_totp(user["id"])
+    assert pdb.get_user_by_id(user["id"])["totp_grace_until"] is None
 
 
 def test_recovery_codes_replace_and_consume():

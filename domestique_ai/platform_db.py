@@ -28,6 +28,7 @@ from domestique_ai.config import (
     get_session_secret,
     get_session_ttl_days,
     get_signup_enabled,
+    get_totp_grace_days,
 )
 
 # Rôles créables par les flux self-service (inscription, invitation).
@@ -73,6 +74,17 @@ def _is_expired(expires_at: str | None) -> bool:
     return dt.datetime.now(dt.UTC) >= when
 
 
+def _new_totp_grace_deadline() -> str | None:
+    """Deadline de grâce 2FA pour un nouveau compte à mot de passe, ou ``None``.
+
+    ``None`` si la grâce est désactivée (``DOMESTIQUE_AI_TOTP_GRACE_DAYS=0``).
+    """
+    days = get_totp_grace_days()
+    if days <= 0:
+        return None
+    return (dt.datetime.now(dt.UTC) + dt.timedelta(days=days)).isoformat()
+
+
 def _connect(path: Path | None = None) -> sqlite3.Connection:
     db_path = Path(path) if path else get_platform_db_path()
     conn = sqlite3.connect(db_path)
@@ -107,6 +119,7 @@ _USERS_COLUMNS = (
     "password_hash",
     "totp_secret",
     "totp_enabled",
+    "totp_grace_until",
     "password_changed_at",
     "failed_attempts",
     "locked_until",
@@ -137,6 +150,7 @@ _USERS_SCHEMA = """
         password_hash TEXT,
         totp_secret TEXT,
         totp_enabled INTEGER NOT NULL DEFAULT 0,
+        totp_grace_until TEXT,
         password_changed_at TEXT,
         failed_attempts INTEGER NOT NULL DEFAULT 0,
         locked_until TEXT,
@@ -239,6 +253,7 @@ def init_platform_db(path: Path | None = None) -> None:
                 password_hash TEXT,
                 totp_secret TEXT,
                 totp_enabled INTEGER NOT NULL DEFAULT 0,
+                totp_grace_until TEXT,
                 password_changed_at TEXT,
                 failed_attempts INTEGER NOT NULL DEFAULT 0,
                 locked_until TEXT,
@@ -269,6 +284,11 @@ def init_platform_db(path: Path | None = None) -> None:
         _ensure_column(conn, "users", "password_hash", "TEXT")
         _ensure_column(conn, "users", "totp_secret", "TEXT")
         _ensure_column(conn, "users", "totp_enabled", "INTEGER NOT NULL DEFAULT 0")
+        # Période de grâce 2FA : un compte à mot de passe créé après l'ajout de
+        # cette colonne peut utiliser l'app jusqu'à cette deadline sans TOTP
+        # (bandeau de rappel), puis est re-bloqué par le middleware. ``NULL`` =
+        # aucune grâce (comptes existants, admin, grâce désactivée par config).
+        _ensure_column(conn, "users", "totp_grace_until", "TEXT")
         _ensure_column(conn, "users", "password_changed_at", "TEXT")
         _ensure_column(conn, "users", "failed_attempts", "INTEGER NOT NULL DEFAULT 0")
         _ensure_column(conn, "users", "locked_until", "TEXT")
@@ -508,6 +528,7 @@ def _user_dict(row: sqlite3.Row) -> dict[str, Any]:
         "email": row["email"],
         "email_verified": bool(row["email_verified"]),
         "totp_enabled": bool(row["totp_enabled"]),
+        "totp_grace_until": row["totp_grace_until"],
         "has_password": bool(row["password_hash"]),
         "avatar": row["avatar"],
         "garmin_email": row["garmin_email"],
@@ -640,12 +661,15 @@ def _insert_user(
         now = _now()
         terms_at = now if terms_version else None
         health_at = now if health_consent_version else None
+        # Grâce 2FA à la création : le compte à mot de passe peut utiliser l'app
+        # sans TOTP jusqu'à cette deadline (jamais pour les admins).
+        grace_until = _new_totp_grace_deadline() if (password_hash and role != ADMIN_ROLE) else None
         cur = conn.execute(
             "INSERT INTO users (public_id, role, display_name, is_bootstrap, created_at, "
-            "email, password_hash, password_changed_at, email_verified, "
+            "email, password_hash, password_changed_at, email_verified, totp_grace_until, "
             "terms_accepted_at, terms_accepted_version, health_consent_at, "
             "health_consent_version, consent_user_agent) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 public_id,
                 role,
@@ -656,6 +680,7 @@ def _insert_user(
                 password_hash,
                 now if password_hash else None,
                 1 if email_verified else 0,
+                grace_until,
                 terms_at,
                 terms_version if terms_at else None,
                 health_at,
@@ -1305,7 +1330,7 @@ def enable_totp(user_id: int, path: Path | None = None) -> bool:
     conn = _connect(path)
     try:
         cur = conn.execute(
-            "UPDATE users SET totp_enabled = 1 "
+            "UPDATE users SET totp_enabled = 1, totp_grace_until = NULL "
             "WHERE id = ? AND totp_secret IS NOT NULL AND totp_secret != ''",
             (user_id,),
         )
@@ -1316,11 +1341,16 @@ def enable_totp(user_id: int, path: Path | None = None) -> bool:
 
 
 def disable_totp(user_id: int, path: Path | None = None) -> None:
-    """Désactive la 2FA et efface le secret + les codes de secours."""
+    """Désactive la 2FA et efface le secret + les codes de secours.
+
+    Efface aussi la deadline de grâce : un re-enrôlement est exigé immédiatement
+    (le reset admin ne rouvre pas de fenêtre sans 2FA).
+    """
     conn = _connect(path)
     try:
         conn.execute(
-            "UPDATE users SET totp_secret = NULL, totp_enabled = 0 WHERE id = ?",
+            "UPDATE users SET totp_secret = NULL, totp_enabled = 0, "
+            "totp_grace_until = NULL WHERE id = ?",
             (user_id,),
         )
         conn.execute("DELETE FROM recovery_codes WHERE user_id = ?", (user_id,))
@@ -1668,12 +1698,13 @@ def accept_invitation(
         normalized_email = (email or "").strip().lower() or None
         terms_at = now if terms_version else None
         health_at = now if health_consent_version else None
+        grace_until = _new_totp_grace_deadline() if password_hash else None
         cur = conn.execute(
             "INSERT INTO users (public_id, role, display_name, is_bootstrap, created_at, "
-            "email, password_hash, password_changed_at, email_verified, "
+            "email, password_hash, password_changed_at, email_verified, totp_grace_until, "
             "terms_accepted_at, terms_accepted_version, health_consent_at, "
             "health_consent_version, consent_user_agent) "
-            "VALUES (?, ?, ?, 0, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?)",
+            "VALUES (?, ?, ?, 0, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?)",
             (
                 public_id,
                 inv["role"],
@@ -1682,6 +1713,7 @@ def accept_invitation(
                 normalized_email,
                 password_hash,
                 now if password_hash else None,
+                grace_until,
                 terms_at,
                 terms_version if terms_at else None,
                 health_at,

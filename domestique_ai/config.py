@@ -142,6 +142,24 @@ def get_password_reset_ttl_minutes() -> int:
         return 30
 
 
+def get_totp_grace_days() -> int:
+    """Période de grâce 2FA à la création d'un compte, en jours.
+
+    Un compte à mot de passe peut utiliser l'app sans TOTP pendant cette fenêtre
+    (bandeau de rappel côté UI), puis est re-bloqué. Override via
+    ``DOMESTIQUE_AI_TOTP_GRACE_DAYS`` (défaut 7). ``0`` désactive la grâce —
+    la 2FA redevient obligatoire dès l'inscription. Jamais appliquée aux admins.
+    """
+    raw = os.getenv("DOMESTIQUE_AI_TOTP_GRACE_DAYS")
+    if raw is None or raw.strip() == "":
+        return 7
+    try:
+        return max(0, int(raw))
+    except ValueError:
+        logger.warning("DOMESTIQUE_AI_TOTP_GRACE_DAYS=%r invalide — fallback 7.", raw)
+        return 7
+
+
 def get_smtp_host() -> str | None:
     """Hôte SMTP (``SMTP_HOST``). ``None`` → envoi d'emails désactivé (no-op loggé)."""
     raw = os.getenv("SMTP_HOST")

@@ -4,6 +4,7 @@ import BottomNav from "./components/BottomNav";
 import AnnouncementBanner from "./components/AnnouncementBanner";
 import ConsentGate from "./components/ConsentGate";
 import EmailVerificationBanner from "./components/EmailVerificationBanner";
+import TotpGraceBanner from "./components/TotpGraceBanner";
 import OnboardingTour from "./components/OnboardingTour";
 import Dashboard from "./pages/Dashboard";
 import Activities from "./pages/Activities";
@@ -166,6 +167,7 @@ function AuthedShell() {
         </div>
       </header>
       <EmailVerificationBanner />
+      <TotpGraceBanner />
       <AnnouncementBanner />
       <main className="mx-auto max-w-3xl px-4 pt-4 pb-24">
         <Routes>

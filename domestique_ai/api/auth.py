@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import hmac
 import json
+from datetime import UTC, datetime
 from pathlib import Path
 
 from starlette.types import ASGIApp, Receive, Scope, Send
@@ -71,6 +72,27 @@ async def _send_error(send: Send, status: int, detail: str) -> None:
         }
     )
     await send({"type": "http.response.body", "body": body})
+
+
+def _totp_grace_active(user: dict) -> bool:
+    """True si le compte est dans sa période de grâce 2FA (non admin).
+
+    Un compte à mot de passe créé avec ``totp_grace_until`` dans le futur peut
+    utiliser l'API sans TOTP ; la deadline passée, le blocage standard reprend.
+    Les admins n'ont jamais de grâce.
+    """
+    if user.get("role") == "admin":
+        return False
+    raw = user.get("totp_grace_until")
+    if not raw:
+        return False
+    try:
+        when = datetime.fromisoformat(raw)
+    except (TypeError, ValueError):
+        return False
+    if when.tzinfo is None:
+        when = when.replace(tzinfo=UTC)
+    return datetime.now(UTC) < when
 
 
 class BearerAuthMiddleware:
@@ -172,14 +194,17 @@ class BearerAuthMiddleware:
 
         # 2FA obligatoire : un compte qui a des identifiants (donc qui se connecte
         # par mot de passe) mais dont le TOTP n'est pas encore activé est bloqué
-        # hors des routes d'enrôlement. Le bootstrap (propriétaire) reste
-        # exempté — break-glass, et un compte sans mot de passe (session
-        # historique) n'est pas bloqué pour éviter un lockout collectif.
+        # hors des routes d'enrôlement — sauf s'il est dans sa période de grâce
+        # (``totp_grace_until``, posée à la création ; jamais pour un admin).
+        # Le bootstrap (propriétaire) reste exempté — break-glass, et un compte
+        # sans mot de passe (session historique) n'est pas bloqué pour éviter un
+        # lockout collectif.
         if (
             user.get("has_password")
             and not user.get("is_bootstrap")
             and not user.get("totp_enabled")
             and path not in self._TOTP_SETUP_ALLOWED_PATHS
+            and not _totp_grace_active(user)
         ):
             await _send_error(
                 send,

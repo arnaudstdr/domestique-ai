@@ -9,13 +9,13 @@ import { useToast } from "../hooks/useToast";
 import { useViewing } from "../hooks/useViewing";
 import { subscribeOnboardingSignals, subscribeOnboardingStart } from "../lib/onboarding";
 
-type StepKey = "profile" | "garmin" | "health";
+type StepKey = "profile" | "garmin" | "health" | "totp";
 type TourStep = { kind: "welcome" } | { kind: StepKey } | { kind: "finish" };
 
-const STEP_KEYS: StepKey[] = ["profile", "garmin", "health"];
+const STEP_KEYS: StepKey[] = ["profile", "garmin", "health", "totp"];
 
 function isPendingKind(kind: TourStep["kind"]): kind is StepKey {
-  return kind === "profile" || kind === "garmin" || kind === "health";
+  return kind === "profile" || kind === "garmin" || kind === "health" || kind === "totp";
 }
 
 function scrollToSection(id: string) {
@@ -42,6 +42,10 @@ export default function OnboardingTour() {
   const { push } = useToast();
 
   const driverRef = useRef<Driver | null>(null);
+  // `me` est lu via une ref pour que `fetchProgress` (et l'intervalle de
+  // revérification) voie toujours l'état courant sans se recréer à chaque refresh.
+  const meRef = useRef(me);
+  meRef.current = me;
   const sequenceRef = useRef<TourStep[]>([]);
   const doneRef = useRef<Set<StepKey>>(new Set());
   const intervalRef = useRef<number | undefined>(undefined);
@@ -69,6 +73,7 @@ export default function OnboardingTour() {
       profile: profile.status === "fulfilled" && profile.value !== null,
       garmin: garmin.status === "fulfilled" && garmin.value.connected,
       health: sources.status === "fulfilled" && sources.value.garmin.last_sync_at !== null,
+      totp: meRef.current?.totp_enabled === true,
     };
   }, []);
 
@@ -140,6 +145,11 @@ export default function OnboardingTour() {
         ?.addEventListener("click", (event) => {
           void runHealthSync(event.currentTarget as HTMLButtonElement);
         });
+      wrapper
+        .querySelector<HTMLButtonElement>('[data-onboarding-action="totp"]')
+        ?.addEventListener("click", () => {
+          navigate("/setup-2fa?next=/");
+        });
     },
     [navigate, runHealthSync],
   );
@@ -153,8 +163,9 @@ export default function OnboardingTour() {
             popover: {
               title: "Bienvenue dans DomestiqueAI",
               description:
-                "<p>3 étapes rapides pour que tes activités, ta charge et tes zones " +
-                "soient calculées correctement.</p>" +
+                "<p>Quelques étapes rapides pour que tes activités, ta charge " +
+                "et tes zones soient calculées correctement — et pour sécuriser " +
+                "ton compte.</p>" +
                 "<p class=\"onboarding-hint\">Tu peux fermer ce guide à tout moment — " +
                 "il se relance depuis la page Profil.</p>",
               nextBtnText: "C'est parti",
@@ -205,6 +216,24 @@ export default function OnboardingTour() {
                 "la page Santé (readiness, HRV, sommeil).</p>" +
                 '<button type="button" data-onboarding-action="health" ' +
                 'class="onboarding-cta">Synchroniser maintenant</button>',
+              nextBtnText: "Suivant",
+              showProgress: false,
+              disableButtons: ["next"],
+            },
+          };
+        case "totp":
+          return {
+            popover: {
+              title: `Étape ${number}/${total} · Sécurise ton compte`,
+              description:
+                "<p>La double authentification (2FA) protège ton compte même si " +
+                "ton mot de passe fuite. Active-la maintenant : le bouton " +
+                "ci-dessous ouvre l'assistant (application d'authentification " +
+                "puis codes de secours).</p>" +
+                '<button type="button" data-onboarding-action="totp" ' +
+                'class="onboarding-cta">Activer la 2FA</button>' +
+                '<p class="onboarding-hint">Tu peux aussi la retrouver dans ' +
+                "Profil → Sécurité.</p>",
               nextBtnText: "Suivant",
               showProgress: false,
               disableButtons: ["next"],
@@ -340,12 +369,14 @@ export default function OnboardingTour() {
   }, []);
 
   // Lancement automatique : comptes athlète/coach, hors consultation, après le
-  // portail de consentement et l'enrôlement 2FA obligatoire.
+  // portail de consentement. Pendant la période de grâce 2FA (nouveau compte),
+  // le tuto démarre quand même — l'étape « Sécurise ton compte » guide vers
+  // l'enrôlement. Sans grâce (admin, deadline passée), il attend la 2FA.
   useEffect(() => {
     if (!me || viewing) return;
     if (me.role === "admin" || me.is_bootstrap) return;
     if (me.onboarding_completed_at || me.onboarding_dismissed_at) return;
-    if (me.has_password && !me.totp_enabled) return;
+    if (me.has_password && !me.totp_enabled && !me.totp_grace_until) return;
     if (!me.terms_accepted_at || !me.health_consent_at) return;
     const timer = window.setTimeout(() => {
       void launch(false);

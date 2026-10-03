@@ -157,21 +157,26 @@ ce sheet (plus de carte de recherche en haut de page).
   de chaque athlète.
 - **Tuto d'onboarding** — `components/OnboardingTour.tsx` (driver.js ≥ 1.9,
   monté dans `AuthedShell` après `ConsentGate`) : carte flottante **non modale**
-  en 3 étapes — profil (`#profil-infos-perso`) → connexion Garmin
-  (`#profil-garmin`) → 1re synchro santé — la carte de cette dernière déclenche
-  elle-même `api.garmin.healthSync(7)`. Pas d'ancrage ni de surbrillance :
-  l'overlay driver.js est invisible ET `pointer-events: none`, et le composant
-  retire la classe `driver-active` du `<body>` après `drive()` (sinon
-  `.driver-active * { pointer-events: none }` neutralise tout le contenu et le
-  listener `keydown` piège Tab) pour que la page reste utilisable ; le popover
-  est replacé en bas au-dessus de la nav (z-index
+  en 4 étapes — profil (`#profil-infos-perso`) → connexion Garmin
+  (`#profil-garmin`) → 1re synchro santé → **activation 2FA** (CTA vers
+  `/setup-2fa?next=/`, étape validée quand `me.totp_enabled`) — la carte santé
+  déclenche elle-même `api.garmin.healthSync(7)`. Pas d'ancrage ni de
+  surbrillance : l'overlay driver.js est invisible ET `pointer-events: none`, et
+  le composant retire la classe `driver-active` du `<body>` après `drive()`
+  (sinon `.driver-active * { pointer-events: none }` neutralise tout le contenu
+  et le listener `keydown` piège Tab) pour que la page reste utilisable ; le
+  popover est replacé en bas au-dessus de la nav (z-index
   1190, sous les toasts). L'étape ne passe à la suivante qu'une fois l'action
   **constatée côté API** (`GET /api/profile`, `/api/garmin/status`,
-  `/api/morning/sources`, revérifiés sur signal, focus, navigation et toutes les
-  6 s) ; le bouton « Suivant » est désactivé tant que ce n'est pas fait.
-  Écrans ciblés : athlètes et coachs (jamais admin/bootstrap ni en consultation
-  coach), après 2FA + consentements. Seuls « terminé » / « passé » sont
-  persistés via `POST /api/auth/me/onboarding` (cf. `domestique_ai/api/AGENTS.md`).
+  `/api/morning/sources`, `me.totp_enabled`, revérifiés sur signal, focus,
+  navigation et toutes les 6 s) ; le bouton « Suivant » est désactivé tant que
+  ce n'est pas fait. Écrans ciblés : athlètes et coachs (jamais admin/bootstrap
+  ni en consultation coach), après consentements — il démarre pendant la période
+  de grâce 2FA d'un nouveau compte (et reste bloqué sans grâce, deadline passée).
+  Seuls « terminé » / « passé » sont persistés via `POST /api/auth/me/onboarding`
+  (cf. `domestique_ai/api/AGENTS.md`). La navigation vers `/setup-2fa` démonte
+  le tour sans le marquer « passé » ; au retour, l'étape 2FA est validée et le
+  guide reprend.
   Relance : bouton « Revoir le guide de démarrage » dans la section Compte de
   `/profil` ou événement `domestique:onboarding-start`. Les pages qui réalisent
   une action guidée émettent un signal via `lib/onboarding.ts`
@@ -194,6 +199,16 @@ ce sheet (plus de carte de recherche en haut de page).
   `acceptInviteLink`, sans doublon). Bandeau `EmailVerificationBanner.tsx` monté
   dans `AuthedShell` tant que `me.email_verified` est faux. `Roster.tsx` affiche
   aussi `ReusableInviteSection` (lien coach réutilisable, copie + régénération).
+- **2FA (enrôlement & grâce)** — `components/TwoFactorSetup.tsx` (partagé par
+  Signup/AcceptInvite/SetupTwoFactor) : sur mobile (`pointer: coarse`), le deep
+  link `otpauth://` (« Ouvrir mon application d'authentification », compte
+  pré-rempli) et la copie de la clé passent en premier, le QR est replié dans un
+  `<details>` « depuis un autre appareil » ; sur desktop, QR d'abord. Pendant la
+  période de grâce 2FA (`me.totp_grace_until`, `frontend/src/api/types.ts`),
+  `components/TotpGraceBanner.tsx` est monté dans `AuthedShell` : bandeau
+  **non masquable** « Sécurise ton compte — J-x » (style urgent à ≤ 2 jours),
+  CTA vers `/setup-2fa?next=…`. Expiré → le middleware renvoie
+  `403 totp_setup_required` et `client.ts` redirige vers `/setup-2fa`.
 - **Suppression de compte** — `DangerZoneSection` en bas de `/profil` : rappel
   irréversible, confirmation par saisie de `SUPPRIMER`, mot de passe (si
   `me.has_password`) + code TOTP (si `me.totp_enabled`), puis

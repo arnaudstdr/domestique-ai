@@ -128,7 +128,11 @@ def test_login_returns_session_when_totp_not_enrolled(client: TestClient) -> Non
 # ---- 2FA obligatoire : blocage puis enrôlement --------------------------------
 
 
-def test_session_with_password_but_no_totp_is_blocked(client: TestClient) -> None:
+def test_session_with_password_but_no_totp_is_blocked(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Grâce désactivée : on teste le blocage dur (comportement historique).
+    monkeypatch.setenv("DOMESTIQUE_AI_TOTP_GRACE_DAYS", "0")
     session = _make_athlete_account(client)
     # has_password + totp_enabled=0 → bloqué hors routes d'enrôlement.
     r = client.get("/api/self", headers=_bearer(session))
@@ -136,6 +140,43 @@ def test_session_with_password_but_no_totp_is_blocked(client: TestClient) -> Non
     assert r.json()["detail"] == "totp_setup_required"
     # ... mais /me reste accessible.
     assert client.get("/api/auth/me", headers=_bearer(session)).status_code == 200
+
+
+def test_session_with_password_gets_totp_grace(client: TestClient) -> None:
+    """Compte à mot de passe créé par défaut : grâce 7 j, l'app reste utilisable."""
+    session = _make_athlete_account(client)
+    me = client.get("/api/auth/me", headers=_bearer(session)).json()
+    assert me["has_password"] is True
+    assert me["totp_enabled"] is False
+    assert me["totp_grace_until"] is not None
+    assert client.get("/api/self", headers=_bearer(session)).status_code == 200
+
+
+def test_expired_grace_blocks_app(client: TestClient) -> None:
+    import sqlite3
+
+    from domestique_ai.config import get_platform_db_path
+
+    session = _make_athlete_account(client)
+    conn = sqlite3.connect(get_platform_db_path())
+    conn.execute(
+        "UPDATE users SET totp_grace_until = ?",
+        ("2020-01-01T00:00:00+00:00",),
+    )
+    conn.commit()
+    conn.close()
+
+    r = client.get("/api/self", headers=_bearer(session))
+    assert r.status_code == 403
+    assert r.json()["detail"] == "totp_setup_required"
+
+
+def test_totp_enrollment_clears_grace(client: TestClient) -> None:
+    session = _make_athlete_account(client)
+    _enroll_totp(client, session)
+    me = client.get("/api/auth/me", headers=_bearer(session)).json()
+    assert me["totp_enabled"] is True
+    assert me["totp_grace_until"] is None
 
 
 def test_full_totp_enrollment_and_login_flow(client: TestClient) -> None:
