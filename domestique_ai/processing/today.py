@@ -35,6 +35,7 @@ from domestique_ai.llm.availability import (
     AvailabilityError,
     load_availability,
 )
+from domestique_ai.processing.activity_classify import infer_kind_from_zones
 from domestique_ai.processing.analyzer import (
     HR_ZONE_KEYS,
     calculate_ctl_atl_tsb,
@@ -145,29 +146,6 @@ def _load_availability_safely(ctx: AthleteContext) -> Availability | None:
 # ---------------------------------------------------------------------------
 
 
-def _infer_kind_from_zones(
-    z_times: dict[str, float | None],
-    avg_hr: float | None,
-) -> str | None:
-    """Déduit le kind dominant d'une séance à partir de ses zones HR.
-
-    Retourne None si les zones sont absentes (séance non backfillée).
-    """
-    if not z_times or all(v in (None, 0) for v in z_times.values()):
-        return None
-    total = sum(v or 0.0 for v in z_times.values())
-    if total <= 0:
-        return None
-    shares = {k: (v or 0.0) / total for k, v in z_times.items()}
-    if shares.get("z5", 0) + shares.get("z4", 0) >= 0.20:
-        return "intervals"
-    if shares.get("z3", 0) >= 0.30:
-        return "tempo"
-    if shares.get("z1", 0) >= 0.70 and (avg_hr is None or avg_hr < 130):
-        return "recovery"
-    return "endurance"
-
-
 def _last_session_kind(
     activities: list[dict[str, Any]],
     today: _dt.date,
@@ -188,7 +166,7 @@ def _last_session_kind(
         if d >= today:
             continue
         zones = {key: act.get(f"hr_{key}_time") for key in HR_ZONE_KEYS}
-        kind = _infer_kind_from_zones(zones, act.get("avg_heart_rate"))
+        kind = infer_kind_from_zones(zones, act.get("avg_heart_rate"))
         return kind, (today - d).days
     return None, None
 

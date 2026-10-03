@@ -13,6 +13,7 @@ import Coach from "./pages/Coach";
 import Plan from "./pages/Plan";
 import Profil from "./pages/Profil";
 import Tendances from "./pages/Tendances";
+import Climbs from "./pages/Climbs";
 import Login from "./pages/Login";
 import Signup from "./pages/Signup";
 import AcceptInvite from "./pages/AcceptInvite";
@@ -177,6 +178,7 @@ function AuthedShell() {
           <Route path="/coach" element={<Coach />} />
           <Route path="/plan" element={<Plan />} />
           <Route path="/tendances" element={<Tendances />} />
+<Route path="/montees" element={<Climbs />} />
           <Route path="/profil" element={<Profil />} />
           <Route path="/roster" element={<Roster />} />
           <Route path="/prescrire" element={<Prescribe />} />

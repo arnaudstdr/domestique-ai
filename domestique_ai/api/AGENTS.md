@@ -6,6 +6,13 @@ calendrier et authentification/identité.
 Guide racine (invariants globaux, DB, conventions) : `AGENTS.md`.
 Couches voisines : `ingestion/AGENTS.md`, `processing/AGENTS.md`, `llm/AGENTS.md`.
 
+## Montées détectées (/api/climbs)
+
+- `GET /api/climbs?limit=` — montées détectées (segments) avec stats (passages, meilleur/moyen temps, VAM, par année), triées par passages ; lecture coach autorisée.
+- `GET /api/climbs/{id}` — détail + passages (date, durée, VAM, FC/puissance, activité).
+- `PUT /api/climbs/{id}` — nomme/renomme (`{name}`, ≤ 80 c., vide = efface) ; **écriture self-only** (refusée en consultation coach).
+- Données **dérivées** des streams persistés (`processing/climbs.py`, tables `climb_segments`/`climb_efforts`) : exclues de l'export RGPD comme `activity_streams`, supprimées avec l'espace athlète.
+
 ## Édition d'activité (toutes sources)
 
 - **Endpoint** — `PATCH /api/activities/{external_id}` (modèle `ActivityUpdate`) : édition partielle des 4 champs athlète — `name` (nom affiché), `sport_type` (type), `notes` (commentaire libre, colonne `notes`) et `rpe` (effort ressenti 1-10, colonne `rpe`). `exclude_unset` : seuls les champs fournis changent ; `null` efface ; chaîne vide/blanche normalisée en `NULL` (`_clean_text`). Renvoie l'`ActivitySummary` à jour.
@@ -416,7 +423,8 @@ Tests : `tests/test_auth_api.py`, `tests/test_platform_db.py`,
   ZIP → `account.json` (identité + consentements, jamais de secret),
   `profil/profil.yaml`, `donnees/*.json` (activités, `morning_metrics`, poids,
   conversations, résumés, mémoire, plans, décisions, prescriptions). Exclus
-  volontairement : `activity_streams` et `memory_vectors` (dérivés/volumineux).
+  volontairement : `activity_streams`, `climb_segments`/`climb_efforts` et
+  `memory_vectors` (dérivés/volumineux).
   Rate-limité 5/h/compte, tracé `account_export` dans `admin_audit`.
 - **Effacement** — `delete_user` anonymise les retours testeurs
   (`feedback.author_email`/`public_id`/`user_agent` → `NULL`, message conservé)

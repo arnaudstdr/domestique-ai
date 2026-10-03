@@ -27,6 +27,8 @@ import type {
   AthleteSummary,
   AuthConfigResponse,
   Availability,
+  ClimbDetail,
+  ClimbsResponse,
   CoachMemoryFact,
   CoachInviteLink,
   CoachSearchHit,
@@ -329,6 +331,15 @@ export const api = {
     },
     remove: (id: number) =>
       http<void>(`/api/activities/${id}`, { method: "DELETE" }),
+  },
+  climbs: {
+    list: (limit = 100) => http<ClimbsResponse>(`/api/climbs?limit=${limit}`),
+    detail: (id: number) => http<ClimbDetail>(`/api/climbs/${id}`),
+    rename: (id: number, name: string) =>
+      http<ClimbDetail>(`/api/climbs/${id}`, {
+        method: "PUT",
+        body: JSON.stringify({ name }),
+      }),
   },
   morning: {
     get: (days = 90) => http<MorningResponse>(`/api/morning?days=${days}`),

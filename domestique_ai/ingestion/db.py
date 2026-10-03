@@ -24,6 +24,24 @@ from typing import Any
 from domestique_ai.athlete_context import AthleteContext
 from domestique_ai.config import get_db_path
 
+#: DDL partagé entre création et migration de ``climb_efforts`` (la contrainte
+#: UNIQUE d'origine a été retirée : plusieurs passages sur la même montée dans
+#: une même sortie sont légitimes).
+_CLIMB_EFFORTS_DDL = """
+    CREATE TABLE IF NOT EXISTS climb_efforts (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        segment_id INTEGER NOT NULL,
+        activity_id INTEGER NOT NULL,
+        date TEXT NOT NULL,
+        duration_sec REAL NOT NULL,
+        vam_m_h REAL,
+        avg_hr REAL,
+        avg_power REAL,
+        avg_gradient_pct REAL,
+        max_gradient_pct REAL
+    )
+"""
+
 
 def _ensure_column(conn: sqlite3.Connection, table: str, column: str, ddl: str) -> None:
     """Ajoute une colonne si absente. Migration douce SQLite."""
@@ -379,6 +397,51 @@ def init_db(db_path: Path | None = None, *, ctx: AthleteContext | None = None) -
                 created_at TEXT NOT NULL
             )
         """)
+        # Montées : segments récurrents (départ/arrivée proches) + efforts par
+        # activité. Alimentées par ``processing.climbs.rebuild_climbs`` depuis
+        # les streams persistés (backfill Garmin / TCX) — jamais par la sync.
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS climb_segments (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT,
+                start_lat REAL,
+                start_lng REAL,
+                end_lat REAL,
+                end_lng REAL,
+                length_m REAL NOT NULL,
+                gain_m REAL NOT NULL,
+                avg_gradient_pct REAL NOT NULL,
+                efforts_count INTEGER NOT NULL DEFAULT 0,
+                first_seen TEXT,
+                last_seen TEXT,
+                created_at TEXT NOT NULL
+            )
+        """)
+        conn.execute(_CLIMB_EFFORTS_DDL)
+        # Migration douce : la 1ʳᵉ version portait ``UNIQUE(segment_id,
+        # activity_id)`` — une sortie peut légitimement grimper la même montée
+        # deux fois (aller-retour), la contrainte empêchait le 2ᵉ passage.
+        row = conn.execute(
+            "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'climb_efforts'"
+        ).fetchone()
+        if row and "UNIQUE" in (row[0] or "").upper():
+            conn.execute("ALTER TABLE climb_efforts RENAME TO climb_efforts_legacy")
+            conn.execute(_CLIMB_EFFORTS_DDL)
+            conn.execute(
+                "INSERT INTO climb_efforts (id, segment_id, activity_id, date, "
+                "duration_sec, vam_m_h, avg_hr, avg_power, avg_gradient_pct, "
+                "max_gradient_pct) "
+                "SELECT id, segment_id, activity_id, date, duration_sec, vam_m_h, "
+                "avg_hr, avg_power, avg_gradient_pct, max_gradient_pct "
+                "FROM climb_efforts_legacy"
+            )
+            conn.execute("DROP TABLE climb_efforts_legacy")
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_climb_efforts_segment ON climb_efforts(segment_id)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_climb_efforts_activity ON climb_efforts(activity_id)"
+        )
         conn.commit()
     finally:
         conn.close()
@@ -594,7 +657,7 @@ def delete_activity(
     ctx: AthleteContext | None = None,
     db_path: Path | None = None,
 ) -> bool:
-    """Supprime une activité (et ses streams) par id local. ``True`` si supprimée."""
+    """Supprime une activité (et ses streams/montées) par id local. ``True`` si supprimée."""
     path = _resolve_path(db_path, ctx)
     if not path.exists():
         return False
@@ -602,6 +665,17 @@ def delete_activity(
     conn = sqlite3.connect(path)
     try:
         conn.execute("DELETE FROM activity_streams WHERE activity_id = ?", (int(activity_id),))
+        conn.execute("DELETE FROM climb_efforts WHERE activity_id = ?", (int(activity_id),))
+        # Les segments survivent (noms conservés) : on rafraîchit leurs compteurs.
+        conn.execute(
+            "UPDATE climb_segments SET "
+            "efforts_count = (SELECT COUNT(*) FROM climb_efforts e "
+            "WHERE e.segment_id = climb_segments.id), "
+            "first_seen = (SELECT MIN(date) FROM climb_efforts e "
+            "WHERE e.segment_id = climb_segments.id), "
+            "last_seen = (SELECT MAX(date) FROM climb_efforts e "
+            "WHERE e.segment_id = climb_segments.id)"
+        )
         cursor = conn.execute("DELETE FROM activities WHERE id = ?", (int(activity_id),))
         conn.commit()
         return cursor.rowcount > 0

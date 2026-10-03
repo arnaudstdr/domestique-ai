@@ -23,6 +23,7 @@ from typing import Any
 
 from domestique_ai.config import get_db_path
 from domestique_ai.ingestion.db import init_db
+from domestique_ai.processing.activity_classify import sport_bucket
 from domestique_ai.processing.geo import (
     decode_polyline,
     discrete_frechet_m,
@@ -48,20 +49,8 @@ _START_PROXIMITY_M = 500.0
 _TRACK_TOLERANCE_M = 500.0
 _TRACK_RESAMPLE_POINTS = 64
 
-# Buckets de sport : on ne compare jamais une sortie route à un home trainer.
-# ``None`` ou un sport non listé tombent dans le bucket ``"other"`` et ne
-# matchent qu'eux-mêmes (rarement utile, mais on évite les faux positifs).
-_INDOOR_SPORTS = {"VirtualRide"}
-_OUTDOOR_SPORTS = {"Ride", "GravelRide", "MountainBikeRide", "EBikeRide"}
-
-
-def _sport_bucket(sport_type: str | None) -> str:
-    """Retourne ``"indoor"``, ``"outdoor"`` ou ``"other"`` selon le sport."""
-    if sport_type in _INDOOR_SPORTS:
-        return "indoor"
-    if sport_type in _OUTDOOR_SPORTS:
-        return "outdoor"
-    return "other"
+# Buckets de sport (indoor/outdoor/other) : voir processing/activity_classify.py
+# — on ne compare jamais une sortie route à un home trainer.
 
 
 def _within_tolerance(a: float, b: float, tolerance: float, floor: float) -> bool:
@@ -172,7 +161,7 @@ def find_similar_activities(
                 ),
             }
 
-        ref_bucket = _sport_bucket(reference["sport_type"])
+        ref_bucket = sport_bucket(reference["sport_type"])
         ref_dist = float(reference["distance"])
         ref_elev = float(reference["elevation_gain"] or 0)
         ref_start = (
@@ -204,7 +193,7 @@ def find_similar_activities(
     matches: list[dict[str, Any]] = []
     for row in rows:
         candidate = _activity_to_dict(row)
-        if _sport_bucket(candidate["sport_type"]) != ref_bucket:
+        if sport_bucket(candidate["sport_type"]) != ref_bucket:
             continue
         if not _within_tolerance(
             ref_dist,

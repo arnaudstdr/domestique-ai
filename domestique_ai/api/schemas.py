@@ -874,3 +874,66 @@ class FeedbackCreated(BaseModel):
 
     id: int
     created_at: str
+
+
+# ---- Montées (climbs) --------------------------------------------------------
+
+
+class ClimbYearStats(BaseModel):
+    """Passages et meilleur temps d'une montée pour une année."""
+
+    year: str
+    efforts: int
+    best_sec: float
+
+
+class ClimbSummary(BaseModel):
+    """Montée détectée (segment récurrent) avec ses statistiques agrégées."""
+
+    id: int
+    name: str | None = None
+    length_m: float
+    gain_m: float
+    avg_gradient_pct: float
+    efforts_count: int
+    start_lat: float | None = None
+    start_lng: float | None = None
+    efforts: int = 0
+    best_sec: float | None = None
+    avg_sec: float | None = None
+    best_vam_m_h: float | None = None
+    first_date: str | None = None
+    last_date: str | None = None
+    by_year: list[ClimbYearStats] = Field(default_factory=list)
+
+
+class ClimbEffortPoint(BaseModel):
+    """Un passage sur une montée (une activité)."""
+
+    date: str
+    duration_sec: float
+    vam_m_h: float | None = None
+    avg_hr: float | None = None
+    avg_power: float | None = None
+    avg_gradient_pct: float | None = None
+    max_gradient_pct: float | None = None
+    activity_name: str | None = None
+    sport_type: str | None = None
+
+
+class ClimbDetailResponse(ClimbSummary):
+    """Détail d'une montée : stats + liste des passages."""
+
+    efforts_list: list[ClimbEffortPoint] = Field(default_factory=list)
+
+
+class ClimbsResponse(BaseModel):
+    """Liste des montées détectées (page « Montées »)."""
+
+    climbs: list[ClimbSummary]
+
+
+class ClimbRenameRequest(BaseModel):
+    """Nommage d'une montée (chaîne vide = effacer le nom)."""
+
+    name: str = Field(default="", max_length=80)

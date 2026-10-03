@@ -1034,3 +1034,47 @@ export interface AdminStatus {
   daily_check: string | null;
   weekly_review: string | null;
 }
+
+export interface ClimbYearStats {
+  year: string;
+  efforts: number;
+  best_sec: number;
+}
+
+export interface ClimbSummary {
+  id: number;
+  name: string | null;
+  length_m: number;
+  gain_m: number;
+  avg_gradient_pct: number;
+  efforts_count: number;
+  start_lat: number | null;
+  start_lng: number | null;
+  efforts: number;
+  best_sec: number | null;
+  avg_sec: number | null;
+  best_vam_m_h: number | null;
+  first_date: string | null;
+  last_date: string | null;
+  by_year: ClimbYearStats[];
+}
+
+export interface ClimbEffortPoint {
+  date: string;
+  duration_sec: number;
+  vam_m_h: number | null;
+  avg_hr: number | null;
+  avg_power: number | null;
+  avg_gradient_pct: number | null;
+  max_gradient_pct: number | null;
+  activity_name: string | null;
+  sport_type: string | null;
+}
+
+export interface ClimbDetail extends ClimbSummary {
+  efforts_list: ClimbEffortPoint[];
+}
+
+export interface ClimbsResponse {
+  climbs: ClimbSummary[];
+}

@@ -87,6 +87,11 @@ surlignant la bulle ; un hit `fact`/`summary` (sans message) redirige vers
 `/profil`. Le lien « Mémoire du coach » (`Brain`) vit désormais dans l'en-tête de
 ce sheet (plus de carte de recherche en haut de page).
 
+**Découvrabilité** : sur fil vide, des *chips* de questions suggérées (évolution,
+FTP, zones bpm, type de sortie, séance du jour) envoient la question directement ;
+les liens entrants `?prompt=...` préremplissent la saisie et donnent le focus au
+textarea (mécanisme à utiliser depuis d'autres pages, ex. cartes du Dashboard).
+
 ## Écrans & composants notables
 
 - **Dashboard** — `DailyBriefCard` en hero. Refonte visuelle : **anneau TSB**
@@ -141,6 +146,11 @@ ce sheet (plus de carte de recherche en haut de page).
   d'écriture n'est proposée en consultation coach (`useViewing`).
 - **Tendances** — page `/tendances` (agrégats `GET /api/metrics/trends` +
   projection FTP).
+- **Montées** — page `/montees` (`pages/Climbs.tsx`, lien depuis Tendances) :
+  montées détectées (`GET /api/climbs`), renommage inline (`PUT
+  /api/climbs/{id}` — self-only), stats meilleur/moyen temps, VAM, par année.
+  État vide → rappel du CLI de backfill
+  (`python -m domestique_ai.ingestion.backfill_streams --all`).
 - **Feedback** — page `/feedback` (bouton `Megaphone` dans l'en-tête, à côté
   de l'avatar ; masqué en consultation coach) → `POST /api/feedback`. Select
   catégorie + textarea ; `page` = pathname courant, `app_version` =
