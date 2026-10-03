@@ -164,7 +164,15 @@ def test_migration_adds_columns_and_preserves_existing_data(tmp_path):
     pdb.init_platform_db(old_path)
 
     cols = {r[1] for r in sqlite3.connect(old_path).execute("PRAGMA table_info(users)")}
-    assert {"email", "password_hash", "totp_secret", "totp_enabled", "locked_until"} <= cols
+    assert {
+        "email",
+        "password_hash",
+        "totp_secret",
+        "totp_enabled",
+        "locked_until",
+        "onboarding_completed_at",
+        "onboarding_dismissed_at",
+    } <= cols
 
     # La ligne existante est intacte et le nouveau champ a un défaut sûr.
     user = pdb.get_user_by_public_id("legacy-pid", path=old_path)
@@ -703,6 +711,40 @@ def test_set_and_withdraw_health_consent_roundtrip():
     assert reaccepted["health_consent_version"] == "v2"
 
     assert pdb.withdraw_health_consent(999999) is False
+
+
+# ---- Tuto d'onboarding ------------------------------------------------------
+
+
+def test_user_onboarding_defaults_and_roundtrip():
+    user = pdb.create_user(role="athlete")
+    assert user["onboarding_completed_at"] is None
+    assert user["onboarding_dismissed_at"] is None
+
+    assert pdb.set_user_onboarding(user["id"], dismissed=True)
+    dismissed = pdb.get_user_by_id(user["id"])
+    assert dismissed is not None
+    assert dismissed["onboarding_dismissed_at"] is not None
+    assert dismissed["onboarding_completed_at"] is None
+
+    # La complétion efface le statut « passé » (un guide terminé n'est plus
+    # seulement ignoré).
+    assert pdb.set_user_onboarding(user["id"], completed=True)
+    completed = pdb.get_user_by_id(user["id"])
+    assert completed is not None
+    assert completed["onboarding_completed_at"] is not None
+    assert completed["onboarding_dismissed_at"] is None
+
+    assert pdb.set_user_onboarding(999999, completed=True) is False
+
+
+def test_user_onboarding_noop_without_action():
+    user = pdb.create_user(role="athlete")
+    assert pdb.set_user_onboarding(user["id"]) is True
+    unchanged = pdb.get_user_by_id(user["id"])
+    assert unchanged is not None
+    assert unchanged["onboarding_completed_at"] is None
+    assert unchanged["onboarding_dismissed_at"] is None
 
 
 def test_delete_user_anonymizes_feedback():

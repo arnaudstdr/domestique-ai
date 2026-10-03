@@ -100,6 +100,37 @@ def test_invitation_flow_creates_usable_athlete_session(client: TestClient) -> N
     assert me.json()["role"] == "athlete"
 
 
+def test_onboarding_endpoint_complete_and_dismiss(client: TestClient) -> None:
+    session_token = _invite_and_accept(client, role="athlete")
+    me = client.get("/api/auth/me", headers=_bearer(session_token)).json()
+    assert me["onboarding_completed_at"] is None
+    assert me["onboarding_dismissed_at"] is None
+
+    r = client.post(
+        "/api/auth/me/onboarding", headers=_bearer(session_token), json={"action": "dismiss"}
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["onboarding_dismissed_at"] is not None
+    assert body["onboarding_completed_at"] is None
+
+    r = client.post(
+        "/api/auth/me/onboarding", headers=_bearer(session_token), json={"action": "complete"}
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["onboarding_completed_at"] is not None
+    assert body["onboarding_dismissed_at"] is None
+
+
+def test_onboarding_endpoint_rejects_unknown_action(client: TestClient) -> None:
+    session_token = _invite_and_accept(client, role="athlete")
+    r = client.post(
+        "/api/auth/me/onboarding", headers=_bearer(session_token), json={"action": "nope"}
+    )
+    assert r.status_code == 422
+
+
 def test_athlete_is_blocked_on_data_and_invitations(client: TestClient) -> None:
     session_token = _invite_and_accept(client, role="athlete")
     # Gating coach-only sur les données.

@@ -551,6 +551,11 @@ export const api = {
       }),
     withdrawHealthConsent: () =>
       http<MeResponse>(`/api/auth/me/consents/health`, { method: "DELETE" }),
+    setOnboarding: (action: "complete" | "dismiss") =>
+      http<MeResponse>(`/api/auth/me/onboarding`, {
+        method: "POST",
+        body: JSON.stringify({ action }),
+      }),
     exportData: async (): Promise<{ blob: Blob; filename: string }> => {
       const response = await fetch(`${API_BASE}/api/auth/me/export`, {
         headers: { ...authHeaders() },

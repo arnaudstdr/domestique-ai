@@ -155,6 +155,29 @@ ce sheet (plus de carte de recherche en haut de page).
   (`Profil.tsx`, `AvatarSection`) ; l'en-tête (`App.tsx`) remplace l'icône
   `UserRound` par la miniature ; `Roster.tsx` affiche l'avatar (ou les initiales)
   de chaque athlète.
+- **Tuto d'onboarding** — `components/OnboardingTour.tsx` (driver.js ≥ 1.9,
+  monté dans `AuthedShell` après `ConsentGate`) : carte flottante **non modale**
+  en 3 étapes — profil (`#profil-infos-perso`) → connexion Garmin
+  (`#profil-garmin`) → 1re synchro santé — la carte de cette dernière déclenche
+  elle-même `api.garmin.healthSync(7)`. Pas d'ancrage ni de surbrillance :
+  l'overlay driver.js est invisible ET `pointer-events: none`, et le composant
+  retire la classe `driver-active` du `<body>` après `drive()` (sinon
+  `.driver-active * { pointer-events: none }` neutralise tout le contenu et le
+  listener `keydown` piège Tab) pour que la page reste utilisable ; le popover
+  est replacé en bas au-dessus de la nav (z-index
+  1190, sous les toasts). L'étape ne passe à la suivante qu'une fois l'action
+  **constatée côté API** (`GET /api/profile`, `/api/garmin/status`,
+  `/api/morning/sources`, revérifiés sur signal, focus, navigation et toutes les
+  6 s) ; le bouton « Suivant » est désactivé tant que ce n'est pas fait.
+  Écrans ciblés : athlètes et coachs (jamais admin/bootstrap ni en consultation
+  coach), après 2FA + consentements. Seuls « terminé » / « passé » sont
+  persistés via `POST /api/auth/me/onboarding` (cf. `domestique_ai/api/AGENTS.md`).
+  Relance : bouton « Revoir le guide de démarrage » dans la section Compte de
+  `/profil` ou événement `domestique:onboarding-start`. Les pages qui réalisent
+  une action guidée émettent un signal via `lib/onboarding.ts`
+  (`emitOnboardingSignal` : `profile-saved` dans `Profil.tsx`, `garmin-connected`
+  dans `GarminSection`, `health-synced` dans `Morning.tsx`) — la marche à suivre
+  pour ajouter une étape est celle du module, pas du polling ad hoc.
 - **Login** — `pages/Login.tsx` : fond animé CSS-only (nappes `animate-aurora-*`
   + profil altimétrique `animate-route-draw`, keyframes dans `tailwind.config.js`,
   désactivés par `prefers-reduced-motion`), carte « verre » (`backdrop-blur`) et

@@ -281,6 +281,24 @@ stockant une **data URL** `data:image/<type>;base64,…`, `NULL` par défaut.
   paramètre `?athlete=` (`withAthlete` les exclut) — un coach en consultation
   n'édite jamais la photo de l'athlète.
 
+## Tuto d'onboarding (état par utilisateur)
+
+Le guide interactif du front (profil → Garmin → 1re synchro santé) ne persiste
+côté serveur que **« terminé » / « passé »** — l'avancement des étapes est
+dérivé côté client des données réelles (`GET /api/profile`,
+`GET /api/garmin/status`, `GET /api/morning/sources`, cf.
+`frontend/AGENTS.md`).
+
+- **DB** — colonnes `onboarding_completed_at TEXT` / `onboarding_dismissed_at
+  TEXT` sur `users` (`platform_db.py`, migration douce `_ensure_column`),
+  exposées par `_user_dict` → `MeResponse`. Setter `set_user_onboarding()`
+  (la complétion remet `dismissed_at` à `NULL`).
+- **Endpoint** — `POST /api/auth/me/onboarding`, body
+  `{action: "complete"|"dismiss"}` → `MeResponse` à jour. Route self-only
+  (compte courant), **pas** dans `_TOTP_SETUP_ALLOWED_PATHS` : le tuto démarre
+  après l'enrôlement 2FA obligatoire.
+- Tests : `tests/test_platform_db.py`, `tests/test_auth_api.py`.
+
 ## Durcissement HTTP (surface & corps de requête)
 
 - **Documentation désactivée** — `FastAPI(docs_url=None, redoc_url=None,

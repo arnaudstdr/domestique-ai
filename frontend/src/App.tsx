@@ -4,6 +4,7 @@ import BottomNav from "./components/BottomNav";
 import AnnouncementBanner from "./components/AnnouncementBanner";
 import ConsentGate from "./components/ConsentGate";
 import EmailVerificationBanner from "./components/EmailVerificationBanner";
+import OnboardingTour from "./components/OnboardingTour";
 import Dashboard from "./pages/Dashboard";
 import Activities from "./pages/Activities";
 import ActivityDetail from "./pages/ActivityDetail";
@@ -82,6 +83,7 @@ function AuthedShell() {
   return (
     <div className="min-h-screen bg-surface text-fg">
       <ConsentGate />
+      <OnboardingTour />
       {viewing && <ViewingBanner name={viewing.name} />}
       <header
         className={`sticky top-0 z-[1100] bg-surface/70 backdrop-blur-xl

@@ -134,6 +134,11 @@ L'UI est une **PWA FastAPI + React** (Streamlit a été retiré) :
   yield les events `thinking` / `tool_call` / `tool_result` / `token` au fur
   et à mesure, consommés par `sse-starlette` côté serveur et par
   `consumeSseStream()` côté client.
+- **Tuto d'onboarding** : carte flottante `driver.js` (profil → Garmin →
+  synchro santé) montée dans la coquille authentifiée ; avancement dérivé des
+  données réelles, seuls « terminé » / « passé » sont persistés
+  (`users.onboarding_*`, `POST /api/auth/me/onboarding`). Détail :
+  `frontend/AGENTS.md` et `domestique_ai/api/AGENTS.md`.
 - ⚠️ **Pas de push Garmin** : le endpoint `POST /api/plan/{id}/push-garmin`
   documenté ici est **fictif** — il n'existe pas dans le code. L'export se fait
   par téléchargement ZIP (fichiers `.FIT`) / ICS depuis la page Plan. Le token

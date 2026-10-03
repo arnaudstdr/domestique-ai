@@ -66,6 +66,7 @@ from domestique_ai.platform_db import (
     set_user_avatar,
     set_user_consents,
     set_user_credentials,
+    set_user_onboarding,
     user_is_locked,
     withdraw_health_consent,
 )
@@ -139,11 +140,18 @@ class MeResponse(BaseModel):
     avatar_url: str | None = None
     email_verified: bool = False
     has_password: bool = False
+    is_bootstrap: bool = False
     terms_accepted_at: str | None = None
     terms_accepted_version: str | None = None
     health_consent_at: str | None = None
     health_consent_version: str | None = None
     health_consent_withdrawn_at: str | None = None
+    onboarding_completed_at: str | None = None
+    onboarding_dismissed_at: str | None = None
+
+
+class OnboardingRequest(BaseModel):
+    action: Literal["complete", "dismiss"]
 
 
 class ConsentRequest(BaseModel):
@@ -396,17 +404,42 @@ def _me_response(user: dict) -> MeResponse:
         avatar_url=user.get("avatar"),
         email_verified=bool(user.get("email_verified")),
         has_password=bool(user.get("has_password")),
+        is_bootstrap=bool(user.get("is_bootstrap")),
         terms_accepted_at=user.get("terms_accepted_at"),
         terms_accepted_version=user.get("terms_accepted_version"),
         health_consent_at=user.get("health_consent_at"),
         health_consent_version=user.get("health_consent_version"),
         health_consent_withdrawn_at=user.get("health_consent_withdrawn_at"),
+        onboarding_completed_at=user.get("onboarding_completed_at"),
+        onboarding_dismissed_at=user.get("onboarding_dismissed_at"),
     )
 
 
 @router.get("/me", response_model=MeResponse)
 def me(user: dict = Depends(get_current_user)) -> MeResponse:  # noqa: B008
     return _me_response(user)
+
+
+@router.post("/me/onboarding", response_model=MeResponse)
+def set_onboarding(
+    body: OnboardingRequest,
+    user: dict = Depends(get_current_user),  # noqa: B008
+) -> MeResponse:
+    """Marque le tuto d'onboarding du compte courant comme terminé ou passé.
+
+    L'avancement des étapes est dérivé côté client des données réelles (profil,
+    Garmin, santé) ; ce endpoint ne sert qu'à ne plus réafficher le guide.
+    """
+    set_user_onboarding(
+        user["id"],
+        completed=body.action == "complete",
+        dismissed=body.action == "dismiss",
+    )
+    updated = get_user_by_id(user["id"])
+    if updated is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Compte introuvable.")
+    log.info("Onboarding %s pour %s", body.action, user["public_id"][:8])
+    return _me_response(updated)
 
 
 @router.post("/me/consents", response_model=MeResponse)

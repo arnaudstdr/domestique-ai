@@ -370,3 +370,123 @@
 .leaflet-container {
   background: rgb(var(--surface));
 }
+
+/* ───────────────────────────────────────────────────────────────────────
+   Tuto d'onboarding (driver.js) — carte flottante non modale.
+   Les sélecteurs `.driver-popover.onboarding-popover` sont volontairement
+   plus spécifiques que les règles par défaut du paquet (importé par
+   `components/OnboardingTour.tsx`), quel que soit l'ordre du bundle CSS.
+   ─────────────────────────────────────────────────────────────────────── */
+
+/* Overlay invisible (opacité 0) mais neutralisé côté clics : l'utilisateur
+   doit pouvoir remplir le profil / connecter Garmin pendant le tuto.
+   (Le composant retire en plus `driver-active` du <body>, dont la règle
+   `.driver-active * { pointer-events: none }` neutralise tout le contenu.) */
+.driver-overlay,
+.driver-overlay path {
+  pointer-events: none !important;
+}
+
+.driver-popover.onboarding-popover {
+  z-index: 1190 !important; /* sous les toasts (1200), au-dessus de la nav (1100) */
+  top: auto !important;
+  right: auto !important;
+  bottom: calc(7.5rem + env(safe-area-inset-bottom)) !important;
+  left: 50% !important;
+  transform: translateX(-50%) !important;
+  min-width: 272px;
+  max-width: min(380px, calc(100vw - 2rem));
+  padding: 1rem 1.1rem;
+  border: 1px solid rgb(var(--border) / 0.1);
+  border-radius: 1rem;
+  background-color: rgb(var(--card));
+  color: rgb(var(--fg));
+  font-family: inherit;
+  box-shadow:
+    0 16px 48px -12px rgb(0 0 0 / 0.45),
+    0 2px 8px rgb(0 0 0 / 0.15);
+}
+
+.driver-popover.onboarding-popover .driver-popover-title {
+  font-family: inherit;
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: rgb(var(--fg));
+}
+
+.driver-popover.onboarding-popover .driver-popover-description {
+  margin-top: 6px;
+  font-size: 13px;
+  line-height: 1.45;
+  color: rgb(var(--fg-soft));
+}
+
+.driver-popover.onboarding-popover .driver-popover-description p {
+  margin: 0;
+}
+
+.driver-popover.onboarding-popover .driver-popover-close-btn {
+  top: 4px;
+  right: 4px;
+  color: rgb(var(--muted));
+}
+
+.driver-popover.onboarding-popover .driver-popover-close-btn:hover,
+.driver-popover.onboarding-popover .driver-popover-close-btn:focus {
+  color: rgb(var(--fg));
+}
+
+.driver-popover.onboarding-popover .driver-popover-footer {
+  margin-top: 12px;
+}
+
+.driver-popover.onboarding-popover .driver-popover-footer-btn {
+  border: 1px solid rgb(var(--border) / 0.12);
+  border-radius: 0.75rem;
+  background-color: rgb(var(--overlay) / 0.04);
+  padding: 0.4rem 0.8rem;
+  font-size: 12px;
+  font-weight: 600;
+  color: rgb(var(--fg));
+}
+
+.driver-popover.onboarding-popover .driver-popover-footer-btn:hover,
+.driver-popover.onboarding-popover .driver-popover-footer-btn:focus {
+  border-color: rgb(var(--border) / 0.2);
+  background-color: rgb(var(--overlay) / 0.08);
+}
+
+.driver-popover.onboarding-popover .driver-popover-next-btn {
+  border-color: rgb(var(--accent));
+  background-color: rgb(var(--accent));
+  color: rgb(var(--accent-ink));
+}
+
+.driver-popover.onboarding-popover .driver-popover-next-btn:hover,
+.driver-popover.onboarding-popover .driver-popover-next-btn:focus {
+  border-color: rgb(var(--accent) / 0.9);
+  background-color: rgb(var(--accent) / 0.9);
+}
+
+.driver-popover.onboarding-popover .driver-popover-arrow {
+  border-color: rgb(var(--card));
+}
+
+@layer components {
+  /* Bouton d'action intégré aux cartes du tuto (HTML injecté dans la
+     description driver.js, hors arbre React). */
+  .onboarding-cta {
+    @apply mt-3 w-full rounded-xl bg-accent px-3 py-2 text-xs font-semibold
+           text-accent-ink transition-colors;
+  }
+  .onboarding-cta:hover {
+    @apply bg-accent/90;
+  }
+  .onboarding-cta:disabled {
+    @apply cursor-not-allowed opacity-60;
+  }
+  .onboarding-hint {
+    @apply mt-2 text-[11px] text-muted;
+  }
+}

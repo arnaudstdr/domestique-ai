@@ -34,6 +34,7 @@ import ReadinessBadge from "../components/ReadinessBadge";
 import { CHART, axisProps, legendStyle, tooltipStyle } from "../chartTheme";
 import { useToast } from "../hooks/useToast";
 import { useViewing } from "../hooks/useViewing";
+import { emitOnboardingSignal } from "../lib/onboarding";
 
 const MANUAL_METRICS: {
   key: keyof MetricForm;
@@ -197,6 +198,7 @@ export default function Morning() {
     try {
       const result = await api.garmin.healthSync(7);
       push(result.message, result.success ? "success" : "error");
+      if (result.success) emitOnboardingSignal("health-synced");
       await refresh();
     } catch (err) {
       const msg = err instanceof ApiError ? err.message : String(err);

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import {
   CalendarDays,
   Camera,
+  Compass,
   Dna,
   Link2,
   LogOut,
@@ -31,6 +32,7 @@ import { useMe, useMeRefresh } from "../hooks/useMe";
 import { useTheme, type ThemeChoice } from "../hooks/useTheme";
 import { useViewing } from "../hooks/useViewing";
 import { resizeImageToSquare } from "../lib/image";
+import { emitOnboardingSignal, startOnboardingTour } from "../lib/onboarding";
 
 const WEEKDAYS: { key: WeekdayName; label: string }[] = [
   { key: "monday", label: "Lundi" },
@@ -303,6 +305,7 @@ function GarminSection() {
       } else {
         setPassword("");
         setReauth(false);
+        emitOnboardingSignal("garmin-connected");
         push("Garmin Connect connecté.", "success");
       }
       load();
@@ -323,6 +326,7 @@ function GarminSection() {
       setMfaCode("");
       setPassword("");
       setReauth(false);
+      emitOnboardingSignal("garmin-connected");
       push("Code MFA validé — Garmin Connect connecté.", "success");
       load();
     } catch (err) {
@@ -352,7 +356,7 @@ function GarminSection() {
   const connected = status?.connected ?? false;
 
   return (
-    <section className="card space-y-3">
+    <section id="profil-garmin" className="card space-y-3">
       <h3 className="flex items-center gap-2 text-sm font-medium text-fg-soft">
         <Link2 className="h-4 w-4 text-accent" strokeWidth={1.75} aria-hidden="true" />
         Garmin Connect
@@ -681,6 +685,7 @@ function SecuritySection() {
 
 function AccountSection() {
   const [me, setMe] = useState<MeResponse | null>(null);
+  const viewing = useViewing();
 
   useEffect(() => {
     api.auth.me().then(setMe).catch(() => setMe(null));
@@ -709,6 +714,16 @@ function AccountSection() {
         </p>
       ) : (
         <p className="text-xs text-muted">—</p>
+      )}
+      {!viewing && (
+        <button
+          type="button"
+          onClick={startOnboardingTour}
+          className="btn-ghost flex w-full items-center justify-center gap-2"
+        >
+          <Compass className="h-4 w-4" strokeWidth={1.75} aria-hidden="true" />
+          Revoir le guide de démarrage
+        </button>
       )}
       <button
         type="button"
@@ -910,6 +925,7 @@ function ProfileSection() {
             : "Profil enregistré.",
         "success",
       );
+      emitOnboardingSignal("profile-saved");
     } catch (err) {
       const msg = err instanceof ApiError ? err.message : String(err);
       push(`Profil : ${msg}`, "error");
@@ -919,7 +935,7 @@ function ProfileSection() {
   }
 
   return (
-    <section className="card space-y-3">
+    <section id="profil-infos-perso" className="card space-y-3">
       <h3 className="flex items-center gap-2 text-sm font-medium text-fg-soft">
         <Dna className="h-4 w-4 text-accent" strokeWidth={1.75} aria-hidden="true" />
         Infos perso

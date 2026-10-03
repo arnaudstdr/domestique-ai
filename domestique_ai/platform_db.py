@@ -122,6 +122,8 @@ _USERS_COLUMNS = (
     "health_consent_version",
     "health_consent_withdrawn_at",
     "consent_user_agent",
+    "onboarding_completed_at",
+    "onboarding_dismissed_at",
 )
 _USERS_SCHEMA = """
     CREATE TABLE users (
@@ -149,7 +151,9 @@ _USERS_SCHEMA = """
         health_consent_at TEXT,
         health_consent_version TEXT,
         health_consent_withdrawn_at TEXT,
-        consent_user_agent TEXT
+        consent_user_agent TEXT,
+        onboarding_completed_at TEXT,
+        onboarding_dismissed_at TEXT
     )
 """
 
@@ -248,7 +252,9 @@ def init_platform_db(path: Path | None = None) -> None:
                 health_consent_at TEXT,
                 health_consent_version TEXT,
                 health_consent_withdrawn_at TEXT,
-                consent_user_agent TEXT
+                consent_user_agent TEXT,
+                onboarding_completed_at TEXT,
+                onboarding_dismissed_at TEXT
             )
         """)
         conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_users_public_id ON users(public_id)")
@@ -307,6 +313,12 @@ def init_platform_db(path: Path | None = None) -> None:
         _ensure_column(conn, "users", "health_consent_version", "TEXT")
         _ensure_column(conn, "users", "health_consent_withdrawn_at", "TEXT")
         _ensure_column(conn, "users", "consent_user_agent", "TEXT")
+        # Tuto interactif d'onboarding (profil → Garmin → 1re synchro santé).
+        # ``NULL`` = jamais terminé/passé ; l'avancement lui-même est dérivé des
+        # données réelles (profil, statut Garmin, sources santé), ces colonnes ne
+        # servent qu'à ne plus réafficher le guide.
+        _ensure_column(conn, "users", "onboarding_completed_at", "TEXT")
+        _ensure_column(conn, "users", "onboarding_dismissed_at", "TEXT")
         conn.execute(
             "CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email "
             "ON users(email) WHERE email IS NOT NULL"
@@ -505,6 +517,8 @@ def _user_dict(row: sqlite3.Row) -> dict[str, Any]:
         "health_consent_at": row["health_consent_at"],
         "health_consent_version": row["health_consent_version"],
         "health_consent_withdrawn_at": row["health_consent_withdrawn_at"],
+        "onboarding_completed_at": row["onboarding_completed_at"],
+        "onboarding_dismissed_at": row["onboarding_dismissed_at"],
     }
 
 
@@ -723,6 +737,39 @@ def withdraw_health_consent(user_id: int, path: Path | None = None) -> bool:
     try:
         cur = conn.execute(
             "UPDATE users SET health_consent_withdrawn_at = ? WHERE id = ?",
+            (_now(), user_id),
+        )
+        conn.commit()
+        return cur.rowcount > 0
+    finally:
+        conn.close()
+
+
+def set_user_onboarding(
+    user_id: int,
+    *,
+    completed: bool = False,
+    dismissed: bool = False,
+    path: Path | None = None,
+) -> bool:
+    """Marque le tuto d'onboarding comme terminé et/ou passé.
+
+    Les deux états sont indépendants (on peut rouvrir un guide terminé) mais
+    ``dismissed`` est remis à ``NULL`` quand ``completed`` est posé : un guide
+    réellement terminé ne doit plus être considéré comme « passé ». Retourne
+    ``True`` si le compte existe.
+    """
+    assignments: list[str] = []
+    if completed:
+        assignments.extend(["onboarding_completed_at = ?", "onboarding_dismissed_at = NULL"])
+    elif dismissed:
+        assignments.append("onboarding_dismissed_at = ?")
+    if not assignments:
+        return True
+    conn = _connect(path)
+    try:
+        cur = conn.execute(
+            f"UPDATE users SET {', '.join(assignments)} WHERE id = ?",
             (_now(), user_id),
         )
         conn.commit()

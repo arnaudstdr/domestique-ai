@@ -679,11 +679,14 @@ export interface MeResponse {
   avatar_url: string | null;
   email_verified: boolean;
   has_password: boolean;
+  is_bootstrap: boolean;
   terms_accepted_at: string | null;
   terms_accepted_version: string | null;
   health_consent_at: string | null;
   health_consent_version: string | null;
   health_consent_withdrawn_at: string | null;
+  onboarding_completed_at: string | null;
+  onboarding_dismissed_at: string | null;
 }
 
 export interface AuthConfigResponse {
