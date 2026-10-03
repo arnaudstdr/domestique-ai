@@ -211,7 +211,13 @@ def test_admin_signup_setting_controls_signup(client: TestClient, monkeypatch):
 
     ok = client.post(
         "/api/auth/signup",
-        json={"email": "new@example.com", "password": "Sup3rSecret!x", "role": "athlete"},
+        json={
+            "email": "new@example.com",
+            "password": "Sup3rSecret!x",
+            "role": "athlete",
+            "accepts_terms": True,
+            "accepts_health_data": True,
+        },
     )
     assert ok.status_code == 200, ok.text
 
@@ -451,7 +457,14 @@ def test_admin_created_invitation_accepts_with_signup_disabled(client: TestClien
 
     r = client.post("/api/admin/invitations", headers=_bearer(admin_token), json={"role": "coach"})
     invite_token = r.json()["invite_url"].split("token=", 1)[1]
-    accepted = client.post("/api/auth/accept-invite", json={"invite_token": invite_token})
+    accepted = client.post(
+        "/api/auth/accept-invite",
+        json={
+            "invite_token": invite_token,
+            "accepts_terms": True,
+            "accepts_health_data": True,
+        },
+    )
     assert accepted.status_code == 200, accepted.text
     assert accepted.json()["role"] == "coach"
 

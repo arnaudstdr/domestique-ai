@@ -1,0 +1,10 @@
+User-agent: *
+# Application privée (bêta sur invitation) : les pages applicatives ne sont
+# pas destinées à l'indexation. Seules les pages légales sont autorisées.
+Disallow: /api/
+Disallow: /
+Allow: /cgu
+Allow: /confidentialite
+Allow: /mentions-legales
+
+Sitemap: https://domestique-ai.com/sitemap.xml

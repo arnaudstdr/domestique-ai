@@ -259,8 +259,9 @@ Tout l'état persistant tient dans `./data/` : `platform.db` (comptes, sessions,
 ## Notes
 
 - **Ollama** : la coach LLM utilise `gemma4:31b-cloud` via Ollama Cloud — aucun service à héberger sur le RPi, juste une connexion Internet.
-- **Pas de TLS** : Tailscale chiffre déjà bout-en-bout entre tes appareils. Inutile de coller un reverse proxy devant pour un usage perso.
-- **Pas d'exposition publique** : le port `8501` n'est joignable que depuis ton tailnet (et le LAN du RPi). L'app dispose désormais d'une auth par compte (mot de passe + 2FA) ; pour une exposition publique, ajouter tout de même un Tailscale Funnel + TLS.
+- **TLS en production publique** : `https://domestique-ai.com` est servi via un reverse proxy (TLS/HSTS) sur le RPi qui redirige vers `127.0.0.1:8501`. Dans ce mode, renseigner `DOMESTIQUE_AI_APP_BASE_URL=https://domestique-ai.com` (liens des emails) et `DOMESTIQUE_AI_TRUSTED_PROXY=1` (le proxy doit écraser `X-Forwarded-For`, sinon le rate-limiting par IP est contournable).
+- **Accès privé Tailscale (sans TLS)** : reste possible pour un usage strictement personnel — Tailscale chiffre bout-en-bout. Ne pas activer `DOMESTIQUE_AI_TRUSTED_PROXY` en accès direct.
+- **Exposition publique** : l'app dispose désormais d'une auth par compte (mot de passe + 2FA obligatoire) et des pages légales (CGU, confidentialité, mentions légales) accessibles sans authentification.
 
 ## Calendrier Apple — flux d'abonnement iCalendar (webcal)
 

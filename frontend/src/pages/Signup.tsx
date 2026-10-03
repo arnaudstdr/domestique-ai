@@ -1,7 +1,10 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { ApiError, api, setApiToken } from "../api/client";
+import ConsentCheckboxes from "../components/ConsentCheckboxes";
+import LegalLinks from "../components/LegalLinks";
 import TwoFactorSetup from "../components/TwoFactorSetup";
+import { usePageMeta } from "../hooks/usePageMeta";
 
 /**
  * Inscription self-service (si activée côté serveur) : email + mot de passe +
@@ -19,8 +22,12 @@ export default function Signup() {
   const [confirm, setConfirm] = useState("");
   const [stage, setStage] = useState<"form" | "totp">("form");
   const [isCoach, setIsCoach] = useState(false);
+  const [acceptsTerms, setAcceptsTerms] = useState(false);
+  const [acceptsHealthData, setAcceptsHealthData] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  usePageMeta({ title: "Créer un compte — DomestiqueAI", robots: "noindex" });
 
   useEffect(() => {
     api.auth
@@ -35,10 +42,21 @@ export default function Signup() {
       setError("Les deux mots de passe ne correspondent pas.");
       return;
     }
+    if (!acceptsTerms || !acceptsHealthData) {
+      setError("Les deux consentements sont requis pour créer un compte.");
+      return;
+    }
     setSubmitting(true);
     setError(null);
     try {
-      const res = await api.auth.signup(email.trim(), password, role, displayName.trim() || null);
+      const res = await api.auth.signup(
+        email.trim(),
+        password,
+        role,
+        displayName.trim() || null,
+        acceptsTerms,
+        acceptsHealthData,
+      );
       setApiToken(res.session_token);
       setIsCoach(res.role === "coach");
       setStage("totp");
@@ -143,6 +161,14 @@ export default function Signup() {
               />
             </label>
 
+            <ConsentCheckboxes
+              acceptsTerms={acceptsTerms}
+              acceptsHealthData={acceptsHealthData}
+              onChangeTerms={setAcceptsTerms}
+              onChangeHealthData={setAcceptsHealthData}
+              disabled={submitting}
+            />
+
             {error ? (
               <p className="text-xs text-red-400" role="alert">
                 {error}
@@ -156,6 +182,8 @@ export default function Signup() {
                 !email.trim() ||
                 password.length < 10 ||
                 password !== confirm ||
+                !acceptsTerms ||
+                !acceptsHealthData ||
                 signupEnabled === null
               }
               className="btn-primary w-full disabled:cursor-not-allowed disabled:opacity-50"
@@ -168,6 +196,7 @@ export default function Signup() {
                 J'ai déjà un compte
               </Link>
             </p>
+            <LegalLinks />
           </form>
         )}
       </div>
@@ -179,7 +208,7 @@ function signupErrorMessage(err: unknown): string {
   if (err instanceof ApiError) {
     if (err.status === 403) return "L'inscription publique est désactivée.";
     if (err.status === 409) return "Cet email est déjà utilisé.";
-    if (err.status === 422) return "Mot de passe trop court (10 caractères minimum).";
+    if (err.status === 422) return err.message || "Mot de passe trop court (10 caractères minimum).";
     if (err.status === 429) return "Trop de tentatives. Réessaie dans un moment.";
   }
   return "Échec de l'inscription.";

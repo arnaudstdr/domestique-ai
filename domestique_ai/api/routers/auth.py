@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import base64
 import datetime as dt
+import shutil
 import sqlite3
 from functools import lru_cache
 from typing import Literal
@@ -20,14 +21,18 @@ from domestique_ai.api.deps import get_current_user, require_coach
 from domestique_ai.api.logging import get_logger
 from domestique_ai.athlete_context import context_for_athlete, remove_athlete_space
 from domestique_ai.config import (
+    garmin_token_dir_for,
     get_email_verification_ttl_hours,
     get_password_reset_ttl_minutes,
+    google_health_tokens_path_for,
 )
 from domestique_ai.ingestion.db import init_db
+from domestique_ai.legal import LEGAL_VERSION
 from domestique_ai.platform_db import (
     InvitationError,
     accept_invitation,
     clear_failed_login,
+    clear_user_garmin_credentials,
     consume_auth_token,
     consume_invitation_for_link,
     consume_reconnect_token,
@@ -59,8 +64,10 @@ from domestique_ai.platform_db import (
     set_password,
     set_totp_secret,
     set_user_avatar,
+    set_user_consents,
     set_user_credentials,
     user_is_locked,
+    withdraw_health_consent,
 )
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
@@ -132,6 +139,16 @@ class MeResponse(BaseModel):
     avatar_url: str | None = None
     email_verified: bool = False
     has_password: bool = False
+    terms_accepted_at: str | None = None
+    terms_accepted_version: str | None = None
+    health_consent_at: str | None = None
+    health_consent_version: str | None = None
+    health_consent_withdrawn_at: str | None = None
+
+
+class ConsentRequest(BaseModel):
+    accepts_terms: bool = False
+    accepts_health_data: bool = False
 
 
 class SignupRequest(BaseModel):
@@ -139,6 +156,8 @@ class SignupRequest(BaseModel):
     password: str
     role: Literal["coach", "athlete"] = "athlete"
     display_name: str | None = None
+    accepts_terms: bool = False
+    accepts_health_data: bool = False
 
 
 class SignupResponse(BaseModel):
@@ -169,6 +188,7 @@ class CoachInviteLinkResponse(BaseModel):
 
 class AuthConfigResponse(BaseModel):
     signup_enabled: bool
+    legal_version: str
 
 
 class LinkInviteRequest(BaseModel):
@@ -207,6 +227,8 @@ class AcceptInvite(BaseModel):
     display_name: str | None = None
     email: str | None = None
     password: str | None = None
+    accepts_terms: bool = False
+    accepts_health_data: bool = False
 
 
 class LoginRequest(BaseModel):
@@ -345,8 +367,26 @@ def _athlete_activity_stats(db_path) -> tuple[int, str | None]:
     return (row[0] or 0), row[1]
 
 
-@router.get("/me", response_model=MeResponse)
-def me(user: dict = Depends(get_current_user)) -> MeResponse:  # noqa: B008
+def _consent_user_agent(request: Request) -> str | None:
+    """User-Agent tronqué, conservé comme preuve de consentement (best-effort)."""
+    return (request.headers.get("user-agent") or "").strip()[:500] or None
+
+
+def _require_consents(accepts_terms: bool, accepts_health_data: bool) -> None:
+    """Exige les deux consentements explicites (CGU/confidentialité + santé)."""
+    if not accepts_terms:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="L'acceptation des CGU et de la politique de confidentialité est requise.",
+        )
+    if not accepts_health_data:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Le traitement de tes données de santé nécessite ton consentement explicite.",
+        )
+
+
+def _me_response(user: dict) -> MeResponse:
     return MeResponse(
         public_id=user["public_id"],
         role=user["role"],
@@ -356,7 +396,70 @@ def me(user: dict = Depends(get_current_user)) -> MeResponse:  # noqa: B008
         avatar_url=user.get("avatar"),
         email_verified=bool(user.get("email_verified")),
         has_password=bool(user.get("has_password")),
+        terms_accepted_at=user.get("terms_accepted_at"),
+        terms_accepted_version=user.get("terms_accepted_version"),
+        health_consent_at=user.get("health_consent_at"),
+        health_consent_version=user.get("health_consent_version"),
+        health_consent_withdrawn_at=user.get("health_consent_withdrawn_at"),
     )
+
+
+@router.get("/me", response_model=MeResponse)
+def me(user: dict = Depends(get_current_user)) -> MeResponse:  # noqa: B008
+    return _me_response(user)
+
+
+@router.post("/me/consents", response_model=MeResponse)
+def accept_consents(
+    body: ConsentRequest,
+    request: Request,
+    user: dict = Depends(get_current_user),  # noqa: B008
+) -> MeResponse:
+    """Enregistre les consentements d'un compte existant (ré-consentement).
+
+    Utilisé par le portail de consentement affiché aux comptes créés avant la
+    mise en conformité (et après toute nouvelle version des textes).
+    """
+    _require_consents(body.accepts_terms, body.accepts_health_data)
+    set_user_consents(
+        user["id"],
+        terms_version=LEGAL_VERSION,
+        health_consent_version=LEGAL_VERSION,
+        user_agent=_consent_user_agent(request),
+    )
+    updated = get_user_by_id(user["id"])
+    if updated is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Compte introuvable.")
+    log.info("Consentements enregistrés pour %s (v%s)", user["public_id"][:8], LEGAL_VERSION)
+    return _me_response(updated)
+
+
+@router.delete("/me/consents/health", response_model=MeResponse)
+def withdraw_health(
+    user: dict = Depends(get_current_user),  # noqa: B008
+) -> MeResponse:
+    """Retire le consentement au traitement des données de santé (art. 7.3 RGPD).
+
+    Marque le retrait, déconnecte Garmin (credentials + tokens) et Google Health
+    (tokens). Les données déjà collectées restent consultables ; leur effacement
+    complet passe par la suppression du compte (``DELETE /me``) ou par la
+    suppression de l'athlète par un coach/admin.
+    """
+    withdraw_health_consent(user["id"])
+    clear_user_garmin_credentials(user["id"])
+    ctx = context_for_athlete(user)
+    shutil.rmtree(garmin_token_dir_for(ctx), ignore_errors=True)
+    try:
+        google_health_tokens_path_for(ctx).unlink(missing_ok=True)
+    except OSError:
+        log.warning(
+            "Retrait consentement santé %s : tokens Google non supprimés.", user["public_id"][:8]
+        )
+    log.info("Consentement santé retiré pour %s", user["public_id"][:8])
+    updated = get_user_by_id(user["id"])
+    if updated is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Compte introuvable.")
+    return _me_response(updated)
 
 
 class AvatarResponse(BaseModel):
@@ -596,8 +699,11 @@ def _require_password_policy(password: str) -> None:
 
 @router.get("/config", response_model=AuthConfigResponse)
 def auth_config() -> AuthConfigResponse:
-    """Expose les capacités d'auth publiques (ex. inscription ouverte ou non)."""
-    return AuthConfigResponse(signup_enabled=effective_signup_enabled())
+    """Expose les capacités d'auth publiques (inscription ouverte, version légale)."""
+    return AuthConfigResponse(
+        signup_enabled=effective_signup_enabled(),
+        legal_version=LEGAL_VERSION,
+    )
 
 
 @router.post("/signup", response_model=SignupResponse)
@@ -617,6 +723,7 @@ def signup(body: SignupRequest, request: Request) -> SignupResponse:
         "signup_ip", ratelimit.client_ip(request), max_events=5, window_seconds=3600
     ):
         raise _rate_limited()
+    _require_consents(body.accepts_terms, body.accepts_health_data)
     _require_password_policy(body.password)
     email = (body.email or "").strip().lower()
     if not email:
@@ -635,6 +742,9 @@ def signup(body: SignupRequest, request: Request) -> SignupResponse:
             email=email,
             password_hash=security.hash_password(body.password),
             email_verified=False,
+            terms_version=LEGAL_VERSION,
+            health_consent_version=LEGAL_VERSION,
+            consent_user_agent=_consent_user_agent(request),
         )
     except sqlite3.IntegrityError as exc:
         raise HTTPException(
@@ -816,12 +926,14 @@ def list_athletes(coach: dict = Depends(require_coach)) -> list[AthleteSummary]:
 
 
 @router.post("/accept-invite", response_model=SessionTokenOut)
-def accept(body: AcceptInvite) -> SessionTokenOut:
+def accept(body: AcceptInvite, request: Request) -> SessionTokenOut:
     """Crée un compte via une invitation (token à usage unique ou code coach).
 
     Si l'email est déjà pris, le client doit basculer sur ``/accept-invite/link``
-    après connexion (on ne crée jamais de doublon d'athlète).
+    après connexion (on ne crée jamais de doublon d'athlète). Les consentements
+    (CGU/confidentialité + données de santé) sont exigés comme à l'inscription.
     """
+    _require_consents(body.accepts_terms, body.accepts_health_data)
     password_hash: str | None = None
     if body.password is not None:
         try:
@@ -853,6 +965,9 @@ def accept(body: AcceptInvite) -> SessionTokenOut:
                 email=email or None,
                 password_hash=password_hash,
                 email_verified=True,
+                terms_version=LEGAL_VERSION,
+                health_consent_version=LEGAL_VERSION,
+                consent_user_agent=_consent_user_agent(request),
             )
         except sqlite3.IntegrityError as exc:
             raise HTTPException(
@@ -875,6 +990,9 @@ def accept(body: AcceptInvite) -> SessionTokenOut:
             display_name=body.display_name,
             email=body.email,
             password_hash=password_hash,
+            terms_version=LEGAL_VERSION,
+            health_consent_version=LEGAL_VERSION,
+            consent_user_agent=_consent_user_agent(request),
         )
     except InvitationError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc

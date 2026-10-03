@@ -862,6 +862,33 @@ def get_sentry_enabled() -> bool:
 def get_sentry_send_pii() -> bool:
     """Joindre les données PII (headers, IP) aux événements Sentry.
 
-    Défaut ``True`` (comportement demandé). Désactivable via ``SENTRY_SEND_PII=0``.
+    Défaut ``False`` depuis la mise en conformité RGPD (l'app traite des données
+    de santé ; les IP/headers ne doivent pas partir chez un tiers par défaut).
+    Réactivable explicitement via ``SENTRY_SEND_PII=1``.
     """
-    return os.getenv("SENTRY_SEND_PII", "1").strip().lower() not in {"0", "false", "no"}
+    return os.getenv("SENTRY_SEND_PII", "0").strip().lower() not in {"0", "false", "no"}
+
+
+def get_llm_calls_retention_days() -> int:
+    """Durée de conservation des métadonnées d'appels LLM (défaut 90 jours).
+
+    ``0`` désactive la purge (conservation illimitée).
+    ``DOMESTIQUE_AI_LLM_CALLS_RETENTION_DAYS``.
+    """
+    raw = os.getenv("DOMESTIQUE_AI_LLM_CALLS_RETENTION_DAYS", "90")
+    try:
+        return max(0, int(raw))
+    except ValueError:
+        return 90
+
+
+def get_audit_retention_days() -> int:
+    """Durée de conservation du journal d'audit admin (défaut 365 jours).
+
+    ``0`` désactive la purge. ``DOMESTIQUE_AI_AUDIT_RETENTION_DAYS``.
+    """
+    raw = os.getenv("DOMESTIQUE_AI_AUDIT_RETENTION_DAYS", "365")
+    try:
+        return max(0, int(raw))
+    except ValueError:
+        return 365

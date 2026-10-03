@@ -71,6 +71,8 @@ def _make_athlete_account(
             "display_name": "Alice",
             "email": email,
             "password": password,
+            "accepts_terms": True,
+            "accepts_health_data": True,
         },
     )
     assert r2.status_code == 200, r2.text
@@ -214,7 +216,13 @@ def test_accept_invite_weak_password_rejected(client: TestClient) -> None:
     ).json()["invite_token"]
     r = client.post(
         "/api/auth/accept-invite",
-        json={"invite_token": invite, "email": "weak@example.com", "password": "short"},
+        json={
+            "invite_token": invite,
+            "email": "weak@example.com",
+            "password": "short",
+            "accepts_terms": True,
+            "accepts_health_data": True,
+        },
     )
     assert r.status_code == 422
 
@@ -230,6 +238,8 @@ def test_accept_invite_duplicate_email_conflict(client: TestClient) -> None:
             "invite_token": invite,
             "email": "DUP@example.com",
             "password": _SAMPLE_C,
+            "accepts_terms": True,
+            "accepts_health_data": True,
         },
     )
     assert r.status_code == 409
@@ -240,6 +250,8 @@ def test_accept_invite_duplicate_email_conflict(client: TestClient) -> None:
             "invite_token": invite,
             "email": "other@example.com",
             "password": _SAMPLE_C,
+            "accepts_terms": True,
+            "accepts_health_data": True,
         },
     )
     assert r2.status_code == 200, r2.text

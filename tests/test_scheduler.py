@@ -23,6 +23,10 @@ def _reset_sync_state(monkeypatch):
         "SESSION_IDLE_FINALIZE_MINUTES",
     ):
         monkeypatch.delenv(key, raising=False)
+    # La purge de rétention est active par défaut (90 j / 365 j) : on la
+    # neutralise ici pour garder les tests de jobs indépendants d'elle.
+    monkeypatch.setenv("DOMESTIQUE_AI_LLM_CALLS_RETENTION_DAYS", "0")
+    monkeypatch.setenv("DOMESTIQUE_AI_AUDIT_RETENTION_DAYS", "0")
 
     garmin_router._sync_state.clear()
     yield
@@ -282,6 +286,31 @@ def test_scheduler_noop_when_everything_disabled(monkeypatch):
     scheduler._scheduler = None
     scheduler.start_scheduler()
     assert scheduler._scheduler is None
+
+
+def test_scheduler_registers_retention_when_enabled(monkeypatch):
+    """Purge de rétention activée — le job tourne même sans autre sync."""
+    monkeypatch.setenv("DOMESTIQUE_AI_LLM_CALLS_RETENTION_DAYS", "90")
+    monkeypatch.setenv("DOMESTIQUE_AI_AUDIT_RETENTION_DAYS", "365")
+    scheduler._scheduler = None
+    try:
+        scheduler.start_scheduler()
+        assert scheduler._scheduler is not None
+        jobs = {j.id for j in scheduler._scheduler.get_jobs()}
+        assert "retention_purge" in jobs
+    finally:
+        scheduler.stop_scheduler()
+
+
+def test_retention_purge_job_swallows_errors(monkeypatch):
+    """Un échec de purge ne doit jamais faire lever le job."""
+
+    def boom(_before):
+        raise RuntimeError("db verrouillée")
+
+    monkeypatch.setattr("domestique_ai.platform_db.purge_llm_calls", boom)
+    monkeypatch.setenv("DOMESTIQUE_AI_LLM_CALLS_RETENTION_DAYS", "90")
+    scheduler._retention_purge_job()  # ne doit pas lever
 
 
 def test_garmin_health_interval_default(monkeypatch):

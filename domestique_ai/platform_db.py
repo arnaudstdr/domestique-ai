@@ -116,6 +116,12 @@ _USERS_COLUMNS = (
     "feed_token",
     "email_verified",
     "coach_invite_code",
+    "terms_accepted_at",
+    "terms_accepted_version",
+    "health_consent_at",
+    "health_consent_version",
+    "health_consent_withdrawn_at",
+    "consent_user_agent",
 )
 _USERS_SCHEMA = """
     CREATE TABLE users (
@@ -137,7 +143,13 @@ _USERS_SCHEMA = """
         garmin_password TEXT,
         feed_token TEXT,
         email_verified INTEGER NOT NULL DEFAULT 0,
-        coach_invite_code TEXT
+        coach_invite_code TEXT,
+        terms_accepted_at TEXT,
+        terms_accepted_version TEXT,
+        health_consent_at TEXT,
+        health_consent_version TEXT,
+        health_consent_withdrawn_at TEXT,
+        consent_user_agent TEXT
     )
 """
 
@@ -230,7 +242,13 @@ def init_platform_db(path: Path | None = None) -> None:
                 garmin_email TEXT,
                 garmin_password TEXT,
                 email_verified INTEGER NOT NULL DEFAULT 0,
-                coach_invite_code TEXT
+                coach_invite_code TEXT,
+                terms_accepted_at TEXT,
+                terms_accepted_version TEXT,
+                health_consent_at TEXT,
+                health_consent_version TEXT,
+                health_consent_withdrawn_at TEXT,
+                consent_user_agent TEXT
             )
         """)
         conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_users_public_id ON users(public_id)")
@@ -278,6 +296,17 @@ def init_platform_db(path: Path | None = None) -> None:
             "CREATE UNIQUE INDEX IF NOT EXISTS idx_users_coach_invite_code "
             "ON users(coach_invite_code) WHERE coach_invite_code IS NOT NULL"
         )
+        # Preuve de consentement (CGU + traitement des données de santé, art. 9
+        # RGPD). Horodatage + version du texte accepté (``domestique_ai.legal``) ;
+        # ``consent_user_agent`` est capturé serveur pour la traçabilité.
+        # ``health_consent_withdrawn_at`` permet le retrait (art. 7.3) sans
+        # effacer l'historique du consentement initial.
+        _ensure_column(conn, "users", "terms_accepted_at", "TEXT")
+        _ensure_column(conn, "users", "terms_accepted_version", "TEXT")
+        _ensure_column(conn, "users", "health_consent_at", "TEXT")
+        _ensure_column(conn, "users", "health_consent_version", "TEXT")
+        _ensure_column(conn, "users", "health_consent_withdrawn_at", "TEXT")
+        _ensure_column(conn, "users", "consent_user_agent", "TEXT")
         conn.execute(
             "CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email "
             "ON users(email) WHERE email IS NOT NULL"
@@ -471,6 +500,11 @@ def _user_dict(row: sqlite3.Row) -> dict[str, Any]:
         "avatar": row["avatar"],
         "garmin_email": row["garmin_email"],
         "has_garmin_credentials": bool(row["garmin_email"] and row["garmin_password"]),
+        "terms_accepted_at": row["terms_accepted_at"],
+        "terms_accepted_version": row["terms_accepted_version"],
+        "health_consent_at": row["health_consent_at"],
+        "health_consent_version": row["health_consent_version"],
+        "health_consent_withdrawn_at": row["health_consent_withdrawn_at"],
     }
 
 
@@ -518,11 +552,15 @@ def create_user(
     email: str | None = None,
     password_hash: str | None = None,
     email_verified: bool = True,
+    terms_version: str | None = None,
+    health_consent_version: str | None = None,
+    consent_user_agent: str | None = None,
 ) -> dict[str, Any]:
     """Crée un utilisateur self-service (rôles ``VALID_ROLES`` uniquement).
 
     ``email``/``password_hash`` optionnels (inscription). ``admin`` est refusé ici
-    exprès : il se crée hors-ligne via ``create_account`` (CLI).
+    exprès : il se crée hors-ligne via ``create_account`` (CLI). Les versions de
+    consentement non nulles posent l'horodatage correspondant (preuve CGU/santé).
     """
     if role not in VALID_ROLES:
         raise ValueError(f"role invalide: {role!r}")
@@ -534,6 +572,9 @@ def create_user(
         email=email,
         password_hash=password_hash,
         email_verified=email_verified,
+        terms_version=terms_version,
+        health_consent_version=health_consent_version,
+        consent_user_agent=consent_user_agent,
     )
 
 
@@ -573,16 +614,24 @@ def _insert_user(
     email: str | None,
     password_hash: str | None,
     email_verified: bool,
+    *,
+    terms_version: str | None = None,
+    health_consent_version: str | None = None,
+    consent_user_agent: str | None = None,
 ) -> dict[str, Any]:
     conn = _connect(path)
     try:
         public_id = uuid.uuid4().hex
         normalized_email = (email or "").strip().lower() or None
         now = _now()
+        terms_at = now if terms_version else None
+        health_at = now if health_consent_version else None
         cur = conn.execute(
             "INSERT INTO users (public_id, role, display_name, is_bootstrap, created_at, "
-            "email, password_hash, password_changed_at, email_verified) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "email, password_hash, password_changed_at, email_verified, "
+            "terms_accepted_at, terms_accepted_version, health_consent_at, "
+            "health_consent_version, consent_user_agent) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 public_id,
                 role,
@@ -593,6 +642,11 @@ def _insert_user(
                 password_hash,
                 now if password_hash else None,
                 1 if email_verified else 0,
+                terms_at,
+                terms_version if terms_at else None,
+                health_at,
+                health_consent_version if health_at else None,
+                (consent_user_agent or None) if (terms_at or health_at) else None,
             ),
         )
         conn.commit()
@@ -611,6 +665,68 @@ def set_email_verified(user_id: int, verified: bool = True, path: Path | None = 
             (1 if verified else 0, user_id),
         )
         conn.commit()
+    finally:
+        conn.close()
+
+
+def set_user_consents(
+    user_id: int,
+    *,
+    terms_version: str | None = None,
+    health_consent_version: str | None = None,
+    user_agent: str | None = None,
+    path: Path | None = None,
+) -> bool:
+    """Enregistre (ou met à jour) les consentements du compte.
+
+    Utilisé par l'inscription, l'acceptation d'invitation et le ré-consentement
+    des comptes existants. Chaque version non nulle pose l'horodatage
+    correspondant ; un nouveau consentement santé annule le retrait précédent.
+    Retourne ``True`` si le compte existe.
+    """
+    conn = _connect(path)
+    try:
+        row = conn.execute("SELECT id FROM users WHERE id = ?", (user_id,)).fetchone()
+        if row is None:
+            return False
+        now = _now()
+        assignments = ["consent_user_agent = ?"]
+        params: list[Any] = [user_agent or None]
+        if terms_version:
+            assignments.extend(["terms_accepted_at = ?", "terms_accepted_version = ?"])
+            params.extend([now, terms_version])
+        if health_consent_version:
+            assignments.extend(
+                [
+                    "health_consent_at = ?",
+                    "health_consent_version = ?",
+                    "health_consent_withdrawn_at = NULL",
+                ]
+            )
+            params.extend([now, health_consent_version])
+        params.append(user_id)
+        conn.execute(f"UPDATE users SET {', '.join(assignments)} WHERE id = ?", params)
+        conn.commit()
+        return True
+    finally:
+        conn.close()
+
+
+def withdraw_health_consent(user_id: int, path: Path | None = None) -> bool:
+    """Marque le retrait du consentement santé (art. 7.3 RGPD).
+
+    L'historique du consentement initial est conservé (``health_consent_at``),
+    le retrait est daté ; un futur consentement remet ``withdrawn_at`` à
+    ``NULL``. Retourne ``True`` si le compte existe.
+    """
+    conn = _connect(path)
+    try:
+        cur = conn.execute(
+            "UPDATE users SET health_consent_withdrawn_at = ? WHERE id = ?",
+            (_now(), user_id),
+        )
+        conn.commit()
+        return cur.rowcount > 0
     finally:
         conn.close()
 
@@ -1468,6 +1584,10 @@ def accept_invitation(
     email: str | None = None,
     password_hash: str | None = None,
     path: Path | None = None,
+    *,
+    terms_version: str | None = None,
+    health_consent_version: str | None = None,
+    consent_user_agent: str | None = None,
 ) -> tuple[dict[str, Any], str]:
     """Consomme une invitation : crée l'utilisateur + une session (+ lien coach si applicable).
 
@@ -1499,10 +1619,14 @@ def accept_invitation(
         now = _now()
         public_id = uuid.uuid4().hex
         normalized_email = (email or "").strip().lower() or None
+        terms_at = now if terms_version else None
+        health_at = now if health_consent_version else None
         cur = conn.execute(
             "INSERT INTO users (public_id, role, display_name, is_bootstrap, created_at, "
-            "email, password_hash, password_changed_at, email_verified) "
-            "VALUES (?, ?, ?, 0, ?, ?, ?, ?, 1)",
+            "email, password_hash, password_changed_at, email_verified, "
+            "terms_accepted_at, terms_accepted_version, health_consent_at, "
+            "health_consent_version, consent_user_agent) "
+            "VALUES (?, ?, ?, 0, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?)",
             (
                 public_id,
                 inv["role"],
@@ -1511,6 +1635,11 @@ def accept_invitation(
                 normalized_email,
                 password_hash,
                 now if password_hash else None,
+                terms_at,
+                terms_version if terms_at else None,
+                health_at,
+                health_consent_version if health_at else None,
+                (consent_user_agent or None) if (terms_at or health_at) else None,
             ),
         )
         user_id = cur.lastrowid
@@ -1869,6 +1998,10 @@ def delete_user(user_id: int, path: Path | None = None) -> bool:
     NULL``). Ne touche PAS aux données athlète sur disque (base activités,
     tokens, YAML) — c'est le rôle de l'appelant (router roster).
 
+    Les retours testeurs de l'utilisateur sont **anonymisés** (snapshots
+    ``public_id``/``author_email``/``user_agent`` effacés) : le contenu du
+    message reste pour l'amélioration du produit, sans lien avec la personne.
+
     Retourne ``True`` si une ligne a été supprimée, ``False`` si l'utilisateur
     n'existe pas. Refuse le bootstrap (propriétaire) — ``ValueError``.
     """
@@ -1879,6 +2012,11 @@ def delete_user(user_id: int, path: Path | None = None) -> bool:
             return False
         if row["is_bootstrap"]:
             raise ValueError("Le compte propriétaire (bootstrap) ne peut pas être supprimé.")
+        conn.execute(
+            "UPDATE feedback SET public_id = NULL, author_email = NULL, user_agent = NULL "
+            "WHERE user_id = ?",
+            (user_id,),
+        )
         conn.execute("DELETE FROM users WHERE id = ?", (user_id,))
         conn.commit()
         return conn.total_changes > 0
@@ -2116,5 +2254,32 @@ def list_admin_audit(
         rows = [_admin_audit_dict(r) for r in conn.execute(sql, params).fetchall()]
         _attach_audit_labels(conn, rows)
         return rows
+    finally:
+        conn.close()
+
+
+# ---------------------------------------------------------------------------
+# Rétention — purge des données hors durée de conservation
+# ---------------------------------------------------------------------------
+
+
+def purge_llm_calls(before: str, path: Path | None = None) -> int:
+    """Supprime les appels LLM antérieurs à ``before`` (ISO). Retourne le nombre purgé."""
+    conn = _connect(path)
+    try:
+        cur = conn.execute("DELETE FROM llm_calls WHERE created_at < ?", (before,))
+        conn.commit()
+        return cur.rowcount
+    finally:
+        conn.close()
+
+
+def purge_admin_audit(before: str, path: Path | None = None) -> int:
+    """Supprime les entrées d'audit antérieures à ``before`` (ISO). Retourne le nombre purgé."""
+    conn = _connect(path)
+    try:
+        cur = conn.execute("DELETE FROM admin_audit WHERE created_at < ?", (before,))
+        conn.commit()
+        return cur.rowcount
     finally:
         conn.close()

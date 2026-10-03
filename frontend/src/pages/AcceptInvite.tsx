@@ -1,7 +1,10 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import { ApiError, api, setApiToken } from "../api/client";
+import ConsentCheckboxes from "../components/ConsentCheckboxes";
+import LegalLinks from "../components/LegalLinks";
 import TwoFactorSetup from "../components/TwoFactorSetup";
+import { usePageMeta } from "../hooks/usePageMeta";
 
 /**
  * Acceptation d'une invitation (multi-tenant).
@@ -28,16 +31,24 @@ export default function AcceptInvite() {
   const [confirm, setConfirm] = useState("");
   const [challenge, setChallenge] = useState<string | null>(null);
   const [code, setCode] = useState("");
+  const [acceptsTerms, setAcceptsTerms] = useState(false);
+  const [acceptsHealthData, setAcceptsHealthData] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(
     hasTarget ? null : "Lien d'invitation invalide (paramètre manquant).",
   );
+
+  usePageMeta({ title: "Rejoindre un coach — DomestiqueAI", robots: "noindex" });
 
   async function createAccount(event: React.FormEvent) {
     event.preventDefault();
     if (!hasTarget) return;
     if (password !== confirm) {
       setError("Les deux mots de passe ne correspondent pas.");
+      return;
+    }
+    if (!acceptsTerms || !acceptsHealthData) {
+      setError("Les deux consentements sont requis pour créer un compte.");
       return;
     }
     setSubmitting(true);
@@ -49,6 +60,8 @@ export default function AcceptInvite() {
         displayName: displayName.trim() || null,
         email: email.trim(),
         password,
+        acceptsTerms,
+        acceptsHealthData,
       });
       setApiToken(res.session_token);
       setStage("totp");
@@ -225,6 +238,15 @@ export default function AcceptInvite() {
                     />
                   </label>
                 )}
+                {mode === "create" && (
+                  <ConsentCheckboxes
+                    acceptsTerms={acceptsTerms}
+                    acceptsHealthData={acceptsHealthData}
+                    onChangeTerms={setAcceptsTerms}
+                    onChangeHealthData={setAcceptsHealthData}
+                    disabled={submitting}
+                  />
+                )}
               </>
             )}
 
@@ -243,7 +265,8 @@ export default function AcceptInvite() {
                   ? !code.trim()
                   : !email.trim() ||
                     password.length < 10 ||
-                    (mode === "create" && password !== confirm))
+                    (mode === "create" &&
+                      (password !== confirm || !acceptsTerms || !acceptsHealthData)))
               }
               className="btn-primary w-full disabled:cursor-not-allowed disabled:opacity-50"
             >
@@ -263,6 +286,7 @@ export default function AcceptInvite() {
                 J'ai déjà un compte
               </Link>
             </p>
+            <LegalLinks />
           </form>
         )}
       </div>
@@ -273,7 +297,7 @@ export default function AcceptInvite() {
 function acceptErrorMessage(err: unknown, fallback = "Échec de l'acceptation de l'invitation."): string {
   if (err instanceof ApiError) {
     if (err.status === 409) return "Cet email est déjà utilisé. Connecte-toi pour rejoindre ce coach.";
-    if (err.status === 422) return "Mot de passe trop court (10 caractères minimum).";
+    if (err.status === 422) return err.message || "Mot de passe trop court (10 caractères minimum).";
     if (err.status === 400) return "Invitation invalide, expirée ou déjà utilisée.";
     if (err.status === 401) return fallback;
     if (err.status === 429) return "Trop de tentatives. Réessaie dans un moment.";

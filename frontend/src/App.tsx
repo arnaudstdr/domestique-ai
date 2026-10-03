@@ -2,6 +2,7 @@ import { Link, Navigate, Route, Routes, useNavigate } from "react-router-dom";
 import { Eye, Megaphone, ShieldCheck, UserRound, Users, X } from "lucide-react";
 import BottomNav from "./components/BottomNav";
 import AnnouncementBanner from "./components/AnnouncementBanner";
+import ConsentGate from "./components/ConsentGate";
 import EmailVerificationBanner from "./components/EmailVerificationBanner";
 import Dashboard from "./pages/Dashboard";
 import Activities from "./pages/Activities";
@@ -23,6 +24,10 @@ import Roster from "./pages/Roster";
 import Prescribe from "./pages/Prescribe";
 import Feedback from "./pages/Feedback";
 import Admin from "./pages/Admin";
+import Cgu from "./pages/Cgu";
+import Confidentialite from "./pages/Confidentialite";
+import MentionsLegales from "./pages/MentionsLegales";
+import NotFound from "./pages/NotFound";
 import { clearViewingAthlete } from "./api/client";
 import { MeProvider, useMe } from "./hooks/useMe";
 import { useViewing } from "./hooks/useViewing";
@@ -76,6 +81,7 @@ function AuthedShell() {
 
   return (
     <div className="min-h-screen bg-surface text-fg">
+      <ConsentGate />
       {viewing && <ViewingBanner name={viewing.name} />}
       <header
         className={`sticky top-0 z-[1100] bg-surface/70 backdrop-blur-xl
@@ -174,6 +180,7 @@ function AuthedShell() {
           <Route path="/prescrire" element={<Prescribe />} />
           <Route path="/feedback" element={<Feedback />} />
           <Route path="/admin" element={<Admin />} />
+          <Route path="*" element={<NotFound />} />
         </Routes>
       </main>
       <BottomNav viewing={!!viewing} />
@@ -192,6 +199,9 @@ export default function App() {
       <Route path="/verify-email" element={<VerifyEmail />} />
       <Route path="/forgot-password" element={<ForgotPassword />} />
       <Route path="/reset-password" element={<ResetPassword />} />
+      <Route path="/mentions-legales" element={<MentionsLegales />} />
+      <Route path="/cgu" element={<Cgu />} />
+      <Route path="/confidentialite" element={<Confidentialite />} />
       <Route path="/*" element={<AuthenticatedLayout />} />
     </Routes>
   );

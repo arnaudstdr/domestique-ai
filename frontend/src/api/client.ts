@@ -25,6 +25,7 @@ import type {
   AdminUserDetail,
   Announcement,
   AthleteSummary,
+  AuthConfigResponse,
   Availability,
   CoachMemoryFact,
   CoachInviteLink,
@@ -529,7 +530,7 @@ export const api = {
   },
   auth: {
     me: () => http<MeResponse>(`/api/auth/me`),
-    config: () => http<{ signup_enabled: boolean }>(`/api/auth/config`),
+    config: () => http<AuthConfigResponse>(`/api/auth/config`),
     uploadAvatar: (file: File) => {
       const form = new FormData();
       form.append("file", file);
@@ -540,6 +541,39 @@ export const api = {
     },
     removeAvatar: () =>
       http<void>(`/api/auth/me/avatar`, { method: "DELETE" }),
+    acceptConsents: (acceptsTerms: boolean, acceptsHealthData: boolean) =>
+      http<MeResponse>(`/api/auth/me/consents`, {
+        method: "POST",
+        body: JSON.stringify({
+          accepts_terms: acceptsTerms,
+          accepts_health_data: acceptsHealthData,
+        }),
+      }),
+    withdrawHealthConsent: () =>
+      http<MeResponse>(`/api/auth/me/consents/health`, { method: "DELETE" }),
+    exportData: async (): Promise<{ blob: Blob; filename: string }> => {
+      const response = await fetch(`${API_BASE}/api/auth/me/export`, {
+        headers: { ...authHeaders() },
+      });
+      if (response.status === 401) {
+        handleUnauthorized();
+        throw new ApiError(401, "Unauthorized");
+      }
+      if (!response.ok) {
+        let message = response.statusText;
+        try {
+          const data = await response.json();
+          message = data.detail || message;
+        } catch {
+          // payload non JSON
+        }
+        throw new ApiError(response.status, message);
+      }
+      const disposition = response.headers.get("content-disposition") || "";
+      const match = disposition.match(/filename="([^"]+)"/);
+      const filename = match ? match[1] : "domestique-ai-export.zip";
+      return { blob: await response.blob(), filename };
+    },
     deleteAccount: (password?: string | null, code?: string | null) =>
       http<void>(`/api/auth/me`, {
         method: "DELETE",
@@ -560,6 +594,8 @@ export const api = {
       password: string,
       role: "coach" | "athlete",
       displayName?: string | null,
+      acceptsTerms = false,
+      acceptsHealthData = false,
     ) =>
       http<SignupResponse>(`/api/auth/signup`, {
         method: "POST",
@@ -568,6 +604,8 @@ export const api = {
           password,
           role,
           display_name: displayName || null,
+          accepts_terms: acceptsTerms,
+          accepts_health_data: acceptsHealthData,
         }),
       }),
     verifyEmail: (token: string) =>
@@ -593,6 +631,8 @@ export const api = {
       displayName?: string | null;
       email?: string | null;
       password?: string | null;
+      acceptsTerms?: boolean;
+      acceptsHealthData?: boolean;
     }) =>
       http<AcceptInviteResponse>(`/api/auth/accept-invite`, {
         method: "POST",
@@ -602,6 +642,8 @@ export const api = {
           display_name: opts.displayName || null,
           email: opts.email || null,
           password: opts.password || null,
+          accepts_terms: opts.acceptsTerms ?? false,
+          accepts_health_data: opts.acceptsHealthData ?? false,
         }),
       }),
     acceptInviteLink: (opts: { inviteToken?: string | null; coachCode?: string | null }) =>

@@ -300,6 +300,8 @@ stockant une **data URL** `data:image/<type>;base64,…`, `NULL` par défaut.
   webcal `?key=` dans les logs).
 - **Sentry** — `_scrub_sentry_event` (`before_send`) retire la query string et
   le header `Authorization` des événements, même quand `SENTRY_SEND_PII=1`.
+  Depuis la mise en conformité RGPD, `SENTRY_SEND_PII` est **désactivé par
+  défaut** (pas d'IP/headers chez le tiers).
 - **Cache** — `CacheControlMiddleware` force `Cache-Control: no-store` sur
   toutes les réponses `/api/*` (données privées : plans, exports, santé), en
   plus de l'`immutable` des assets et du `no-cache` de l'app shell.
@@ -310,12 +312,14 @@ Socle identité étendu (au-delà de l'entrée par invitation). Toute la logique
 est dans `platform_db.py`, les endpoints dans `api/routers/auth.py`.
 
 - **Inscription self-service** — `POST /api/auth/signup` (public, **exempté** du
-  Bearer) : email + mot de passe + `role` (`athlete`|`coach`). Désactivée par
-  défaut : `DOMESTIQUE_AI_SIGNUP_ENABLED` (403 sinon). Rate-limitée par IP
-  (5/h). Provisionne l'espace athlète et émet une session. Le compte est créé
-  **non vérifié** (`users.email_verified=0`) ; les comptes invités/legacy sont
-  vérifiés d'office (`accept_invitation` pose `email_verified=1`).
-  `GET /api/auth/config` (public) expose `{signup_enabled}` pour l'UI.
+  Bearer) : email + mot de passe + `role` (`athlete`|`coach`) + consentements
+  (`accepts_terms`, `accepts_health_data`, cf. « Conformité RGPD »).
+  Désactivée par défaut : `DOMESTIQUE_AI_SIGNUP_ENABLED` (403 sinon).
+  Rate-limitée par IP (5/h). Provisionne l'espace athlète et émet une session.
+  Le compte est créé **non vérifié** (`users.email_verified=0`) ; les comptes
+  invités/legacy sont vérifiés d'office (`accept_invitation` pose
+  `email_verified=1`). `GET /api/auth/config` (public) expose
+  `{signup_enabled, legal_version}` pour l'UI.
 - **Lien d'invitation réutilisable du coach** — un coach s'inscrivant reçoit
   `invite_url=/accept-invite?coach=<code>`. Code opaque stocké **en clair**
   (`users.coach_invite_code`, précédent `feed_token`), **self-only** (jamais dans
@@ -359,7 +363,7 @@ est dans `platform_db.py`, les endpoints dans `api/routers/auth.py`.
   `DeleteAccountRequest`) : confirmation forte — mot de passe si le compte en a
   un + code TOTP/code de secours si la 2FA est active. Refuse le bootstrap
   (403). Efface la ligne plateforme (`delete_user` : sessions/invitations/tokens
-  en cascade) **puis** le dossier de données via
+  en cascade, retours testeurs **anonymisés**) **puis** le dossier de données via
   `athlete_context.remove_athlete_space(public_id)` (helper partagé avec la
   suppression par un coach, `roster.py`). `MeResponse.has_password` permet à l'UI
   de n'exiger le mot de passe que quand il existe.
@@ -370,6 +374,51 @@ est dans `platform_db.py`, les endpoints dans `api/routers/auth.py`.
 
 Tests : `tests/test_auth_api.py`, `tests/test_platform_db.py`,
 `tests/test_ratelimit.py`, `tests/test_mailer.py`.
+
+## Conformité RGPD (consentements, export, rétention)
+
+- **Version des textes** — `domestique_ai/legal.py` (`LEGAL_VERSION`,
+  `CONTACT_EMAIL`) ; exposée publiquement par `GET /api/auth/config`
+  (`legal_version`). Les textes publiés vivent dans `frontend/src/legal/*.md` :
+  garder les deux en phase et incrémenter la version à chaque modification
+  substantielle.
+- **Consentements obligatoires** — `POST /api/auth/signup` et
+  `POST /api/auth/accept-invite` exigent `accepts_terms` **et**
+  `accepts_health_data` (422 sinon), cases décochées côté UI. Horodatage +
+  version + user-agent enregistrés dans `users.terms_accepted_*` /
+  `users.health_consent_*` (migration `_ensure_column`). Exposés par
+  `GET /api/auth/me` (le front en déduit le portail de consentement).
+- **Ré-consentement / retrait** — `POST /api/auth/me/consents` (comptes
+  existants, exige les deux booléens) ; `DELETE /api/auth/me/consents/health`
+  marque le retrait (art. 7.3 RGPD) et déconnecte Garmin (credentials + tokens)
+  et Google Health (fichier de tokens). Ces deux routes sont dans
+  `_TOTP_SETUP_ALLOWED_PATHS` : l'exercice des droits n'est jamais bloqué par
+  l'enrôlement 2FA.
+- **Portabilité** — `GET /api/auth/me/export` (routeur `api/routers/account.py`) :
+  ZIP → `account.json` (identité + consentements, jamais de secret),
+  `profil/profil.yaml`, `donnees/*.json` (activités, `morning_metrics`, poids,
+  conversations, résumés, mémoire, plans, décisions, prescriptions). Exclus
+  volontairement : `activity_streams` et `memory_vectors` (dérivés/volumineux).
+  Rate-limité 5/h/compte, tracé `account_export` dans `admin_audit`.
+- **Effacement** — `delete_user` anonymise les retours testeurs
+  (`feedback.author_email`/`public_id`/`user_agent` → `NULL`, message conservé)
+  avant le DELETE. `admin_audit` et `llm_calls` survivent (snapshots
+  `public_id`), bornés par la rétention.
+- **Rétention** — job scheduler `retention_purge` (toutes les 24 h) :
+  `purge_llm_calls` (90 j par défaut, `DOMESTIQUE_AI_LLM_CALLS_RETENTION_DAYS`)
+  et `purge_admin_audit` (365 j, `DOMESTIQUE_AI_AUDIT_RETENTION_DAYS`) ; `0`
+  désactive la purge.
+- **Sentry** — `SENTRY_SEND_PII` par défaut **0** (plus d'IP/headers chez le
+  tiers par défaut) ; scrub query string + `Authorization` inchangé.
+- **Fichiers statiques publics** — `robots.txt` et `sitemap.xml` vivent dans
+  `frontend/public/` (servis à la racine du build) et sont mis en `no-cache` par
+  `CacheControlMiddleware`. `SPAStaticFiles` renvoie un vrai 404 pour les
+  chemins techniques (`/api/`, `/assets/`, `/fonts/`) et les fichiers manquants
+  avec extension ; les routes React (sans extension) gardent le fallback
+  `index.html`.
+- Tests : `tests/test_auth_api.py` (consentements, export, retrait),
+  `tests/test_platform_db.py` (consentements, purge, anonymisation),
+  `tests/test_scheduler.py` (job de rétention).
 
 ## Export iCalendar (`export/ics.py`)
 

@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { ApiError, api, setApiToken } from "../api/client";
+import LegalLinks from "../components/LegalLinks";
+import { usePageMeta } from "../hooks/usePageMeta";
 
 /**
  * Connexion email + mot de passe, puis code TOTP (ou code de secours).
@@ -17,6 +19,8 @@ export default function Login() {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [signupEnabled, setSignupEnabled] = useState(false);
+
+  usePageMeta({ title: "Connexion — DomestiqueAI", robots: "noindex" });
 
   useEffect(() => {
     api.auth
@@ -191,6 +195,7 @@ export default function Login() {
             )}
           </div>
         )}
+        <LegalLinks />
       </form>
     </div>
   );

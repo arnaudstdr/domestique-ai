@@ -15,16 +15,21 @@ from fastapi.testclient import TestClient
 
 from domestique_ai.api.auth import BearerAuthMiddleware
 from domestique_ai.api.deps import require_coach
+from domestique_ai.api.routers import account as account_router
 from domestique_ai.api.routers import auth as auth_router
 from domestique_ai.api.routers import roster as roster_router
 
 _LEGACY = "legacy-token-1234"
+
+# Consentements requis par les flux self-service (signup + accept-invite).
+_CONSENTS = {"accepts_terms": True, "accepts_health_data": True}
 
 
 def _make_app(token: str | None) -> FastAPI:
     app = FastAPI()
     app.add_middleware(BearerAuthMiddleware, token=token)
     app.include_router(auth_router.router)
+    app.include_router(account_router.router)
     app.include_router(roster_router.router)
 
     @app.get("/api/data", dependencies=[Depends(require_coach)])  # noqa: B008
@@ -81,7 +86,7 @@ def _invite_and_accept(client: TestClient, role: str = "athlete") -> str:
     invite_token = r.json()["invite_token"]
 
     # accept-invite est public (exempté du Bearer).
-    r2 = client.post("/api/auth/accept-invite", json={"invite_token": invite_token})
+    r2 = client.post("/api/auth/accept-invite", json={"invite_token": invite_token, **_CONSENTS})
     assert r2.status_code == 200, r2.text
     body = r2.json()
     assert body["role"] == role
@@ -110,18 +115,39 @@ def test_accept_invite_twice_fails(client: TestClient) -> None:
     r = client.post("/api/auth/invitations", headers=_bearer(_LEGACY), json={"role": "athlete"})
     invite_token = r.json()["invite_token"]
     assert (
-        client.post("/api/auth/accept-invite", json={"invite_token": invite_token}).status_code
+        client.post(
+            "/api/auth/accept-invite", json={"invite_token": invite_token, **_CONSENTS}
+        ).status_code
         == 200
     )
     assert (
-        client.post("/api/auth/accept-invite", json={"invite_token": invite_token}).status_code
+        client.post(
+            "/api/auth/accept-invite", json={"invite_token": invite_token, **_CONSENTS}
+        ).status_code
         == 400
     )
 
 
 def test_accept_unknown_invite_fails(client: TestClient) -> None:
-    r = client.post("/api/auth/accept-invite", json={"invite_token": "nope"})
+    r = client.post("/api/auth/accept-invite", json={"invite_token": "nope", **_CONSENTS})
     assert r.status_code == 400
+
+
+def test_accept_invite_requires_consents(client: TestClient) -> None:
+    r = client.post("/api/auth/invitations", headers=_bearer(_LEGACY), json={"role": "athlete"})
+    invite_token = r.json()["invite_token"]
+    assert (
+        client.post("/api/auth/accept-invite", json={"invite_token": invite_token}).status_code
+        == 422
+    )
+    # Seulement les CGU ne suffisent pas : le consentement santé est explicite.
+    assert (
+        client.post(
+            "/api/auth/accept-invite",
+            json={"invite_token": invite_token, "accepts_terms": True},
+        ).status_code
+        == 422
+    )
 
 
 # ---- Révocation d'invitation ------------------------------------------------
@@ -140,7 +166,7 @@ def test_revoke_pending_invitation(client: TestClient) -> None:
     after = client.get("/api/auth/invitations", headers=_bearer(_LEGACY)).json()
     assert after[0]["status"] == "revoked"
     # Le lien révoqué n'est plus acceptable.
-    acc = client.post("/api/auth/accept-invite", json={"invite_token": invite_token})
+    acc = client.post("/api/auth/accept-invite", json={"invite_token": invite_token, **_CONSENTS})
     assert acc.status_code == 400
 
 
@@ -151,7 +177,7 @@ def test_revoke_unknown_invitation_404(client: TestClient) -> None:
 def test_revoke_already_accepted_invitation_404(client: TestClient) -> None:
     r = client.post("/api/auth/invitations", headers=_bearer(_LEGACY), json={"role": "athlete"})
     invite_token = r.json()["invite_token"]
-    client.post("/api/auth/accept-invite", json={"invite_token": invite_token})
+    client.post("/api/auth/accept-invite", json={"invite_token": invite_token, **_CONSENTS})
     inv_id = client.get("/api/auth/invitations", headers=_bearer(_LEGACY)).json()[0]["id"]
     # Une invitation déjà acceptée n'est pas révocable (statut != pending).
     assert (
@@ -305,7 +331,8 @@ _STRONG_PASSWORD = "motdepasse1"
 
 def _signup(client: TestClient, *, role: str, email: str, password: str = _STRONG_PASSWORD):
     return client.post(
-        "/api/auth/signup", json={"email": email, "password": password, "role": role}
+        "/api/auth/signup",
+        json={"email": email, "password": password, "role": role, **_CONSENTS},
     )
 
 
@@ -486,7 +513,7 @@ def test_accept_invite_by_coach_code_creates_athlete(
     coach_session, _coach_pid, code = _signup_coach(client, monkeypatch, "coach@b.c")
     r = client.post(
         "/api/auth/accept-invite",
-        json={"coach_code": code, "email": "ath@b.c", "password": _STRONG_PASSWORD},
+        json={"coach_code": code, "email": "ath@b.c", "password": _STRONG_PASSWORD, **_CONSENTS},
     )
     assert r.status_code == 200, r.text
     assert r.json()["role"] == "athlete"
@@ -660,3 +687,97 @@ def test_totp_reenroll_requires_reauth_when_2fa_active(
     )
     assert r.status_code == 200, r.text
     assert r.json()["secret"]
+
+
+# ---- Consentements (CGU + données de santé) ---------------------------------
+
+
+def test_signup_requires_consents(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("DOMESTIQUE_AI_SIGNUP_ENABLED", "1")
+    r = client.post("/api/auth/signup", json={"email": "a@b.c", "password": _STRONG_PASSWORD})
+    assert r.status_code == 422
+    r2 = client.post(
+        "/api/auth/signup",
+        json={
+            "email": "a@b.c",
+            "password": _STRONG_PASSWORD,
+            "accepts_terms": True,
+            "accepts_health_data": False,
+        },
+    )
+    assert r2.status_code == 422
+
+
+def test_signup_records_consent_versions(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("DOMESTIQUE_AI_SIGNUP_ENABLED", "1")
+    body = _signup(client, role="athlete", email="a@b.c").json()
+    version = client.get("/api/auth/config").json()["legal_version"]
+    assert version
+    me = client.get("/api/auth/me", headers=_bearer(body["session_token"])).json()
+    assert me["terms_accepted_at"] and me["terms_accepted_version"] == version
+    assert me["health_consent_at"] and me["health_consent_version"] == version
+    assert me["health_consent_withdrawn_at"] is None
+
+
+def test_reconsent_existing_account(client: TestClient) -> None:
+    # Le compte propriétaire (legacy) n'a aucun consentement enregistré.
+    me = client.get("/api/auth/me", headers=_bearer(_LEGACY)).json()
+    assert me["terms_accepted_at"] is None
+    # Consentement partiel refusé.
+    partial = client.post(
+        "/api/auth/me/consents",
+        json={"accepts_terms": True, "accepts_health_data": False},
+        headers=_bearer(_LEGACY),
+    )
+    assert partial.status_code == 422
+    r = client.post(
+        "/api/auth/me/consents",
+        json={"accepts_terms": True, "accepts_health_data": True},
+        headers=_bearer(_LEGACY),
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["terms_accepted_at"] is not None
+    assert r.json()["health_consent_at"] is not None
+
+
+def test_withdraw_health_consent(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("DOMESTIQUE_AI_SIGNUP_ENABLED", "1")
+    body = _signup(client, role="athlete", email="a@b.c").json()
+    headers = _bearer(body["session_token"])
+    r = client.delete("/api/auth/me/consents/health", headers=headers)
+    assert r.status_code == 200, r.text
+    assert r.json()["health_consent_withdrawn_at"] is not None
+    # L'historique du consentement initial est conservé.
+    assert r.json()["health_consent_at"] is not None
+
+
+# ---- Export RGPD (portabilité) ----------------------------------------------
+
+
+def test_export_account_returns_zip(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    import io
+    import json
+    import zipfile
+
+    monkeypatch.setenv("DOMESTIQUE_AI_SIGNUP_ENABLED", "1")
+    body = _signup(client, role="athlete", email="a@b.c").json()
+    # L'export contient des données de santé : 2FA requise (middleware).
+    _enable_totp(body["public_id"])
+    r = client.get("/api/auth/me/export", headers=_bearer(body["session_token"]))
+    assert r.status_code == 200, r.text
+    assert r.headers["content-type"] == "application/zip"
+    with zipfile.ZipFile(io.BytesIO(r.content)) as archive:
+        names = set(archive.namelist())
+        assert "account.json" in names
+        assert "LISEZ-MOI.txt" in names
+        account = json.loads(archive.read("account.json"))
+        assert account["email"] == "a@b.c"
+        assert account["consents"]["terms_accepted_at"] is not None
+        # Aucun secret ne doit fuiter.
+        assert "password_hash" not in account and "totp_secret" not in account
+
+
+def test_export_requires_auth(client: TestClient) -> None:
+    assert client.get("/api/auth/me/export").status_code == 401

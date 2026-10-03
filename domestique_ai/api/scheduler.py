@@ -27,10 +27,12 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from domestique_ai.api.logging import get_logger
 from domestique_ai.api.routers.garmin import trigger_sync_blocking as trigger_garmin_sync
 from domestique_ai.config import (
+    get_audit_retention_days,
     get_garmin_health_auto_sync_minutes,
     get_garmin_health_first_run_delay_minutes,
     get_google_health_auto_sync_minutes,
     get_google_health_first_run_delay_minutes,
+    get_llm_calls_retention_days,
     get_session_idle_finalize_minutes,
 )
 from domestique_ai.healthcheck import ping_healthcheck
@@ -51,6 +53,10 @@ _DEFAULT_GARMIN_HEALTH_FIRST_RUN_DELAY_MIN = 10
 # seuil d'inactivité lui-même est `SESSION_IDLE_FINALIZE_MINUTES` (défaut 45).
 _SESSION_FINALIZE_INTERVAL_MIN = 15
 _SESSION_FINALIZE_FIRST_RUN_DELAY_MIN = 5
+# Purge de rétention : une passe toutes les 24 h, première exécution différée
+# pour ne pas charger le démarrage.
+_RETENTION_INTERVAL_HOURS = 24
+_RETENTION_FIRST_RUN_DELAY_MIN = 15
 
 
 def _read_positive_int(env_name: str, default: int) -> int:
@@ -303,6 +309,36 @@ def _finalize_sessions_job() -> None:
         log.info("Finalisation sessions mémoire : %d session(s) finalisée(s).", total)
 
 
+def _retention_purge_job() -> None:
+    """Purge les données au-delà des durées de conservation documentées.
+
+    ``llm_calls`` (métadonnées d'appels LLM) et ``admin_audit`` (journal
+    d'audit) sont conservés pour l'observabilité et la sécurité, mais pas
+    indéfiniment. Les durées sont configurables
+    (``DOMESTIQUE_AI_LLM_CALLS_RETENTION_DAYS``, ``DOMESTIQUE_AI_AUDIT_RETENTION_DAYS``) ;
+    ``0`` désactive la purge. Best-effort : un job APScheduler ne doit jamais
+    lever.
+    """
+    from domestique_ai.platform_db import purge_admin_audit, purge_llm_calls
+
+    now = dt.datetime.now(dt.UTC)
+    try:
+        llm_days = get_llm_calls_retention_days()
+        if llm_days > 0:
+            before = (now - dt.timedelta(days=llm_days)).isoformat()
+            purged = purge_llm_calls(before)
+            if purged:
+                log.info("Rétention : %d appel(s) LLM purgé(s) (> %d j).", purged, llm_days)
+        audit_days = get_audit_retention_days()
+        if audit_days > 0:
+            before = (now - dt.timedelta(days=audit_days)).isoformat()
+            purged = purge_admin_audit(before)
+            if purged:
+                log.info("Rétention : %d entrée(s) d'audit purgée(s) (> %d j).", purged, audit_days)
+    except Exception:  # noqa: BLE001 — best-effort, ne doit jamais casser le scheduler
+        log.exception("Rétention : purge échouée.")
+
+
 def _weekly_review_job() -> None:
     """Revue hebdomadaire — re-plan adaptatif pour tous les athlètes avec plan actif."""
     from domestique_ai.athlete_context import context_for_athlete
@@ -476,6 +512,7 @@ def start_scheduler() -> None:
     - ``healthcheck_ping`` : ping Healthchecks.io périodique (si URL configurée)
     - ``daily_morning_check`` / ``weekly_review`` : coach adaptatif (CronTrigger)
     - ``finalize_sessions`` : résumé + faits des sessions coach inactives
+    - ``retention_purge`` : purge des données au-delà des durées de conservation
 
     No-op global si déjà démarré. Chaque job est ajouté seulement si sa
     configuration est valide — on peut donc avoir n'importe quelle combinaison.
@@ -490,6 +527,7 @@ def start_scheduler() -> None:
     garmin_interval = _garmin_auto_sync_interval_minutes()
     garmin_health_interval = _garmin_health_auto_sync_interval_minutes()
     session_finalize_enabled = get_session_idle_finalize_minutes() > 0
+    retention_enabled = get_llm_calls_retention_days() > 0 or get_audit_retention_days() > 0
 
     gh_enabled = gh_interval > 0
     hc_enabled = hc_interval > 0 and hc_url_configured
@@ -502,6 +540,7 @@ def start_scheduler() -> None:
         and not garmin_enabled
         and not garmin_health_enabled
         and not session_finalize_enabled
+        and not retention_enabled
     ):
         if not gh_enabled:
             log.info("Auto-sync Google Health désactivé.")
@@ -515,6 +554,7 @@ def start_scheduler() -> None:
                 "(DOMESTIQUE_AI_GARMIN_HEALTH_AUTO_SYNC_MINUTES=0)."
             )
         log.info("Finalisation sessions mémoire désactivée (SESSION_IDLE_FINALIZE_MINUTES=0).")
+        log.info("Purge de rétention désactivée.")
         return
 
     scheduler = BackgroundScheduler(timezone="UTC")
@@ -664,6 +704,26 @@ def start_scheduler() -> None:
         )
     else:
         log.info("Finalisation sessions mémoire désactivée (SESSION_IDLE_FINALIZE_MINUTES=0).")
+
+    if retention_enabled:
+        scheduler.add_job(
+            _retention_purge_job,
+            "interval",
+            hours=_RETENTION_INTERVAL_HOURS,
+            id="retention_purge",
+            coalesce=True,
+            max_instances=1,
+            next_run_time=dt.datetime.now(dt.UTC)
+            + dt.timedelta(minutes=_RETENTION_FIRST_RUN_DELAY_MIN),
+        )
+        log.info(
+            "Scheduler : purge de rétention toutes les %d h (llm_calls %d j, audit %d j).",
+            _RETENTION_INTERVAL_HOURS,
+            get_llm_calls_retention_days(),
+            get_audit_retention_days(),
+        )
+    else:
+        log.info("Purge de rétention désactivée (durées à 0).")
 
     scheduler.start()
     _scheduler = scheduler

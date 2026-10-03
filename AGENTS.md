@@ -185,6 +185,12 @@ Points structurants à connaître avant de toucher au code :
    les blocs réécrits à la main ne respectent pas le format Black-like du projet).
 - **⚠️ Frontend (`frontend/`)** : la CI exécute `cd frontend && npm ci && npm run build`
   (tsc + vite). Tout changement front doit builder avant commit.
+- **Documents légaux & consentements** : la version (`domestique_ai/legal.py`,
+  `LEGAL_VERSION`) et les textes publiés (`frontend/src/legal/*.md`) doivent
+  rester en phase — incrémenter la version à chaque modification substantielle.
+  Tout flux de création de compte exige les **deux** consentements (CGU +
+  données de santé). Détail : `domestique_ai/api/AGENTS.md` et
+  `frontend/AGENTS.md`.
 - **Imports** : `from __future__ import annotations` en tête de chaque module Python.
 - **Fixtures de test** : utiliser `tmp_path` + `init_db(tmp_path/"x.db")` pour isoler la base. Neutraliser les vars HR via `monkeypatch.delenv("STRAVA_HR_REST", ...)` quand un test cible explicitement la branche TSS power (sinon la config locale du dev peut faire basculer le calcul).
 - **⚠️ Toujours une todo** : pour toute tâche non triviale (3+ étapes), maintenir une todo list — une seule tâche `in_progress` à la fois, mise à jour en temps réel (ne cocher `completed` qu'après vérification réelle, jamais sur intention).

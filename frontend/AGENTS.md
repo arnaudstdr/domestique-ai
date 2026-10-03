@@ -205,6 +205,36 @@ ce sheet (plus de carte de recherche en haut de page).
   maintenance/message alimente `components/AnnouncementBanner.tsx` (monté dans
   `AuthedShell`, bandeau non bloquant pour tous).
 
+## Pages légales, consentements & SEO
+
+- **Pages publiques** — `/mentions-legales`, `/cgu`, `/confidentialite` déclarées
+  en top-level dans `App.tsx` (avant le catch-all `/*` : sinon un visiteur
+  anonyme est redirigé vers `/login`). Contenu Markdown dans `src/legal/*.md`
+  importé en `?raw`, rendu par `components/LegalLayout.tsx` (react-markdown +
+  remark-gfm, styles `.legal-prose` dans `index.css`). La version affichée
+  (`LEGAL_VERSION` de `src/legal/index.ts`) doit rester alignée avec
+  `domestique_ai/legal.py`.
+- **Liens** — `components/LegalLinks.tsx` sous les cartes des pages publiques
+  (login, signup, accept-invite, forgot/reset, verify-email, reconnect) et dans
+  la section profil.
+- **Consentements** — `components/ConsentCheckboxes.tsx` (cases décochées,
+  liens ouverts en nouvel onglet) sur `Signup.tsx` et `AcceptInvite.tsx` (mode
+  création). `components/ConsentGate.tsx`, monté dans `AuthedShell`, affiche un
+  portail bloquant tant que `me.terms_accepted_at` ou `me.health_consent_at`
+  est nul (comptes antérieurs à la conformité). Retrait/ré-consentement santé
+  et export RGPD dans `components/ProfileLegalSection.tsx` (section « Données
+  personnelles & consentements » de `/profil`).
+- **SEO / tête de page** — `hooks/usePageMeta.ts` (titre, description, meta
+  robots ; restaurés à la navigation). `robots.txt` et `sitemap.xml` dans
+  `public/`. `pages/NotFound.tsx` rendue par le catch-all de la coquille
+  authentifiée ; côté FastAPI, `SPAStaticFiles` renvoie un vrai 404 pour les
+  fichiers manquants (pas le shell HTML).
+- **Polices auto-hébergées** — woff2 dans `src/assets/fonts/` (latin +
+  latin-ext, OFL) référencés par `@font-face` en tête de `index.css` : aucune
+  requête navigateur vers Google Fonts. Vite les émet dans
+  `/assets/*-<hash>.woff2` (cache immutable) et `vite.config.ts` les précache
+  (`globPatterns` inclut `woff2`).
+
 ## Avatar — redimensionnement client
 
 L'image est redimensionnée **côté navigateur** avant envoi

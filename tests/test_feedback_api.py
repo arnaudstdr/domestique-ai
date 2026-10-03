@@ -44,7 +44,14 @@ def _athlete_token(client: TestClient) -> str:
     r = client.post("/api/auth/invitations", headers=_bearer(_LEGACY), json={"role": "athlete"})
     assert r.status_code == 200, r.text
     invite_token = r.json()["invite_token"]
-    r2 = client.post("/api/auth/accept-invite", json={"invite_token": invite_token})
+    r2 = client.post(
+        "/api/auth/accept-invite",
+        json={
+            "invite_token": invite_token,
+            "accepts_terms": True,
+            "accepts_health_data": True,
+        },
+    )
     assert r2.status_code == 200, r2.text
     return r2.json()["session_token"]
 

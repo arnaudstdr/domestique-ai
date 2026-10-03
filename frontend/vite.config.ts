@@ -36,7 +36,7 @@ export default defineConfig({
         navigateFallback: "/index.html",
         navigateFallbackDenylist: [/^\/api\//],
         cleanupOutdatedCaches: true,
-        globPatterns: ["**/*.{js,css,html,svg,png,ico}"],
+        globPatterns: ["**/*.{js,css,html,svg,png,ico,woff2}"],
         // Whitelist stricte : seuls ces endpoints idempotents et non sensibles
         // sont mis en cache. Tout le reste — /api/coach/*, /api/morning,
         // /api/objective, /api/profile, /api/availability, auth — n'est

@@ -113,6 +113,11 @@ class BearerAuthMiddleware:
         "/api/auth/resend-verification",
         "/api/auth/totp/enroll",
         "/api/auth/totp/verify",
+        # Portail de consentement (comptes antérieurs à la mise en conformité)
+        # et retrait du consentement santé (art. 7.3 RGPD) : accessibles avant
+        # l'enrôlement 2FA pour ne jamais bloquer l'exercice des droits.
+        "/api/auth/me/consents",
+        "/api/auth/me/consents/health",
     }
 
     def __init__(

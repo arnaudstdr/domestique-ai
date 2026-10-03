@@ -652,3 +652,93 @@ def test_get_announcement_defaults_and_override():
     assert pdb.get_announcement() == {"maintenance_mode": True, "message": "Bonjour"}
     pdb.set_setting("broadcast_message", "   ")
     assert pdb.get_announcement()["message"] is None
+
+
+# ---- Consentements (CGU + données de santé) ---------------------------------
+
+
+def test_create_user_records_consents():
+    user = pdb.create_user(
+        role="athlete",
+        email="a@b.c",
+        terms_version="2026-10-beta",
+        health_consent_version="2026-10-beta",
+        consent_user_agent="pytest",
+    )
+    assert user["terms_accepted_at"] is not None
+    assert user["terms_accepted_version"] == "2026-10-beta"
+    assert user["health_consent_at"] is not None
+    assert user["health_consent_withdrawn_at"] is None
+    # Sans consentement fourni : aucun horodatage.
+    plain = pdb.create_user(role="athlete", email="plain@b.c")
+    assert plain["terms_accepted_at"] is None
+    assert plain["health_consent_at"] is None
+
+
+def test_set_and_withdraw_health_consent_roundtrip():
+    user = pdb.create_user(role="athlete")
+    assert pdb.set_user_consents(
+        user["id"],
+        terms_version="v1",
+        health_consent_version="v1",
+        user_agent="ua",
+    )
+    updated = pdb.get_user_by_id(user["id"])
+    assert updated is not None
+    assert updated["terms_accepted_version"] == "v1"
+    assert updated["health_consent_at"] is not None
+
+    assert pdb.withdraw_health_consent(user["id"])
+    withdrawn = pdb.get_user_by_id(user["id"])
+    assert withdrawn is not None
+    assert withdrawn["health_consent_withdrawn_at"] is not None
+    # L'historique du consentement initial est conservé.
+    assert withdrawn["health_consent_at"] is not None
+
+    # Un nouveau consentement annule le retrait.
+    pdb.set_user_consents(user["id"], health_consent_version="v2")
+    reaccepted = pdb.get_user_by_id(user["id"])
+    assert reaccepted is not None
+    assert reaccepted["health_consent_withdrawn_at"] is None
+    assert reaccepted["health_consent_version"] == "v2"
+
+    assert pdb.withdraw_health_consent(999999) is False
+
+
+def test_delete_user_anonymizes_feedback():
+    user = pdb.create_user(role="athlete", email="a@b.c")
+    pdb.insert_feedback(
+        category="bug",
+        message="ça plante",
+        user_id=user["id"],
+        public_id=user["public_id"],
+        role="athlete",
+        author_email="a@b.c",
+        user_agent="pytest-UA",
+    )
+    assert pdb.delete_user(user["id"])
+    entry = pdb.list_feedback()[0]
+    assert entry["message"] == "ça plante"  # contenu conservé pour le produit
+    assert entry["author_email"] is None
+    assert entry["public_id"] is None
+    assert entry["user_agent"] is None
+
+
+# ---- Rétention ---------------------------------------------------------------
+
+
+def test_purge_llm_calls_and_admin_audit():
+    actor = pdb.create_account("admin")
+    pdb.insert_llm_call(label="test", entrypoint="pytest", model="m")
+    pdb.record_admin_audit(actor, "settings_update", details={"x": 1})
+    assert len(pdb.fetch_llm_calls()) == 1
+    assert len(pdb.list_admin_audit()) == 1
+
+    # Rien à purger avec une borne dans le passé.
+    assert pdb.purge_llm_calls(_past()) == 0
+    assert pdb.purge_admin_audit(_past()) == 0
+    # Borne future → tout est purgé.
+    assert pdb.purge_llm_calls(_future()) == 1
+    assert pdb.purge_admin_audit(_future()) == 1
+    assert pdb.fetch_llm_calls() == []
+    assert pdb.list_admin_audit() == []

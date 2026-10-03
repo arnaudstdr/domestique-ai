@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { api, ApiError, setApiToken } from "../api/client";
+import LegalLinks from "../components/LegalLinks";
 
 /**
  * Reconnexion à un compte athlète existant via un lien fourni par le coach.
@@ -65,6 +66,7 @@ export default function Reconnect() {
         ) : (
           <p className="text-sm text-fg-soft">Reconnexion en cours…</p>
         )}
+        <LegalLinks />
       </div>
     </div>
   );

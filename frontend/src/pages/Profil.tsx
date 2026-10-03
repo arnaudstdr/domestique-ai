@@ -25,6 +25,7 @@ import type {
   WeekdayName,
 } from "../api/types";
 import MemoryPanel from "../components/MemoryPanel";
+import ProfileLegalSection from "../components/ProfileLegalSection";
 import { useToast } from "../hooks/useToast";
 import { useMe, useMeRefresh } from "../hooks/useMe";
 import { useTheme, type ThemeChoice } from "../hooks/useTheme";
@@ -89,6 +90,7 @@ export default function Profil() {
       <MemoryPanel />
       <SecuritySection />
       <AccountSection />
+      <ProfileLegalSection />
       <DangerZoneSection />
     </div>
   );

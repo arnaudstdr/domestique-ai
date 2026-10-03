@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import { ApiError, api } from "../api/client";
+import LegalLinks from "../components/LegalLinks";
 
 /**
  * Choix d'un nouveau mot de passe (`/reset-password?token=…`). Le reset révoque
@@ -93,6 +94,7 @@ export default function ResetPassword() {
             </button>
           </form>
         )}
+        <LegalLinks />
       </div>
     </div>
   );

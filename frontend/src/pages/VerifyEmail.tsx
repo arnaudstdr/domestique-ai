@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { api } from "../api/client";
+import LegalLinks from "../components/LegalLinks";
 
 /**
  * Vérification d'email (`/verify-email?token=…`) : consomme le token reçu par
@@ -52,6 +53,7 @@ export default function VerifyEmail() {
             </Link>
           </>
         )}
+        <LegalLinks />
       </div>
     </div>
   );

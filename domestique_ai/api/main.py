@@ -18,6 +18,9 @@ from starlette.types import ASGIApp, Message, Receive, Scope, Send
 from domestique_ai.api.auth import BearerAuthMiddleware
 from domestique_ai.api.logging import get_logger, setup_logging
 from domestique_ai.api.routers import (
+    account as account_router,
+)
+from domestique_ai.api.routers import (
     activities as activities_router,
 )
 from domestique_ai.api.routers import (
@@ -148,9 +151,9 @@ def _init_sentry() -> None:
 
     L'integrations FastAPI/Starlette sont activées automatiquement via le
     package ``sentry-sdk[fastapi]``. ``send_default_pii`` expose headers/IP —
-    activé par défaut, désactivable via ``SENTRY_SEND_PII=0``. Dans tous les
-    cas, ``before_send`` scrubbe la query string et le header ``Authorization``
-    (tokens webcal/Bearer).
+    **désactivé par défaut** (données de santé, conformité RGPD), réactivable
+    via ``SENTRY_SEND_PII=1``. Dans tous les cas, ``before_send`` scrubbe la
+    query string et le header ``Authorization`` (tokens webcal/Bearer).
     """
     if not get_sentry_enabled():
         log.info("Sentry désactivé (SENTRY_ENABLED=0).")
@@ -286,7 +289,14 @@ class CacheControlMiddleware:
     """
 
     _IMMUTABLE_PREFIX = "/assets/"
-    _NO_CACHE_PATHS = {"/", "/index.html", "/sw.js", "/manifest.webmanifest"}
+    _NO_CACHE_PATHS = {
+        "/",
+        "/index.html",
+        "/sw.js",
+        "/manifest.webmanifest",
+        "/robots.txt",
+        "/sitemap.xml",
+    }
 
     def __init__(self, app: ASGIApp) -> None:
         self.app = app
@@ -403,6 +413,9 @@ app.add_middleware(BodySizeLimitMiddleware)
 # Routeur d'identité : non gaté (gère lui-même /me, accept-invite public, etc.).
 app.include_router(auth_router.router)
 
+# Portabilité RGPD : export ZIP des données du compte courant (authentifié).
+app.include_router(account_router.router)
+
 # Routeurs scopés par athlète (1b-i) : protégés par l'auth (chaque handler
 # résout son AthleteContext via get_athlete_context) et isolés par espace de
 # données. Plus de gate coach-only.
@@ -444,13 +457,22 @@ class SPAStaticFiles(StaticFiles):
     géré par React Router renvoie un 404 ``{"detail":"Not Found"}`` parce que
     ``StaticFiles`` cherche un fichier physique correspondant. On laisse
     seulement passer le 404 si même ``index.html`` est manquant.
+
+    Les chemins qui ressemblent à des fichiers (dernier segment avec une
+    extension) ou qui visent une zone technique (``/api/``, ``/assets/``,
+    ``/fonts/``) renvoient un vrai 404 : un ``robots.txt`` absent ne doit pas
+    répondre l'app shell HTML.
     """
+
+    _NEVER_FALLBACK_PREFIXES = ("api/", "assets/", "fonts/")
 
     async def get_response(self, path, scope):  # type: ignore[override]
         try:
             return await super().get_response(path, scope)
         except StarletteHTTPException as exc:
             if exc.status_code != 404:
+                raise
+            if path.startswith(self._NEVER_FALLBACK_PREFIXES) or "." in path.rsplit("/", 1)[-1]:
                 raise
             return await super().get_response("index.html", scope)
 

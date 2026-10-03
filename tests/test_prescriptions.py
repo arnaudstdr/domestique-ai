@@ -141,7 +141,14 @@ def env(tmp_path: Path, monkeypatch) -> Iterator[dict]:
 
 def _new_athlete(client: TestClient) -> tuple[str, str]:
     inv = client.post("/api/auth/invitations", headers=_bearer(_LEGACY), json={"role": "athlete"})
-    acc = client.post("/api/auth/accept-invite", json={"invite_token": inv.json()["invite_token"]})
+    acc = client.post(
+        "/api/auth/accept-invite",
+        json={
+            "invite_token": inv.json()["invite_token"],
+            "accepts_terms": True,
+            "accepts_health_data": True,
+        },
+    )
     session = acc.json()["session_token"]
     me = client.get("/api/auth/me", headers=_bearer(session))
     return session, me.json()["public_id"]
@@ -149,7 +156,14 @@ def _new_athlete(client: TestClient) -> tuple[str, str]:
 
 def _new_coach(client: TestClient) -> str:
     inv = client.post("/api/auth/invitations", headers=_bearer(_LEGACY), json={"role": "coach"})
-    acc = client.post("/api/auth/accept-invite", json={"invite_token": inv.json()["invite_token"]})
+    acc = client.post(
+        "/api/auth/accept-invite",
+        json={
+            "invite_token": inv.json()["invite_token"],
+            "accepts_terms": True,
+            "accepts_health_data": True,
+        },
+    )
     return acc.json()["session_token"]
 
 

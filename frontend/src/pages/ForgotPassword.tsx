@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import { ApiError, api } from "../api/client";
+import LegalLinks from "../components/LegalLinks";
 
 /**
  * Demande de réinitialisation de mot de passe. Réponse toujours positive côté
@@ -77,6 +78,7 @@ export default function ForgotPassword() {
             Retour à la connexion
           </Link>
         </p>
+        <LegalLinks />
       </div>
     </div>
   );

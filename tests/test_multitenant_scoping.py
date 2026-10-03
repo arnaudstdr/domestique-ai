@@ -67,7 +67,14 @@ def _new_athlete(client: TestClient) -> tuple[str, str]:
     """Invite (coach legacy) + accepte un athlète. Retourne (session_token, public_id)."""
     inv = client.post("/api/auth/invitations", headers=_bearer(_LEGACY), json={"role": "athlete"})
     assert inv.status_code == 200, inv.text
-    acc = client.post("/api/auth/accept-invite", json={"invite_token": inv.json()["invite_token"]})
+    acc = client.post(
+        "/api/auth/accept-invite",
+        json={
+            "invite_token": inv.json()["invite_token"],
+            "accepts_terms": True,
+            "accepts_health_data": True,
+        },
+    )
     assert acc.status_code == 200, acc.text
     session = acc.json()["session_token"]
     me = client.get("/api/auth/me", headers=_bearer(session))
