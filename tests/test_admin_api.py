@@ -22,6 +22,9 @@ from domestique_ai.api.routers import auth as auth_router
 
 _LEGACY = "legacy-admin-token"
 
+# Mot de passe factice utilisé par les tests d'inscription (pas un secret réel).
+_TEST_PASSWORD = "Sup3rSecret!x"  # ggignore
+
 
 def _make_app() -> FastAPI:
     app = FastAPI()
@@ -198,7 +201,7 @@ def test_admin_signup_setting_controls_signup(client: TestClient, monkeypatch):
     assert (
         client.post(
             "/api/auth/signup",
-            json={"email": "new@example.com", "password": "Sup3rSecret!x", "role": "athlete"},
+            json={"email": "new@example.com", "password": _TEST_PASSWORD, "role": "athlete"},
         ).status_code
         == 403
     )
@@ -213,7 +216,7 @@ def test_admin_signup_setting_controls_signup(client: TestClient, monkeypatch):
         "/api/auth/signup",
         json={
             "email": "new@example.com",
-            "password": "Sup3rSecret!x",
+            "password": _TEST_PASSWORD,
             "role": "athlete",
             "accepts_terms": True,
             "accepts_health_data": True,
