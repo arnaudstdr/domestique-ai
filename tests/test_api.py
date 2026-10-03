@@ -513,6 +513,21 @@ def test_sentry_event_scrubbing_removes_secrets() -> None:
     assert scrubbed["request"]["headers"]["Host"] == "app.example"
 
 
+def test_sentry_not_initialized_under_pytest() -> None:
+    """Sous pytest, Sentry reste inactif malgré le ``SENTRY_DSN`` du ``.env``.
+
+    ``_init_sentry()`` tourne à l'import de ``main`` (garde ``"pytest" in
+    sys.modules`` + ``SENTRY_ENABLED=0`` de conftest) : les exceptions
+    volontairement levées par les tests ne doivent jamais partir vers Sentry
+    (incident DOMESTIQUE-AI-1..H, 2026-10-03).
+    """
+    import sentry_sdk
+
+    import domestique_ai.api.main  # noqa: F401 — force l'import/init
+
+    assert not sentry_sdk.get_client().is_active()
+
+
 def test_morning_metrics_table_initialized(client: TestClient, tmp_path: Path) -> None:
     """Garantit qu'aucune migration n'a été cassée par l'API."""
     db = Path(tmp_path / "api_test.db")

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 import time
 import uuid
 from contextlib import asynccontextmanager
@@ -154,7 +155,16 @@ def _init_sentry() -> None:
     **désactivé par défaut** (données de santé, conformité RGPD), réactivable
     via ``SENTRY_SEND_PII=1``. Dans tous les cas, ``before_send`` scrubbe la
     query string et le header ``Authorization`` (tokens webcal/Bearer).
+
+    **Jamais sous pytest** : ``_init_sentry()`` tourne à l'import du module (avant
+    les fixtures), donc un ``SENTRY_ENABLED=0`` posé par ``conftest`` ne suffit
+    pas si l'environnement est mal configuré. La garde ``"pytest" in sys.modules``
+    empêche structurellement que les exceptions volontairement levées par les
+    tests (swallow tests) partent vers le projet Sentry de prod.
     """
+    if "pytest" in sys.modules:
+        log.info("Sentry désactivé (exécution sous pytest).")
+        return
     if not get_sentry_enabled():
         log.info("Sentry désactivé (SENTRY_ENABLED=0).")
         return

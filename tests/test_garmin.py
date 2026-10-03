@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import shutil
 import sqlite3
 from unittest.mock import MagicMock
 
@@ -12,7 +13,9 @@ from domestique_ai.athlete_context import AthleteContext
 from domestique_ai.ingestion.db import get_sync_meta, init_db, set_sync_meta
 from domestique_ai.ingestion.garmin import (
     BACKFILL_FLAG,
+    AthleteSpaceRemovedError,
     GarminIngestError,
+    _last_garmin_activity_date,
     backfill_garmin_fields,
     encode_polyline,
     extract_activity_data,
@@ -442,6 +445,52 @@ def test_save_garmin_activity_inserts_and_is_idempotent(tmp_path, monkeypatch):
     assert row[0] is None
     assert row[1] == 18435401234
     assert row[2] is not None  # TSS calculé
+
+
+def test_save_garmin_activity_aborts_when_space_removed(tmp_path):
+    """Espace athlète supprimé pendant la sync → erreur dédiée, pas de recréation.
+
+    Régression Sentry DOMESTIQUE-AI-J (2026-10-03) : ``sqlite3.connect`` levait
+    un ``OperationalError: unable to open database file`` opaque.
+    """
+    db = tmp_path / "athletes" / "abc" / "strava_activities.db"
+    init_db(db)
+    shutil.rmtree(db.parent)
+    with pytest.raises(AthleteSpaceRemovedError):
+        save_garmin_activity(
+            {"id": 1, "date": "2026-08-30T08:00:00Z", "duration": 3600}, db_path=db
+        )
+    assert not db.parent.exists()  # pas de dossier orphelin recréé
+
+
+def test_last_garmin_activity_date_aborts_when_space_removed(tmp_path):
+    db = tmp_path / "athletes" / "abc" / "strava_activities.db"
+    init_db(db)
+    shutil.rmtree(db.parent)
+    with pytest.raises(AthleteSpaceRemovedError):
+        _last_garmin_activity_date(db)
+
+
+def test_run_sync_aborts_quietly_when_space_removed(tmp_path, monkeypatch):
+    """``_run_sync`` attrape l'erreur d'espace supprimé en warning (pas d'alerte)."""
+    from domestique_ai.api.routers import garmin as garmin_router
+
+    db = tmp_path / "g.db"
+    init_db(db)
+    monkeypatch.setattr(garmin_router, "get_ingest_client", lambda **_: MagicMock())
+
+    def _boom(*_args, **_kwargs):
+        raise AthleteSpaceRemovedError("Espace athlète supprimé")
+
+    monkeypatch.setattr(garmin_router, "sync_activities_garmin", _boom)
+    garmin_router._sync_state.clear()
+    try:
+        garmin_router._run_sync(_ctx(db), "alice")
+        state = garmin_router._sync_state["alice"]
+    finally:
+        garmin_router._sync_state.clear()
+    assert state["status"] == "error"
+    assert "supprimé" in state["error"]
 
 
 def test_init_db_normalizes_legacy_road_biking(tmp_path):

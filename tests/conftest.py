@@ -2,7 +2,17 @@
 
 from __future__ import annotations
 
+import os
+
 import pytest
+
+# Sentry doit être coupé AVANT tout import de ``domestique_ai.api.main`` : son
+# ``_init_sentry()`` s'exécute à l'import du module (pas au lifespan) et un
+# ``setenv`` en fixture s'exécute par test — trop tard, la collecte a déjà
+# importé ``main`` et initialisé Sentry avec le ``SENTRY_DSN`` du ``.env``. Sans
+# ça, les exceptions volontairement levées par les tests (swallow tests)
+# polluent le projet Sentry (issues DOMESTIQUE-AI-1..H, 2026-10-03).
+os.environ["SENTRY_ENABLED"] = "0"
 
 
 @pytest.fixture(autouse=True)
@@ -19,10 +29,6 @@ def _isolate_platform_db(tmp_path, monkeypatch):
     """
     monkeypatch.setenv("DOMESTIQUE_AI_PLATFORM_DB_PATH", str(tmp_path / "platform.db"))
     monkeypatch.setenv("DOMESTIQUE_AI_ATHLETES_ROOT", str(tmp_path / "athletes"))
-    # Sentry désactivé sous pytest : les exceptions volontairement levées par
-    # les tests (swallow tests) ne doivent jamais polluer Sentry, même si un
-    # SENTRY_DSN est présent dans l'environnement du runner.
-    monkeypatch.setenv("SENTRY_ENABLED", "0")
     # Les tests qui montent `TestClient(app)` sans `with` ne déclenchent pas le
     # lifespan (donc pas l'init plateforme) ; on l'initialise ici pour tous.
     from domestique_ai.platform_db import init_platform_db

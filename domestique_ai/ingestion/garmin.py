@@ -86,6 +86,16 @@ class GarminIngestError(RuntimeError):
     """Erreur d'ingestion Garmin Connect (auth, réseau, réponse inattendue)."""
 
 
+class AthleteSpaceRemovedError(RuntimeError):
+    """Espace de données athlète supprimé pendant la sync (compte effacé).
+
+    Levée quand le dossier ``data/athletes/<public_id>/`` disparaît entre le
+    début de la sync et l'écriture (suppression de compte, purge d'orphelins,
+    incident volume). La sync est interrompue proprement — on ne recrée pas un
+    dossier orphelin — et sans alerte Sentry (warning côté router).
+    """
+
+
 def map_sport_type(type_key: str | None) -> str | None:
     """Convertit un ``typeKey`` Garmin en sport_type (nomenclature type Strava)."""
     if not type_key:
@@ -612,6 +622,9 @@ def save_garmin_activity(
     )
     temp_values = temp_summary if temp_summary is not None else (None, None, None)
 
+    if not path.parent.exists():
+        raise AthleteSpaceRemovedError(f"Espace athlète supprimé : {path.parent}")
+
     conn = sqlite3.connect(path)
     try:
         cursor = conn.execute("SELECT 1 FROM activities WHERE garmin_id = ?", (garmin_id,))
@@ -668,6 +681,8 @@ def _last_garmin_activity_date(
 ) -> dt.date | None:
     """Date (UTC) de la dernière activité Garmin connue, ``None`` si vide."""
     path = Path(db_path) if db_path else (ctx.db_path if ctx else get_db_path())
+    if not path.parent.exists():
+        raise AthleteSpaceRemovedError(f"Espace athlète supprimé : {path.parent}")
     conn = sqlite3.connect(path)
     try:
         row = conn.execute(
@@ -998,6 +1013,12 @@ def sync_activities_garmin(
     """
     if end_date is None:
         end_date = dt.date.today()
+
+    # Le dossier de l'athlète doit exister avant de lire la dernière date
+    # (init_db fait le mkdir) — sinon une base neuve échouait ici.
+    _assert_ctx_can_sync(ctx)
+    init_db(db_path, ctx=ctx)
+
     if start_date is None:
         last = _last_garmin_activity_date(db_path, ctx=ctx)
         if last is not None:
@@ -1007,8 +1028,6 @@ def sync_activities_garmin(
     if start_date > end_date:
         return 0
 
-    _assert_ctx_can_sync(ctx)
-    init_db(db_path, ctx=ctx)
     if client is None:
         client = _ingest_client_for(ctx)
 

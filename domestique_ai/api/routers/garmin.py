@@ -29,6 +29,7 @@ from domestique_ai.api.schemas import (
 from domestique_ai.athlete_context import AthleteContext
 from domestique_ai.config import garmin_token_dir_for
 from domestique_ai.ingestion.garmin import (
+    AthleteSpaceRemovedError,
     GarminIngestError,
     get_ingest_client,
     sync_activities_garmin,
@@ -129,6 +130,18 @@ def _run_sync(ctx: AthleteContext, key: str) -> None:
         inserted = sync_activities_garmin(client, ctx=ctx)
     except GarminIngestError as exc:
         log.error("Sync Garmin [%s] : erreur : %s", key[:8], exc)
+        _set_state(
+            key,
+            status="error",
+            error=str(exc),
+            finished_at=dt.datetime.now(dt.UTC).isoformat(),
+        )
+        return
+    except AthleteSpaceRemovedError as exc:
+        # Compte supprimé / espace purgé pendant la sync : abandon propre, sans
+        # alerte Sentry (warning, pas de log.exception) — on ne recrée pas un
+        # dossier orphelin.
+        log.warning("Sync Garmin [%s] : espace athlète supprimé, sync interrompue.", key[:8])
         _set_state(
             key,
             status="error",

@@ -319,7 +319,11 @@ dérivé côté client des données réelles (`GET /api/profile`,
 - **Sentry** — `_scrub_sentry_event` (`before_send`) retire la query string et
   le header `Authorization` des événements, même quand `SENTRY_SEND_PII=1`.
   Depuis la mise en conformité RGPD, `SENTRY_SEND_PII` est **désactivé par
-  défaut** (pas d'IP/headers chez le tiers).
+  défaut** (pas d'IP/headers chez le tiers). **Jamais initialisé sous pytest** :
+  `_init_sentry()` tourne à l'import de `main` (avant les fixtures), donc la
+  garde `"pytest" in sys.modules` (doublée d'un `os.environ["SENTRY_ENABLED"]="0"`
+  top-level dans `tests/conftest.py`) empêche les exceptions volontairement
+  levées par les tests de partir vers Sentry (incident `DOMESTIQUE-AI-1..H`).
 - **Cache** — `CacheControlMiddleware` force `Cache-Control: no-store` sur
   toutes les réponses `/api/*` (données privées : plans, exports, santé), en
   plus de l'`immutable` des assets et du `no-cache` de l'app shell.
