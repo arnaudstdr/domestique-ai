@@ -155,6 +155,13 @@ ce sheet (plus de carte de recherche en haut de page).
   (`Profil.tsx`, `AvatarSection`) ; l'en-tête (`App.tsx`) remplace l'icône
   `UserRound` par la miniature ; `Roster.tsx` affiche l'avatar (ou les initiales)
   de chaque athlète.
+- **Login** — `pages/Login.tsx` : fond animé CSS-only (nappes `animate-aurora-*`
+  + profil altimétrique `animate-route-draw`, keyframes dans `tailwind.config.js`,
+  désactivés par `prefers-reduced-motion`), carte « verre » (`backdrop-blur`) et
+  entrée `.stagger` ; logo affiché en `/favicon.svg` (SVG). Quand
+  `api.auth.config().signup_enabled` est faux, un lien `mailto:` pré-rempli
+  (sujet + corps, email déjà saisi inclus) vers `LEGAL_CONTACT_EMAIL`
+  (`src/legal/index.ts`) s'affiche sous la carte pour demander une invitation.
 - **Inscription / mot de passe** — pages publiques `Signup.tsx` (`/signup`,
   masquée dans Login tant que `api.auth.config().signup_enabled` est faux),
   `VerifyEmail.tsx` (`/verify-email?token=`), `ForgotPassword.tsx`

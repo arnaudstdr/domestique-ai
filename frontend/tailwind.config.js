@@ -99,6 +99,25 @@ export default {
           "0%, 100%": { opacity: "1" },
           "50%": { opacity: "0.55" },
         },
+        // Nappes de lumière du fond animé des pages publiques (Login) :
+        // transform-only pour rester composited, très lentes pour ne pas distraire.
+        "aurora-a": {
+          "0%, 100%": { transform: "translate3d(-6%, -4%, 0) scale(1)" },
+          "50%": { transform: "translate3d(7%, 5%, 0) scale(1.18)" },
+        },
+        "aurora-b": {
+          "0%, 100%": { transform: "translate3d(6%, 4%, 0) scale(1.12)" },
+          "50%": { transform: "translate3d(-6%, -6%, 0) scale(0.9)" },
+        },
+        "aurora-c": {
+          "0%, 100%": { transform: "translate3d(0, 0, 0) scale(1)", opacity: "0.5" },
+          "50%": { transform: "translate3d(5%, -7%, 0) scale(1.16)", opacity: "0.9" },
+        },
+        // Tracé progressif de la ligne altimétrique décorative (pathLength=1).
+        "route-draw": {
+          from: { strokeDashoffset: "1" },
+          to: { strokeDashoffset: "0" },
+        },
       },
       animation: {
         rise: "rise 0.5s cubic-bezier(0.22, 1, 0.36, 1) both",
@@ -106,6 +125,10 @@ export default {
         "sheet-up": "sheet-up 0.3s cubic-bezier(0.22, 1, 0.36, 1) both",
         "coach-halo": "coach-halo 3.2s ease-in-out infinite",
         "alert-pulse": "alert-pulse 1.8s ease-in-out infinite",
+        "aurora-a": "aurora-a 26s ease-in-out infinite alternate",
+        "aurora-b": "aurora-b 34s ease-in-out infinite alternate",
+        "aurora-c": "aurora-c 22s ease-in-out infinite alternate",
+        "route-draw": "route-draw 3.6s cubic-bezier(0.22, 1, 0.36, 1) 0.5s both",
       },
     },
   },

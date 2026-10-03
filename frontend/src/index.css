@@ -357,7 +357,11 @@
   .animate-fade-in,
   .animate-sheet-up,
   .animate-coach-halo,
-  .animate-alert-pulse {
+  .animate-alert-pulse,
+  .animate-aurora-a,
+  .animate-aurora-b,
+  .animate-aurora-c,
+  .animate-route-draw {
     animation: none !important;
   }
 }
