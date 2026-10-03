@@ -104,7 +104,7 @@ interchangeable with power-based TSS. CTL / ATL / TSB are EMAs computed over
 <td width="50%" valign="top">
 
 ### An agentic coach with guardrails
-The LLM runs a **tool-calling loop over 17 typed tools**. A golden rule in the
+The LLM runs a **tool-calling loop over 21 typed tools**. A golden rule in the
 system prompt forbids any unsourced figure, and responses **stream over SSE**,
 token by token, with visible reasoning and tool calls.
 
@@ -175,7 +175,7 @@ domestique_ai/
 ├── auth_cli.py        # offline bootstrap / lockout-recovery CLI
 ├── ingestion/         # Garmin (activities + health), Google Health, TCX, SQLite
 ├── processing/        # TSS, CTL/ATL/TSB, zones, overtraining, trends, plans
-├── llm/               # Ollama client, 17 tools, agentic coach, memory, plans
+├── llm/               # Ollama client, 21 tools, agentic coach, memory, plans
 ├── api/               # FastAPI — 16 domain routers, auth middleware, SSE
 └── export/            # .FIT archive (ZIP) + iCalendar / webcal subscription
 frontend/              # React 18 + Vite + TypeScript + Tailwind PWA
@@ -197,6 +197,12 @@ frontend/              # React 18 + Vite + TypeScript + Tailwind PWA
 - **Comparison** — similar rides matched by sport, distance (±5 %), elevation
   (±10 %), start point (≤ 500 m) and route shape (discrete Fréchet), so "how
   many times have I climbed this?" gets a real answer.
+- **Climbs** — repeated climbs detected from persisted Garmin/TCX streams
+  (altitude + time), matched across rides (start/end ≤ 250 m), named by you:
+  pass count, best/average time and VAM per climb, per year.
+- **Records** — best efforts from 5 s to 60 min (W and W/kg) with the
+  20-minute threshold trend per year, plus aerobic decoupling (Pw:HR) on
+  sustained rides.
 - **Projection** — a 4-week FTP forecast from the 28-day CTL trend, capped and
   graded by confidence.
 
@@ -207,7 +213,7 @@ or **Ollama Cloud** — the default model is `gemma4:31b-cloud` with an
 `OLLAMA_API_KEY`. Switch with `OLLAMA_MODEL` / `OLLAMA_HOST`; your training data
 itself always lives in your own SQLite.
 
-- **17 typed tools** expose the same functions that power the dashboard, so the
+- **21 typed tools** expose the same functions that power the dashboard, so the
   chat and the charts can never disagree.
 - **A golden rule in the system prompt**: no figure without a tool call. The
   model never *computes*, it only *explains*.
@@ -264,7 +270,7 @@ produced by tested Python.
 <br/>
 
 A model handed a table of metrics will still paraphrase, round, or invent values
-under pressure. By exposing **17 typed tools** and forbidding any quantitative
+under pressure. By exposing **21 typed tools** and forbidding any quantitative
 claim without a tool call, the source of truth stays in code. The tools return
 the same computed dicts that power the dashboard — so the chat and the charts
 can never disagree.

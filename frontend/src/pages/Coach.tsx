@@ -10,6 +10,15 @@ import { useToast } from "../hooks/useToast";
 
 const PAGE_SIZE = 30;
 
+const SUGGESTED_PROMPTS = [
+  "Comment j'évolue sur les 6 derniers mois ?",
+  "Où va mon FTP ?",
+  "C'est quoi ma Z2 en bpm ?",
+  "Mes sorties longues progressent-elles ?",
+  "Combien de séances de seuil ce trimestre ?",
+  "Qu'est-ce que je fais aujourd'hui ?",
+];
+
 interface PendingAssistant {
   content: string;
   thinking: string | null;
@@ -188,6 +197,7 @@ export default function Coach() {
     if (prefill) {
       setDraft(prefill);
       setSearchParams({}, { replace: true });
+      requestAnimationFrame(() => textareaRef.current?.focus());
     }
   }, [searchParams, setSearchParams]);
 
@@ -232,8 +242,8 @@ export default function Coach() {
     );
   }
 
-  async function send() {
-    const message = draft.trim();
+  async function send(override?: string) {
+    const message = (override ?? draft).trim();
     if (!message || streaming) return;
     setDraft("");
     setStreaming(true);
@@ -335,6 +345,25 @@ export default function Coach() {
         {!hasMoreBefore && messages.length > 0 && (
           <div className="py-4 text-center text-xs text-muted">Début de la conversation</div>
         )}
+        {messages.length === 0 && !streaming && (
+          <div className="px-4 pt-8">
+            <p className="mb-3 text-center text-sm text-muted">Une question pour démarrer ?</p>
+            <div className="mx-auto flex max-w-2xl flex-wrap justify-center gap-2">
+              {SUGGESTED_PROMPTS.map((question) => (
+                <button
+                  key={question}
+                  type="button"
+                  onClick={() => void send(question)}
+                  className="rounded-full border border-border/[0.12] bg-card px-3 py-1.5
+                             text-sm text-fg-soft shadow-card transition-colors duration-150
+                             hover:border-accent/50 hover:text-fg active:translate-y-px"
+                >
+                  {question}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
         {messages.map((m) => (
           <div
             key={m.key}
@@ -402,7 +431,11 @@ export default function Coach() {
             placeholder="Pose une question au coach…"
             className="input resize-none max-h-32 overflow-y-auto"
           />
-          <button onClick={send} disabled={streaming || !draft.trim()} className="btn-primary">
+          <button
+            onClick={() => void send()}
+            disabled={streaming || !draft.trim()}
+            className="btn-primary"
+          >
             {streaming ? "…" : "↑"}
           </button>
         </div>

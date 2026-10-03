@@ -29,6 +29,7 @@ Chaque activité est ventilée en 5 zones %HRR (Karvonen) — colonnes `hr_z1_ti
 - Bornes en dur dans `processing/analyzer._HR_ZONE_BOUNDS`. La fonction `calculate_hr_zones(hr_stream, time_stream, hr_rest, hr_max)` consomme les séries `heartrate` + `time` extraites des streams d'ingestion.
 - Les pauses d'enregistrement (saut > 5 s entre deux samples) ne sont pas comptabilisées (constante `_HR_ZONE_PAUSE_GAP_SEC`).
 - Convention DB : `NULL` = non calculé ; `0.0` = calculé mais aucune seconde dans cette zone.
+- `hr_zone_bpm_ranges(hr_rest, hr_max)` convertit ces bornes en bpm (Karvonen) — utilisé par le tool `get_profile` pour verbaliser les zones.
 
 **Quelle source à l'ingestion** : zones Garmin prioritaires pour le vélo, repli sur `calculate_hr_zones()` sinon — détail dans `ingestion/AGENTS.md`.
 
@@ -44,6 +45,7 @@ Agrégats saisonniers exposés via `GET /api/metrics/trends?period={3m|6m|1y|all
   - `high` quand ≥ 60 j d'historique CTL ET part Z4-Z5 ∈ [4 %, 25 %] sur les 28 derniers jours (stimulus seuil/VO2max plausible).
   - `medium` quand ≥ 28 j d'historique.
   - `low` sinon.
+- **Exposition coach LLM** : tool `get_training_trends(period, weeks, include_ftp_projection)` (`llm/tools.py`) — mêmes agrégats que la page, pour répondre aux questions d'évolution sans inventer de chiffres.
 
 ## Plan déterministe — builder, validator, reprise graduée
 
@@ -153,7 +155,7 @@ historique orpheline `weight_history` n'est plus utilisée.
 
 **Critères dans l'ordre** (tous les critères GPS sont « si disponible » : un hard filter n'est appliqué que quand la donnée existe des deux côtés, sinon on retombe sur distance + dénivelé) :
 
-- `sport_bucket` : `outdoor` (Ride, GravelRide, MountainBikeRide, EBikeRide), `indoor` (VirtualRide), ou `other`. On ne compare jamais une sortie route à un home trainer.
+- `sport_bucket` (`processing/activity_classify.py`) : `outdoor` (Ride, GravelRide, MountainBikeRide, EBikeRide), `indoor` (VirtualRide), ou `other`. On ne compare jamais une sortie route à un home trainer.
 - Distance à ±5 % près en relatif.
 - Dénivelé à ±10 % près en relatif.
 - Plancher distance 5 km / dénivelé 50 m pour éviter les divisions absurdes sur les très courtes activités.
@@ -171,4 +173,35 @@ Les helpers géo (`haversine_m`, `decode_polyline`, `resample_polyline`, `discre
 **Exposition coach LLM** : tool `find_similar_activities(external_id, limit=10)`, déclaré dans `tools.py`. Permet au coach de répondre à « ce col, je l'ai monté combien de fois ? » sans inventer de chiffres.
 
 **Tests** : `tests/test_similar_activities.py` couvre tolérances, exclusion indoor/outdoor, delta_pct, tri, limit, plancher distance, cast de durée REAL, et les filtres départ/tracé (même départ+tracé → matche ; départ ou tracé éloigné → exclu ; candidat/référence sans GPS → fallback).
+
+## Types de sortie & mix (`processing/activity_classify.py`, `activity_stats.py`)
+
+Classification **pure** partagée (`activity_classify.py`) : `sport_bucket(sport_type)` → `indoor`/`outdoor`/`other`, et `infer_kind_from_zones(z_times, avg_hr)` → `recovery|endurance|tempo|intervals` (ou `None` si zones absentes). Utilisée par `today.py` (dernière séance), `similar.py`, `compliance.py` et `activity_stats.py` — ne pas dupliquer ces heuristiques.
+
+`activity_stats.get_activity_mix_stats(days, group_by, include_monthly)` agrège séances, durée, distance, D+ et charge par bucket :
+
+- `group_by="sport"` (défaut) → `by_sport` (compatibiité tool existant) ; `"kind"` → `by_type` (kind inféré des zones HR, `unknown` si non ventilé) ; `"indoor"` → `by_type` (indoor/outdoor/other).
+- `include_monthly=True` ajoute `monthly` (mois × type) borné à la fenêtre `days` — sert aux questions « est-ce que mes sorties longues progressent ? ».
+
+**Exposition coach LLM** : tool `get_activity_mix(days, group_by, include_monthly)` (`llm/tools.py`) — l'ancien comportement (sport) reste la valeur par défaut. Tests : `tests/test_activity_stats.py` + extensions `tests/test_tools.py`.
+
+## Montées (`processing/climbs.py`)
+
+Détection des cols/bosses récurrents à partir des **streams persistés** (backfill Garmin aligné / TCX) — aucune donnée réseau.
+
+- **Détection** (`detect_climbs`, pur) : lissage d'altitude (moyenne glissante ±2), pente par segment, points « en montée » à pente ≥ 2 % (hystérésis), interruptions < 150 m fusionnées, puis filtre **pente moyenne ≥ 3 %, D+ ≥ 40 m, longueur ≥ 800 m**. Sortie : longueur, D+, pente moy/max, durée, VAM, FC/puissance moy, coordonnées départ/arrivée.
+- **Appariement** (`rebuild_climbs`, idempotent) : même montée si départ **et** arrivée ≤ 250 m + longueur ± 30 % ; les **noms des segments survivent** au rebuild. Réécrit `climb_efforts` puis les compteurs (`efforts_count`, `first_seen`, `last_seen`). Un changement de seuils nécessite un rebuild.
+- **Tables** : `climb_segments` (nom nullable, géométrie, stats) + `climb_efforts` (UNIQUE `segment_id`+`activity_id`), créées par `init_db` ; `delete_activity` purge les efforts de l'activité et rafraîchit les compteurs (les segments nommés survivent).
+- **Nommage** : aucun géocodage → l'utilisateur nomme depuis la page « Montées » (`PUT /api/climbs/{id}`) ; le coach liste les montées sans nom (`unnamed_segments`).
+- **Exposition** : tool `get_climb_stats(name, limit)` ; API `GET /api/climbs`, `GET/PUT /api/climbs/{id}` (`api/AGENTS.md`). Données **dérivées** → exclues de l'export RGPD, comme `activity_streams`.
+- **CLI** : `python -m domestique_ai.ingestion.backfill_streams --all` (backfill + rebuild automatique ; `--no-rebuild` pour dissocier). Tests : `tests/test_climbs.py`, `tests/test_garmin_aligned.py`, `tests/test_climbs_api.py`.
+
+## Records de puissance (`processing/records.py`)
+
+Best efforts et découplage Pw:HR calculés **à la volée** depuis les streams persistés (aucune table dédiée).
+
+- **Best efforts** (`best_effort_watts`) : moyenne de puissance maximale sur fenêtre glissante (5 s, 1 min, 5 min, 20 min, 1 h), pondérée par le temps réel entre échantillons (pas fixe ~5 s) ; fenêtre retenue seulement si elle couvre ≥ 95 % de la durée. Séries « pause » > 30 s plafonnées.
+- **Découplage** (`decoupling_pct`) : `(EF1 − EF2) / EF1` où `EF = puissance/FC` par moitié — positif = FC qui dérive à puissance égale ; exige ≥ 20 min et FC des deux moitiés. Exposé par `get_activity_details` (`decoupling_pct`, best-effort si streams présents).
+- **Rapport** (`records_report`) : un record par durée standard + tendance seuil (meilleur 20 min par année), ou top efforts d'une durée ciblée (`duration_min`) avec meilleur par année. Périodes `3m/6m/1y/all`.
+- **Exposition** : tool `get_best_efforts(period, duration_min)`. Puissance absente des streams → `available: false` avec raison. Tests : `tests/test_records.py`.
 

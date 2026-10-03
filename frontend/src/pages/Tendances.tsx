@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 import { api, ApiError } from "../api/client";
 import type {
   FtpProjectionResponse,
@@ -74,6 +75,13 @@ export default function Tendances() {
           ))}
         </div>
       </div>
+
+      <Link
+        to="/montees"
+        className="inline-block text-xs font-semibold text-accent hover:underline"
+      >
+        ⛰️ Montées détectées — passages et temps par montée →
+      </Link>
 
       {ftp && <FtpProjectionCard data={ftp} />}
 

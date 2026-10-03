@@ -25,10 +25,12 @@ Règle d'or : **le LLM n'invente jamais de chiffre**. Le `SYSTEM_PROMPT` impose 
 
 Positionnement : coach **cycliste et assistant santé**. Au-delà de l'entraînement vélo, il conseille sur la nutrition, le sommeil, la récupération et le renforcement, à partir de ses connaissances générales — ancrées sur les données réelles de l'athlète (`get_nutrition_context`, `get_activity_mix`) mais sans jamais présenter un repère général comme une mesure de l'athlète. Pas de disclaimer médical systématique (ton neutre). Activités hors vélo : `propose_workout(sport=...)` gère renfo/gainage, cross-training et mobilité (conseil ponctuel — **non planifié** dans le plan).
 
+Outils d'analyse (10/2026) : `get_training_trends` (courbe CTL/ATL/TSB, mensuels, volume hebdo, projection FTP — agrège `processing/trends.py`), `get_profile` (niveau, FTP, W/kg, FC repos/max, zones bpm) et `get_activity_mix` étendu (`group_by=sport|kind|indoor`, `include_monthly` — `processing/activity_stats.py`). `get_climb_stats` (montées : passages, meilleur/moyen temps, VAM — `processing/climbs.py`, streams persistés requis) et `get_best_efforts` (records 5 s→60 min + tendance seuil — `processing/records.py`). `get_recent_activities` expose `rpe`/`notes` et `get_morning_trends` les scores Garmin + une série courte 7 j.
+
 Pour ajouter un tool :
 
 1. Écrire la fonction Python dans `tools.py` (signature explicite, retourne un dict JSON-sérialisable).
-2. Ajouter son schéma JSON dans `TOOL_SCHEMAS` (description claire, paramètres typés). Rester concis : les schémas sont renvoyés à **chaque itération** de la boucle de tool-calling (budget global verrouillé par test).
+2. Ajouter son schéma JSON dans `TOOL_SCHEMAS` (description claire, paramètres typés). Rester concis : les schémas sont renvoyés à **chaque itération** de la boucle de tool-calling (budget global verrouillé par test, ~9 000 c depuis 10/2026).
 3. L'enregistrer dans le dict `TOOLS`. `dispatch()` route automatiquement.
 4. Tester sur DB tmp dans `tests/test_tools.py` (pas de réseau, pas de LLM).
 
@@ -187,6 +189,9 @@ idempotent) + **pre-sync Garmin** pour garantir des données fraîches, puis
   Le Plan affiche « REPOS (coach) » ou « allégée » ; la compliance la traite
   comme repos coach (pas une séance manquée). Override manuel via
   `POST /api/plan/decision`. Aucune notification Pushover pour ce check.
+  Le tool chat `propose_workout_today` renvoie aussi `morning_decision` /
+  `morning_reason` (évalués à la volée par les règles, `use_llm=False`) pour
+  que le coach cite la décision directement dans la conversation.
 - **Coût LLM** : la décision `go` ne déclenche **aucun** appel LLM (la raison
   déterministe suffit, elle n'est pas persistée) ; le LLM ne rédige que
   `adjust`/`rest`, avec schéma JSON passé au SDK (`chat_structured(schema=…)` →

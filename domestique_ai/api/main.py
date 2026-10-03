@@ -37,6 +37,9 @@ from domestique_ai.api.routers import (
     availability as availability_router,
 )
 from domestique_ai.api.routers import (
+    climbs as climbs_router,
+)
+from domestique_ai.api.routers import (
     coach as coach_router,
 )
 from domestique_ai.api.routers import (
@@ -431,6 +434,7 @@ app.include_router(account_router.router)
 # données. Plus de gate coach-only.
 app.include_router(metrics_router.router)
 app.include_router(activities_router.router)
+app.include_router(climbs_router.router)
 app.include_router(morning_router.router)
 app.include_router(google_health_router.router)
 app.include_router(objective_router.router)

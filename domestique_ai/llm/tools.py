@@ -114,6 +114,9 @@ def get_recent_activities(days: int = 7, *, ctx: AthleteContext | None = None) -
         recent = sorted(recent, key=lambda act: act.get("date") or "")[-_MAX_RECENT_ACTIVITIES:]
     out = []
     for act in recent:
+        notes = act.get("notes")
+        if isinstance(notes, str) and len(notes) > 200:
+            notes = notes[:200]
         out.append(
             {
                 "date": act.get("date"),
@@ -125,6 +128,8 @@ def get_recent_activities(days: int = 7, *, ctx: AthleteContext | None = None) -
                 "max_heart_rate": act.get("max_heart_rate"),
                 "avg_power": act.get("avg_power"),
                 "training_load": act.get("training_load"),
+                "rpe": act.get("rpe"),
+                "notes": notes,
                 "hr_zones_sec": {key: act.get(f"hr_{key}_time") for key in HR_ZONE_KEYS},
             }
         )
@@ -170,56 +175,97 @@ def get_zone_distribution(days: int = 14, *, ctx: AthleteContext | None = None) 
     }
 
 
-def get_activity_mix(days: int = 28, *, ctx: AthleteContext | None = None) -> dict[str, Any]:
-    """Répartition de la pratique par sport sur les N derniers jours.
+def get_training_trends(
+    period: str = "6m",
+    weeks: int = 12,
+    include_ftp_projection: bool = True,
+    *,
+    ctx: AthleteContext | None = None,
+) -> dict[str, Any]:
+    """Évolution de l'athlète : courbe CTL/ATL/TSB, agrégats mensuels, volume
+    hebdomadaire et projection FTP.
 
-    Agrège séances, durée, distance, dénivelé et charge par ``sport_type``
-    (Ride, Run, Walk, Workout…). Permet au coach de raisonner multi-sport
-    (vélo + course + renfo) sans confondre les disciplines.
+    Agrège ``processing.trends`` (mêmes calculs que la page « Tendances ») —
+    périodes ``3m`` / ``6m`` / ``1y`` / ``all``.
     """
-    activities = fetch_activities_from_db(ctx=ctx)
-    as_of = _today()
-    recent = _filter_recent(activities, days, end=as_of)
+    from domestique_ai.processing import trends as _trends
 
-    buckets: dict[str, dict[str, float]] = {}
-    for act in recent:
-        sport = act.get("sport_type") or "unknown"
-        bucket = buckets.setdefault(
-            sport,
-            {
-                "sessions": 0.0,
-                "duration_sec": 0.0,
-                "distance_km": 0.0,
-                "elevation_m": 0.0,
-                "training_load": 0.0,
-            },
-        )
-        bucket["sessions"] += 1
-        bucket["duration_sec"] += act.get("duration") or 0
-        bucket["distance_km"] += (act.get("distance") or 0) / 1000
-        bucket["elevation_m"] += act.get("elevation_gain") or 0
-        bucket["training_load"] += act.get("training_load") or 0
-
-    by_sport = [
-        {
-            "sport_type": sport,
-            "sessions": int(values["sessions"]),
-            "duration_h": round(values["duration_sec"] / 3600, 1),
-            "distance_km": round(values["distance_km"], 1),
-            "elevation_m": round(values["elevation_m"], 0),
-            "training_load": round(values["training_load"], 1),
-        }
-        for sport, values in sorted(
-            buckets.items(), key=lambda item: item[1]["sessions"], reverse=True
-        )
-    ]
-    return {
-        "as_of": as_of.isoformat(),
-        "days": days,
-        "total_sessions": len(recent),
-        "sports_count": len(by_sport),
-        "by_sport": by_sport,
+    ctx = ctx or context_from_env()
+    if period not in {"3m", "6m", "1y", "all"}:
+        period = "6m"
+    weeks = max(1, min(int(weeks), 52))
+    today = _today()
+    result: dict[str, Any] = {
+        "as_of": today.isoformat(),
+        "trends": _trends.get_trends(period, today=today, ctx=ctx),
+        "weekly_volume": _trends.get_weekly_volume(weeks=weeks, today=today, ctx=ctx),
     }
+    if include_ftp_projection:
+        result["ftp_projection"] = _trends.get_ftp_projection(today=today, ctx=ctx)
+    return result
+
+
+def get_best_efforts(
+    period: str = "1y",
+    duration_min: int | None = None,
+    *,
+    ctx: AthleteContext | None = None,
+) -> dict[str, Any]:
+    """Records de puissance : meilleurs efforts 5 s → 60 min sur la période.
+
+    ``duration_min`` cible une durée (top efforts + meilleur par année) ; sans
+    lui, un record par durée standard + tendance seuil (20 min) par année.
+    Nécessite les streams persistés (backfill Garmin) avec puissance.
+    """
+    from domestique_ai.processing.records import records_report
+
+    ctx = ctx or context_from_env()
+    return records_report(period=period, duration_min=duration_min, ctx=ctx)
+
+
+def get_climb_stats(
+    name: str | None = None,
+    limit: int = 10,
+    *,
+    ctx: AthleteContext | None = None,
+) -> dict[str, Any]:
+    """Montées détectées (cols/bosses récurrents) : passages, meilleur temps,
+    temps moyen, VAM, historique par année.
+
+    ``name`` filtre une montée nommée (ex. « Haut-Koenigsbourg ») ; sans nom,
+    liste les montées les plus grimpées. Délègue à ``processing.climbs``
+    (streams persistés — backfill Garmin requis pour l'historique).
+    """
+    from domestique_ai.processing.climbs import climb_report
+
+    ctx = ctx or context_from_env()
+    return climb_report(name=name, limit=limit, ctx=ctx)
+
+
+def get_activity_mix(
+    days: int = 28,
+    group_by: str = "sport",
+    include_monthly: bool = False,
+    *,
+    ctx: AthleteContext | None = None,
+) -> dict[str, Any]:
+    """Mix de la pratique : par sport (défaut), type de séance (`kind`, zones
+    HR) ou indoor/outdoor, sur les N derniers jours.
+
+    ``include_monthly`` ajoute l'évolution mensuelle (mois × type). Délègue à
+    ``processing.activity_stats`` ; ``kind`` est déduit des zones HR des
+    activités passées (``unknown`` quand non ventilées).
+    """
+    from domestique_ai.processing.activity_stats import get_activity_mix_stats
+
+    ctx = ctx or context_from_env()
+    return get_activity_mix_stats(
+        days=days,
+        group_by=group_by,
+        include_monthly=include_monthly,
+        today=_today(),
+        ctx=ctx,
+    )
 
 
 def get_objective(*, ctx: AthleteContext | None = None) -> dict[str, Any]:
@@ -237,6 +283,36 @@ def get_objective(*, ctx: AthleteContext | None = None) -> dict[str, Any]:
     return {"available": True, "objective": obj.to_dict()}
 
 
+def get_profile(*, ctx: AthleteContext | None = None) -> dict[str, Any]:
+    """Profil de l'athlète : niveau, FTP, W/kg, FC (repos/max), sexe, seuil
+    lactique et zones HR en bpm (convention %HRR Karvonen).
+    """
+    from domestique_ai.processing.analyzer import hr_zone_bpm_ranges
+    from domestique_ai.processing.morning_metrics import (
+        latest_weight,
+        power_to_weight,
+    )
+
+    ctx = ctx or context_from_env()
+    weight_kg = latest_weight(db_path=ctx.db_path)
+    zones = (
+        hr_zone_bpm_ranges(float(ctx.hr_rest), float(ctx.hr_max))
+        if ctx.hr_rest and ctx.hr_max
+        else {}
+    )
+    return {
+        "level": ctx.level,
+        "ftp_w": ctx.ftp,
+        "weight_kg": weight_kg,
+        "wkg": power_to_weight(ctx.ftp, weight_kg),
+        "hr_rest": ctx.hr_rest,
+        "hr_max": ctx.hr_max,
+        "sex": ctx.sex,
+        "lthr_pct": ctx.lthr_pct,
+        "hr_zones_bpm": zones or None,
+    }
+
+
 def get_activity_details(external_id: int, *, ctx: AthleteContext | None = None) -> dict[str, Any]:
     """Détail complet d'une activité identifiée par son id externe.
 
@@ -252,22 +328,32 @@ def get_activity_details(external_id: int, *, ctx: AthleteContext | None = None)
     init_db(ctx.db_path)
     conn = sqlite3.connect(ctx.db_path)
     try:
-        # Id externe : strava_id (legacy) ou garmin_id.
+        # Id externe : strava_id (legacy), garmin_id, sinon id local (manual/TCX).
         cursor = conn.execute(
-            "SELECT coalesce(strava_id, garmin_id), date, duration, avg_heart_rate, "
+            "SELECT coalesce(strava_id, garmin_id, id), date, duration, avg_heart_rate, "
             "max_heart_rate, avg_power, elevation_gain, distance, training_load, "
             "hr_z1_time, hr_z2_time, hr_z3_time, hr_z4_time, hr_z5_time, "
             "avg_temp, min_temp, max_temp, "
             "name, calories, max_power, cadence_avg, cadence_max, "
-            "speed_avg, speed_max, elevation_loss, sport_type "
-            "FROM activities WHERE strava_id = ? OR garmin_id = ?",
-            (external_id, external_id),
+            "speed_avg, speed_max, elevation_loss, sport_type, id "
+            "FROM activities WHERE strava_id = ? OR garmin_id = ? OR id = ?",
+            (external_id, external_id, external_id),
         )
         row = cursor.fetchone()
     finally:
         conn.close()
     if not row:
         return {"available": False, "external_id": external_id}
+    decoupling: float | None = None
+    try:
+        from domestique_ai.ingestion.db import load_activity_streams
+        from domestique_ai.processing.records import decoupling_pct
+
+        payload = load_activity_streams(row[26], db_path=ctx.db_path)
+        if payload:
+            decoupling = decoupling_pct(payload)
+    except Exception:  # noqa: BLE001 — best-effort, jamais bloquant
+        decoupling = None
     speed_avg = row[22]
     speed_max = row[23]
     return {
@@ -294,6 +380,7 @@ def get_activity_details(external_id: int, *, ctx: AthleteContext | None = None)
         "cadence_max": row[21],
         "speed_avg_kmh": round(speed_avg * 3.6, 1) if speed_avg is not None else None,
         "speed_max_kmh": round(speed_max * 3.6, 1) if speed_max is not None else None,
+        "decoupling_pct": decoupling,
     }
 
 
@@ -362,7 +449,22 @@ def get_morning_trends(days: int = 30, *, ctx: AthleteContext | None = None) -> 
         },
         "sleep_score_computed": latest.get("sleep_score_computed"),
         "stress_score_computed": latest.get("stress_score_computed"),
+        "garmin_sleep_score": latest.get("garmin_sleep_score"),
+        "garmin_readiness_score": latest.get("garmin_readiness_score"),
+        "garmin_body_battery_min": latest.get("garmin_body_battery_min"),
+        "garmin_body_battery_max": latest.get("garmin_body_battery_max"),
     }
+
+    recent_days = [
+        {
+            "date": entry.get("date"),
+            "readiness_score": entry.get("readiness_score"),
+            "hrv_ms": entry.get("hrv_ms"),
+            "resting_hr": entry.get("resting_hr"),
+            "sleep_hours": entry.get("sleep_hours"),
+        }
+        for entry in history[-7:]
+    ]
 
     return {
         "available": True,
@@ -371,6 +473,7 @@ def get_morning_trends(days: int = 30, *, ctx: AthleteContext | None = None) -> 
         "latest_date": latest.get("date"),
         "baselines": baselines,
         "latest_advanced": advanced_latest,
+        "recent_days": recent_days,
         "alerts": detect_morning_alerts(db_path=ctx.db_path),
     }
 
@@ -784,7 +887,22 @@ def propose_workout_today(
         propose_workout_today as _propose_today,
     )
 
-    return _propose_today(available_min=available_min, refresh=refresh, ctx=ctx)
+    result = _propose_today(available_min=available_min, refresh=refresh, ctx=ctx)
+    # Check du matin (règles, sans LLM) : le prompt système promet que le tool
+    # porte `morning_decision` / `morning_reason` — on les fusionne ici pour que
+    # le chat puisse citer la décision sans passer par `/api/coach/today`.
+    try:
+        from domestique_ai.llm.daily_decision import evaluate_daily_decision
+
+        morning = evaluate_daily_decision(ctx=ctx, use_llm=False)
+    except Exception:  # noqa: BLE001 — best-effort, ne bloque jamais la séance
+        morning = None
+    if isinstance(result, dict) and isinstance(morning, dict):
+        if morning.get("decision"):
+            result.setdefault("morning_decision", morning["decision"])
+        if morning.get("reason"):
+            result.setdefault("morning_reason", morning["reason"])
+    return result
 
 
 # ---- Schémas JSON pour le LLM ------------------------------------------------
@@ -802,9 +920,38 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
     {
         "type": "function",
         "function": {
+            "name": "get_training_trends",
+            "description": "Évolution : CTL/ATL/TSB, mensuels (volume, TSS, "
+            "zones), volume hebdo, projection FTP.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "period": {
+                        "type": "string",
+                        "enum": ["3m", "6m", "1y", "all"],
+                        "description": "Période (défaut 6m).",
+                    },
+                    "weeks": {
+                        "type": "integer",
+                        "description": "Semaines de volume (défaut 12).",
+                        "minimum": 1,
+                        "maximum": 52,
+                    },
+                    "include_ftp_projection": {
+                        "type": "boolean",
+                        "description": "Projection FTP (défaut true).",
+                    },
+                },
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "get_recent_activities",
             "description": "Activités des N derniers jours (sport, TSS, durée, "
-            "distance, dénivelé, FC, zones) — 10 plus récentes max.",
+            "distance, dénivelé, FC, zones, RPE, notes) — 10 plus récentes max.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -850,8 +997,18 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
     {
         "type": "function",
         "function": {
+            "name": "get_profile",
+            "description": "Profil athlète : niveau, FTP, W/kg, FC repos/max, "
+            "sexe, seuil lactique et zones HR en bpm.",
+            "parameters": {"type": "object", "properties": {}, "required": []},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "get_activity_details",
-            "description": "Détail complet d'une activité par son id externe, sport compris.",
+            "description": "Détail complet d'une activité par son id externe "
+            "(+ découplage Pw:HR si streams persistés).",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -869,8 +1026,8 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "get_morning_trends",
-            "description": "Métriques matinales (HRV, FC repos, sommeil, "
-            "readiness, SpO2…) : baselines 14 j, dernières valeurs, alertes.",
+            "description": "Métriques matinales : baselines 14 j, dernières "
+            "valeurs, série courte, scores Garmin, alertes.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -900,8 +1057,9 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "get_activity_mix",
-            "description": "Répartition par sport (vélo, course, renfo…) sur N "
-            "jours : séances, durée, distance, dénivelé, charge par discipline.",
+            "description": "Mix par sport (défaut), type de séance (kind) ou "
+            "indoor/outdoor : séances, durée, distance, D+, charge. "
+            "include_monthly = évolution mensuelle.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -910,6 +1068,15 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
                         "description": "Fenêtre en jours (défaut 28).",
                         "minimum": 1,
                         "maximum": 365,
+                    },
+                    "group_by": {
+                        "type": "string",
+                        "enum": ["sport", "kind", "indoor"],
+                        "description": "sport (défaut), kind (zones HR), indoor.",
+                    },
+                    "include_monthly": {
+                        "type": "boolean",
+                        "description": "Évolution mensuelle.",
                     },
                 },
                 "required": [],
@@ -1013,32 +1180,30 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "propose_workout",
-            "description": "Squelette de séance (échauffement, corps, retour "
-            "au calme). Cyclisme : target_zone + duration_min. Hors vélo "
-            "(renfo, gainage, mobilité) : sport + duration_min.",
+            "description": "Squelette de séance (cyclisme : target_zone ; hors vélo : sport) + durée.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "sport": {
                         "type": "string",
                         "enum": ["cyclisme", *_OFFBIKE_TEMPLATES.keys()],
-                        "description": "Discipline (défaut 'cyclisme').",
+                        "description": "Discipline (défaut cyclisme).",
                     },
                     "target_zone": {
                         "type": "string",
                         "enum": list(HR_ZONE_KEYS),
-                        "description": "Zone HR visée (vélo).",
+                        "description": "Zone visée.",
                     },
                     "duration_min": {
                         "type": "integer",
-                        "description": "Durée en minutes.",
+                        "description": "Durée.",
                         "minimum": 15,
                         "maximum": 480,
                     },
                     "kind": {
                         "type": "string",
                         "enum": list(_WORKOUT_TEMPLATES.keys()),
-                        "description": "Type vélo (déduit de target_zone si absent).",
+                        "description": "Déduit de target_zone.",
                     },
                 },
                 "required": ["duration_min"],
@@ -1062,8 +1227,7 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "find_similar_activities",
-            "description": "Activités passées au profil similaire (même "
-            "bucket indoor/outdoor, distance ±5 %, dénivelé ±10 %).",
+            "description": "Activités similaires (bucket indoor/outdoor, distance ±5 %, D+ ±10 %).",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -1079,6 +1243,55 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
                     },
                 },
                 "required": ["external_id"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_best_efforts",
+            "description": "Records de puissance : meilleurs efforts 5 s→60 min "
+            "(W, W/kg, date) et tendance seuil 20 min par année.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "period": {
+                        "type": "string",
+                        "enum": ["3m", "6m", "1y", "all"],
+                        "description": "Période (défaut 1y).",
+                    },
+                    "duration_min": {
+                        "type": "integer",
+                        "description": "Durée ciblée en minutes (optionnel).",
+                        "minimum": 1,
+                        "maximum": 180,
+                    },
+                },
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_climb_stats",
+            "description": "Montées (cols/bosses répétés) : passages, meilleur/"
+            "moyen temps, VAM, par année. `name` filtre une montée nommée.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "name": {
+                        "type": "string",
+                        "description": "Nom (partiel), ex. « Haut-Koenigsbourg ».",
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "Max de montées (défaut 10).",
+                        "minimum": 1,
+                        "maximum": 50,
+                    },
+                },
+                "required": [],
             },
         },
     },
@@ -1134,13 +1347,17 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
 
 TOOLS: dict[str, Callable[..., dict[str, Any]]] = {
     "get_training_load_state": get_training_load_state,
+    "get_training_trends": get_training_trends,
     "get_recent_activities": get_recent_activities,
     "get_zone_distribution": get_zone_distribution,
     "get_objective": get_objective,
+    "get_profile": get_profile,
     "get_activity_details": get_activity_details,
     "get_morning_trends": get_morning_trends,
     "get_overtraining_signals": get_overtraining_signals,
     "get_activity_mix": get_activity_mix,
+    "get_climb_stats": get_climb_stats,
+    "get_best_efforts": get_best_efforts,
     "get_nutrition_context": get_nutrition_context,
     "generate_training_plan": generate_training_plan,
     "get_planned_workout": get_planned_workout,

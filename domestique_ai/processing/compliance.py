@@ -15,8 +15,8 @@ from __future__ import annotations
 import datetime as _dt
 from typing import Any
 
+from domestique_ai.processing.activity_classify import sport_bucket
 from domestique_ai.processing.plan_builder import Workout
-from domestique_ai.processing.similar import _sport_bucket
 
 # Fraction de la durée planifiée en dessous de laquelle on considère la séance
 # comme « partielle » plutôt que « faite ».
@@ -53,10 +53,10 @@ def _match_activity(
     bucket = _planned_bucket(workout)
     if bucket is None:
         candidates = [
-            a for a in day_activities if _sport_bucket(a.get("sport_type")) in _CYCLING_BUCKETS
+            a for a in day_activities if sport_bucket(a.get("sport_type")) in _CYCLING_BUCKETS
         ]
     else:
-        candidates = [a for a in day_activities if _sport_bucket(a.get("sport_type")) == bucket]
+        candidates = [a for a in day_activities if sport_bucket(a.get("sport_type")) == bucket]
     if not candidates:
         return None
     return max(candidates, key=lambda a: a.get("training_load") or 0.0)

@@ -103,9 +103,11 @@ def test_tool_schemas_have_required_shape():
     names = {schema["function"]["name"] for schema in TOOL_SCHEMAS}
     assert names == {
         "get_training_load_state",
+        "get_training_trends",
         "get_recent_activities",
         "get_zone_distribution",
         "get_objective",
+        "get_profile",
         "get_activity_details",
         "get_morning_trends",
         "get_overtraining_signals",
@@ -118,6 +120,8 @@ def test_tool_schemas_have_required_shape():
         "remember_fact",
         "search_conversations",
         "get_activity_mix",
+        "get_climb_stats",
+        "get_best_efforts",
         "get_nutrition_context",
     }
     for schema in TOOL_SCHEMAS:
@@ -128,11 +132,12 @@ def test_tool_schemas_have_required_shape():
 
 def test_tool_schemas_stay_compact():
     """Garde-fou anti-bloat : les schémas sont envoyés à CHAQUE itération de la
-    boucle de tool-calling. Budget total ~7 k caractères (avant : ~8,9 k)."""
+    boucle de tool-calling. Budget total ~9 k caractères (relevé en 10/2026 pour
+    couvrir les tools évolution/profil/type de sortie, après élagage)."""
     import json
 
     total = sum(len(json.dumps(schema, ensure_ascii=False)) for schema in TOOL_SCHEMAS)
-    assert total < 7600
+    assert total < 9000
 
 
 def test_get_morning_trends_exposes_weight_and_wkg(seeded_db):
@@ -171,6 +176,29 @@ def test_propose_workout_today_dispatchable(tmp_path, monkeypatch):
     assert "rest_day" in out
     assert out["rest_day"] is False
     assert out["workout"]["kind"] in {"recovery", "endurance", "tempo", "intervals"}
+    # Le check du matin (règles, sans LLM) est fusionné dans la réponse.
+    assert out["morning_decision"] in {"go", "adjust", "rest"}
+    assert isinstance(out["morning_reason"], str)
+
+
+def test_get_activity_details_resolves_manual_local_id(seeded_db):
+    """Les activités manuelles/TCX n'ont pas d'id externe : l'id local fait foi."""
+    conn = sqlite3.connect(seeded_db)
+    try:
+        cursor = conn.execute(
+            "INSERT INTO activities (date, duration, source, distance, training_load) "
+            "VALUES (?, ?, ?, ?, ?)",
+            ("2026-04-29T18:00:00Z", 2400, "manual", 10000.0, 25.0),
+        )
+        local_id = cursor.lastrowid
+        conn.commit()
+    finally:
+        conn.close()
+
+    out = get_activity_details(local_id)
+    assert out["available"] is True
+    assert out["external_id"] == local_id
+    assert out["duration_sec"] == 2400
 
 
 def test_review_week_dispatchable(tmp_path, monkeypatch):
@@ -197,6 +225,49 @@ def test_get_training_load_state_empty_db(tmp_path, monkeypatch):
     init_db(tmp_path / "empty.db")
     state = get_training_load_state()
     assert state["available"] is False
+
+
+def test_get_training_trends_dispatchable(seeded_db, freeze_today):
+    out = dispatch("get_training_trends", {"period": "3m", "weeks": 4})
+    assert out["as_of"] == "2026-04-30"
+    assert out["trends"]["period"] == "3m"
+    assert len(out["weekly_volume"]["weeks"]) == 4
+    assert "ftp_projection" in out
+
+
+def test_get_training_trends_rejects_bad_period(seeded_db, freeze_today):
+    out = dispatch("get_training_trends", {"period": "42y", "weeks": 999})
+    assert out["trends"]["period"] == "6m"
+    assert len(out["weekly_volume"]["weeks"]) == 52
+
+
+def test_get_profile_returns_bpm_zones(seeded_db, monkeypatch):
+    from domestique_ai.config import invalidate_profile_cache
+
+    monkeypatch.setenv("STRAVA_FTP", "250")
+    monkeypatch.setenv("STRAVA_HR_REST", "50")
+    monkeypatch.setenv("STRAVA_HR_MAX", "190")
+    monkeypatch.delenv("DOMESTIQUE_AI_PROFILE_PATH", raising=False)
+    invalidate_profile_cache()
+
+    out = dispatch("get_profile", {})
+    assert out["ftp_w"] == 250.0
+    zones = out["hr_zones_bpm"]
+    assert zones["z1"]["low"] == 50
+    assert zones["z2"]["low"] == 134
+    assert zones["z5"]["high"] == 190
+
+
+def test_get_profile_without_hr_has_no_zones(seeded_db, monkeypatch):
+    from domestique_ai.config import invalidate_profile_cache
+
+    monkeypatch.delenv("STRAVA_HR_REST", raising=False)
+    monkeypatch.delenv("STRAVA_HR_MAX", raising=False)
+    monkeypatch.delenv("DOMESTIQUE_AI_PROFILE_PATH", raising=False)
+    invalidate_profile_cache()
+
+    out = dispatch("get_profile", {})
+    assert out["hr_zones_bpm"] is None
 
 
 def test_get_recent_activities_filters_window(seeded_db, freeze_today):
@@ -278,6 +349,24 @@ def test_get_activity_mix_aggregates_by_sport(seeded_db, freeze_today):
     assert "Workout" in by_sport
     assert by_sport["Workout"]["sessions"] == 1
     assert by_sport["unknown"]["sessions"] == 3  # les activités seedées sans sport
+
+
+def test_get_activity_mix_group_by_kind_and_monthly(seeded_db, freeze_today):
+    out = get_activity_mix(days=10, group_by="kind", include_monthly=True)
+    assert out["group_by"] == "kind"
+    by_type = {row["type"]: row for row in out["by_type"]}
+    assert by_type["endurance"]["sessions"] == 3  # zones HR seedées
+    assert by_type["unknown"]["sessions"] == 1  # Workout sans zones
+    assert {(row["month"], row["type"]) for row in out["monthly"]} == {
+        ("2026-04", "endurance"),
+        ("2026-04", "unknown"),
+    }
+
+
+def test_get_activity_mix_group_by_indoor(seeded_db, freeze_today):
+    out = get_activity_mix(days=10, group_by="indoor")
+    by_type = {row["type"]: row for row in out["by_type"]}
+    assert by_type["other"]["sessions"] == 4  # aucun VirtualRide/Ride seedé
 
 
 def test_get_nutrition_context_exposes_facts(seeded_db, freeze_today):

@@ -234,6 +234,27 @@ def calculate_hr_zones(
     return {key: round(value, 1) for key, value in zones.items()}
 
 
+def hr_zone_bpm_ranges(hr_rest: float, hr_max: float) -> dict[str, dict[str, int]]:
+    """Bornes bpm des zones %HRR (Karvonen), alignées sur ``_HR_ZONE_BOUNDS``.
+
+    Retourne ``{"z1": {"low": ..., "high": ...}, ...}`` — Z1 descend jusqu'à la
+    FC repos (0 % HRR), Z5 monte jusqu'à la FC max. Dict vide si le profil HR
+    est incohérent (``hr_max <= hr_rest``). Sert à verbaliser les zones en bpm
+    (coach, profil) sans dupliquer les bornes.
+    """
+    if hr_max <= hr_rest:
+        return {}
+    hrr_range = hr_max - hr_rest
+    bounds = (0.0, *_HR_ZONE_BOUNDS, 1.0)
+    return {
+        key: {
+            "low": round(hr_rest + bounds[i] * hrr_range),
+            "high": round(hr_rest + bounds[i + 1] * hrr_range),
+        }
+        for i, key in enumerate(HR_ZONE_KEYS)
+    }
+
+
 def compute_training_load(
     duration_sec: int,
     avg_hr: float | None = None,

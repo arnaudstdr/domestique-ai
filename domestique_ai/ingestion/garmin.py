@@ -387,6 +387,175 @@ def parse_details_streams(details: dict[str, Any] | None) -> dict[str, list[floa
 
 
 # ---------------------------------------------------------------------------
+# Series ALIGNÉES (montées/climbs) — conserve les trous par échantillon
+# ---------------------------------------------------------------------------
+
+# ``parse_details_series`` compacte chaque colonne en sautant les ``None`` :
+# les index des séries divergent dès qu'une métrique a un trou (cf. tests
+# legacy). Pour reconstruire des montées il faut au contraire des séries
+# **index-aligned** (même longueur, ``None`` conservés aux mêmes positions) —
+# d'où ce parseur séparé, consommé par le backfill des streams.
+
+#: Pas de sous-échantillonnage des tracés persistés (1 point ~ toutes les 5 s).
+STREAM_STEP_SEC = 5.0
+#: Plafond dur du nombre de points persistés par activité (~5 h à 1 pt/5 s).
+STREAM_MAX_POINTS = 4000
+
+
+def _aligned_from_modern(details: dict[str, Any]) -> dict[str, list[float | None]]:
+    """Colonnes index-aligned depuis ``metricDescriptors`` + ``activityDetailMetrics``."""
+    index_to_key: dict[int, str] = {}
+    for desc in details.get("metricDescriptors") or []:
+        key = desc.get("key")
+        idx = desc.get("metricsIndex")
+        if not isinstance(key, str) or not isinstance(idx, int) or isinstance(idx, bool) or idx < 0:
+            continue
+        index_to_key[idx] = key.lower()
+
+    samples = details.get("activityDetailMetrics") or []
+    if not samples or not index_to_key:
+        return {}
+    columns: dict[str, list[float | None]] = {key: [] for key in index_to_key.values()}
+    for sample in samples:
+        metrics = sample.get("metrics") or []
+        for idx, key in index_to_key.items():
+            value = metrics[idx] if idx < len(metrics) else None
+            if value is not None:
+                try:
+                    value = float(value)
+                except (TypeError, ValueError):
+                    value = None
+            columns[key].append(value)
+
+    raw_ts = columns.get("directtimestamp")
+    if raw_ts:
+        first = next((v for v in raw_ts if v is not None), None)
+        if first is not None:
+            columns["directtimestamp"] = [
+                None if v is None else (v - first) / 1000.0 for v in raw_ts
+            ]
+    return columns
+
+
+def _aligned_from_legacy(entries: list[dict[str, Any]]) -> dict[str, list[float | None]]:
+    """Colonnes index-aligned depuis les orientations legacy (A : 1 entrée/métrique,
+    B : 1 entrée/échantillon)."""
+    columns: dict[str, list[float | None]] = {}
+    for entry in entries:
+        descriptors = entry.get("metricDescriptorDTOs") or []
+        values = entry.get("metrics") or []
+        if len(descriptors) == 1 and values:
+            key = str(descriptors[0].get("key") or "").lower()
+            aligned = [float(v) if v is not None else None for v in values]
+            columns.setdefault(key, []).extend(aligned)
+    if columns:
+        return columns
+
+    first = entries[0]
+    descriptors = first.get("metricDescriptorDTOs") or []
+    for idx, desc in enumerate(descriptors):
+        key = str(desc.get("key") or "").lower()
+        column: list[float | None] = []
+        for entry in entries:
+            metrics = entry.get("metrics") or []
+            value = metrics[idx] if idx < len(metrics) else None
+            if value is not None:
+                try:
+                    value = float(value)
+                except (TypeError, ValueError):
+                    value = None
+            column.append(value)
+        if any(v is not None for v in column):
+            columns[key] = column
+    return columns
+
+
+def parse_details_aligned(
+    details: dict[str, Any] | None,
+) -> dict[str, list[float | None]]:
+    """Séries index-aligned d'un payload de détails (trous ``None`` conservés).
+
+    Mêmes clés que ``parse_details_series`` (``heartrate``, ``time``,
+    ``altitude``, ``distance``, ``power``, ``lat``, ``lng``…), mais **toutes de
+    même longueur** : l'index ``i`` désigne le même échantillon dans chaque
+    série. ``directTimestamp`` (epoch ms) sert de repli pour ``time`` (secondes
+    relatives au 1ᵉʳ sample). Sert au backfill des streams persistés et à la
+    détection de montées — ne pas confondre avec ``parse_details_series``
+    (compacté, pour l'API streams/zones).
+    """
+    if not details:
+        return {}
+
+    if details.get("metricDescriptors") and details.get("activityDetailMetrics"):
+        columns = _aligned_from_modern(details)
+    else:
+        entries = _find_metrics_entries(details)
+        columns = _aligned_from_legacy(entries) if entries else {}
+    if not columns:
+        return {}
+
+    length = max(len(column) for column in columns.values())
+
+    def padded(column: list[float | None]) -> list[float | None]:
+        return column + [None] * (length - len(column))
+
+    series: dict[str, list[float | None]] = {}
+    for name, candidates in _SERIES_KEYS.items():
+        for candidate in candidates:
+            if candidate in columns:
+                series[name] = padded(columns[candidate])
+                break
+    if "time" not in series and "directtimestamp" in columns:
+        series["time"] = padded(columns["directtimestamp"])
+    return series
+
+
+def compact_aligned_series(
+    series: dict[str, list[float | None]],
+    *,
+    step_sec: float = STREAM_STEP_SEC,
+    max_points: int = STREAM_MAX_POINTS,
+) -> dict[str, list[float | None]]:
+    """Sous-échantillonne des séries alignées (~1 point / ``step_sec``).
+
+    Le premier et le dernier point sont conservés ; si le résultat dépasse
+    ``max_points``, on décime uniformément (toujours premier/dernier).
+    """
+    if not series:
+        return {}
+    length = min((len(column) for column in series.values()), default=0)
+    if length <= 2:
+        return {key: list(column[:length]) for key, column in series.items()}
+
+    times = series.get("time")
+    indices: list[int] = [0]
+    if times and len(times) >= length and any(t is not None for t in times):
+        last_t = times[0]
+        for i in range(1, length - 1):
+            current = times[i]
+            if current is None:
+                continue
+            if last_t is None or (current - last_t) >= step_sec:
+                indices.append(i)
+                last_t = current
+    else:
+        stride = max(1, length // max_points)
+        indices.extend(range(stride, length - 1, stride))
+    if indices[-1] != length - 1:
+        indices.append(length - 1)
+
+    if len(indices) > max_points:
+        stride = len(indices) / (max_points - 1)
+        decimated = [indices[int(i * stride)] for i in range(max_points - 1)]
+        indices = sorted({*decimated, indices[-1]})
+
+    return {
+        key: [column[i] if i < len(column) else None for i in indices]
+        for key, column in series.items()
+    }
+
+
+# ---------------------------------------------------------------------------
 # Zones HR Garmin (hrTimeInZones) — source prioritaire pour le vélo
 # ---------------------------------------------------------------------------
 
