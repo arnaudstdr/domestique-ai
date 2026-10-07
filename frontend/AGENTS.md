@@ -10,6 +10,13 @@ Endpoints consommés : `domestique_ai/api/AGENTS.md`. Données/coach :
 ## Stack & dev
 
 - React 18 + Vite + TypeScript + Tailwind + recharts + react-leaflet.
+- **Override npm volontaire** : `@babel/plugin-transform-runtime` est figé en
+  `^7.29.0` (`overrides` de `package.json`). npm 11 installe récursivement les
+  peers optionnels de `@vitejs/plugin-react` (`@rolldown/plugin-babel` →
+  `@babel/plugin-transform-runtime@8`) et entre en conflit avec le Babel 7
+  embarqué par `workbox-build` (`vite-plugin-pwa`) → `npm install` échoue en
+  ERESOLVE. Ne pas monter cet override vers 8.x tant que workbox n'a pas migré
+  (Renovate l'ignore explicitement, cf. `renovate.json`).
 - **Service worker généré par `vite-plugin-pwa`** (`registerType: "autoUpdate"`,
   stratégie Workbox `generateSW`) : precache révisionné automatiquement à
   chaque build, `navigateFallback` sur `/index.html`, `cleanupOutdatedCaches`.
