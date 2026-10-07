@@ -29,6 +29,8 @@ from domestique_ai.athlete_context import AthleteContext
 from domestique_ai.config import (
     get_db_path,
     get_ollama_embed_model,
+    get_session_finalize_max_attempts,
+    get_session_finalize_max_per_run,
     get_session_idle_finalize_minutes,
     get_session_summary_every_messages,
 )
@@ -516,6 +518,109 @@ def _previous_summary_hint(existing: dict[str, Any] | None) -> str:
     )
 
 
+# --------------------------------------------------------------------------- #
+# Bornage des tentatives de finalisation (résumé + faits)
+# --------------------------------------------------------------------------- #
+#
+# Le garde ``last_summarized_message_id`` n'avance qu'en cas de **succès** : une
+# finalisation qui échoue (réponse non-JSON, Ollama KO) serait resoumise à
+# chaque passage (scheduler toutes les 15 min) ou à chaque tour de chat, en
+# boucle infinie. ``session_finalize_state`` mémorise les échecs pour imposer un
+# backoff et un plafond de tentatives (sauf nouveaux messages).
+
+
+def _get_finalize_state(
+    session_id: str, *, db_path: Path | None = None, ctx: AthleteContext | None = None
+) -> dict[str, Any] | None:
+    conn = _connect(db_path, ctx)
+    try:
+        row = conn.execute(
+            "SELECT session_id, attempts, last_attempt_at, last_message_id, last_error "
+            "FROM session_finalize_state WHERE session_id = ?",
+            (session_id,),
+        ).fetchone()
+    finally:
+        conn.close()
+    return dict(row) if row else None
+
+
+def _mark_finalize_attempt(
+    session_id: str,
+    *,
+    max_id: int,
+    error: str,
+    db_path: Path | None = None,
+    ctx: AthleteContext | None = None,
+) -> None:
+    """Incrémente le compteur d'échecs (best-effort, ne lève jamais)."""
+    try:
+        conn = _connect(db_path, ctx)
+        try:
+            conn.execute(
+                "INSERT INTO session_finalize_state "
+                "(session_id, attempts, last_attempt_at, last_message_id, last_error) "
+                "VALUES (?, 1, ?, ?, ?) "
+                "ON CONFLICT(session_id) DO UPDATE SET "
+                "  attempts = session_finalize_state.attempts + 1, "
+                "  last_attempt_at = excluded.last_attempt_at, "
+                "  last_message_id = excluded.last_message_id, "
+                "  last_error = excluded.last_error",
+                (session_id, _now(), max_id, error),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+    except Exception:  # noqa: BLE001 — le bornage ne doit pas casser l'appel
+        pass
+
+
+def _clear_finalize_state(
+    session_id: str, *, db_path: Path | None = None, ctx: AthleteContext | None = None
+) -> None:
+    """Efface l'état d'échec après une finalisation réussie (best-effort)."""
+    try:
+        conn = _connect(db_path, ctx)
+        try:
+            conn.execute("DELETE FROM session_finalize_state WHERE session_id = ?", (session_id,))
+            conn.commit()
+        finally:
+            conn.close()
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def _finalize_backoff_seconds(attempts: int) -> float:
+    """Délai mini avant nouvelle tentative : 15 min, 1 h, 6 h, puis 24 h."""
+    return float(min(15 * 60 * (4 ** max(0, attempts - 1)), 24 * 3600))
+
+
+def _finalize_attempt_allowed(state: dict[str, Any] | None, max_id: int) -> bool:
+    """Décide si une nouvelle tentative de finalisation est permise.
+
+    Bloque si le plafond est atteint et qu'aucun nouveau message n'est arrivé
+    (cas de la session orpheline en boucle), et impose un backoff croissant
+    entre deux échecs.
+    """
+    if not state:
+        return True
+    attempts = int(state.get("attempts") or 0)
+    if attempts <= 0:
+        return True
+    max_attempts = get_session_finalize_max_attempts()
+    has_new = max_id > int(state.get("last_message_id") or 0)
+    if max_attempts and attempts >= max_attempts and not has_new:
+        return False
+    raw = (state.get("last_attempt_at") or "").replace("Z", "+00:00")
+    try:
+        last = dt.datetime.fromisoformat(raw)
+    except (TypeError, ValueError):
+        return True
+    if last.tzinfo is None:
+        last = last.replace(tzinfo=dt.UTC)
+    elapsed = (dt.datetime.now(dt.UTC) - last).total_seconds()
+    return elapsed >= _finalize_backoff_seconds(attempts)
+
+
 def get_session_summary(
     session_id: str,
     *,
@@ -572,6 +677,12 @@ def summarize_session(
         result["updated"] = False
         return result
 
+    state = _get_finalize_state(session_id, db_path=db_path, ctx=ctx)
+    if not _finalize_attempt_allowed(state, max_id):
+        result = dict(existing) if existing else {"session_id": session_id}
+        result["updated"] = False
+        return result
+
     transcript = _transcript(messages, since_id=int(last_id))
     if not transcript:
         return None
@@ -588,29 +699,48 @@ def summarize_session(
         f"{_previous_summary_hint(existing)}"
         f"Conversation :\n{transcript}"
     )
-    parsed = chat_structured_sync(
-        [{"role": "user", "content": prompt}], timeout_s=45.0, label=usage.SESSION_SUMMARY
-    )
+    try:
+        parsed = chat_structured_sync(
+            [{"role": "user", "content": prompt}], timeout_s=45.0, label=usage.SESSION_SUMMARY
+        )
+    except Exception:  # noqa: BLE001 — best-effort, on borne et on abandonne
+        _mark_finalize_attempt(
+            session_id, max_id=max_id, error="exception", db_path=db_path, ctx=ctx
+        )
+        return None
     if not parsed:
+        _mark_finalize_attempt(
+            session_id, max_id=max_id, error="no_output", db_path=db_path, ctx=ctx
+        )
         return None
     summary = str(parsed.get("summary") or "").strip()
     if not summary:
+        _mark_finalize_attempt(
+            session_id, max_id=max_id, error="empty_summary", db_path=db_path, ctx=ctx
+        )
         return None
     topics = parsed.get("topics")
     if not isinstance(topics, list):
         topics = []
     topics = [str(t).strip() for t in topics if str(t).strip()][:8]
 
-    _persist_summary(
-        session_id,
-        summary,
-        topics,
-        message_count=len(messages),
-        max_id=max_id,
-        existing=existing,
-        ctx=ctx,
-        db_path=db_path,
-    )
+    try:
+        _persist_summary(
+            session_id,
+            summary,
+            topics,
+            message_count=len(messages),
+            max_id=max_id,
+            existing=existing,
+            ctx=ctx,
+            db_path=db_path,
+        )
+    except Exception:  # noqa: BLE001 — un échec de persistance doit aussi être borné
+        _mark_finalize_attempt(
+            session_id, max_id=max_id, error="persist_failed", db_path=db_path, ctx=ctx
+        )
+        return None
+    _clear_finalize_state(session_id, db_path=db_path, ctx=ctx)
 
     return {
         "session_id": session_id,
@@ -705,6 +835,13 @@ def summarize_and_extract_facts(
         result["facts"] = []
         return result
 
+    state = _get_finalize_state(session_id, db_path=db_path, ctx=ctx)
+    if not _finalize_attempt_allowed(state, max_id):
+        result = dict(existing) if existing else {"session_id": session_id}
+        result["updated"] = False
+        result["facts"] = []
+        return result
+
     transcript = _transcript(messages, since_id=int(last_id))
     if not transcript:
         return None
@@ -746,32 +883,50 @@ def summarize_and_extract_facts(
         f"{_previous_summary_hint(existing)}"
         f"Conversation :\n{transcript}"
     )
-    parsed = chat_structured_sync(
-        [{"role": "user", "content": prompt}],
-        timeout_s=45.0,
-        schema=schema,
-        label=usage.SESSION_FINALIZE,
-    )
+    try:
+        parsed = chat_structured_sync(
+            [{"role": "user", "content": prompt}],
+            timeout_s=45.0,
+            schema=schema,
+            label=usage.SESSION_FINALIZE,
+        )
+    except Exception:  # noqa: BLE001 — best-effort, on borne et on abandonne
+        _mark_finalize_attempt(
+            session_id, max_id=max_id, error="exception", db_path=db_path, ctx=ctx
+        )
+        return None
     if not parsed:
+        _mark_finalize_attempt(
+            session_id, max_id=max_id, error="no_output", db_path=db_path, ctx=ctx
+        )
         return None
     summary = str(parsed.get("summary") or "").strip()
     if not summary:
+        _mark_finalize_attempt(
+            session_id, max_id=max_id, error="empty_summary", db_path=db_path, ctx=ctx
+        )
         return None
     topics = parsed.get("topics")
     if not isinstance(topics, list):
         topics = []
     topics = [str(t).strip() for t in topics if str(t).strip()][:8]
 
-    _persist_summary(
-        session_id,
-        summary,
-        topics,
-        message_count=len(messages),
-        max_id=max_id,
-        existing=existing,
-        ctx=ctx,
-        db_path=db_path,
-    )
+    try:
+        _persist_summary(
+            session_id,
+            summary,
+            topics,
+            message_count=len(messages),
+            max_id=max_id,
+            existing=existing,
+            ctx=ctx,
+            db_path=db_path,
+        )
+    except Exception:  # noqa: BLE001 — un échec de persistance doit aussi être borné
+        _mark_finalize_attempt(
+            session_id, max_id=max_id, error="persist_failed", db_path=db_path, ctx=ctx
+        )
+        return None
 
     facts: list[dict[str, Any]] = []
     raw_facts = parsed.get("facts")
@@ -785,6 +940,8 @@ def summarize_and_extract_facts(
             if content:
                 items.append((category, content))
         facts = remember_facts_batch(items, ctx=ctx, source_session_id=session_id, db_path=db_path)
+
+    _clear_finalize_state(session_id, db_path=db_path, ctx=ctx)
 
     return {
         "session_id": session_id,
@@ -1156,12 +1313,19 @@ def finalize_idle_sessions(
     cutoff = (dt.datetime.now(dt.UTC) - dt.timedelta(minutes=idle_minutes)).isoformat()
 
     try:
+        max_per_run = get_session_finalize_max_per_run()
         conn = _connect(db_path, ctx)
         try:
-            rows = conn.execute(
+            query = (
                 "SELECT session_id, MAX(created_at) AS last, "
-                "COUNT(*) AS messages FROM conversations GROUP BY session_id"
-            ).fetchall()
+                "COUNT(*) AS messages FROM conversations GROUP BY session_id "
+                "ORDER BY last DESC"
+            )
+            params: tuple[Any, ...] = ()
+            if max_per_run > 0:
+                query += " LIMIT ?"
+                params = (max_per_run,)
+            rows = conn.execute(query, params).fetchall()
         finally:
             conn.close()
     except Exception:  # noqa: BLE001

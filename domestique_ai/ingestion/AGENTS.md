@@ -11,6 +11,12 @@ Couches aval : `processing/AGENTS.md`, `llm/AGENTS.md`, `api/AGENTS.md`.
 > voir « Points structurants » du `AGENTS.md` racine (source de vérité,
 > `insert_activity()`, `_ensure_column()`, absence de cycle d'imports).
 
+`init_db()` crée aussi les tables de la mémoire du coach (`coach_memory`,
+`session_summaries`, `memory_vectors`, `session_finalize_state`) — leur
+sémantique est décrite dans `llm/AGENTS.md` (mémoire persistante). En
+particulier, `session_finalize_state` borne les tentatives de finalisation
+(une session dont le résumé échoue n'est plus resoumise en boucle).
+
 ## Ingestion Garmin Connect (source d'activités)
 
 Les activités sont ingérées depuis l'**API non officielle Garmin Connect** (module `garminconnect`) via `ingestion/garmin.py`. Le compteur Edge / la montre synchronisent vers Garmin Connect, et `sync_activities_garmin()` rapatrie les activités dans la même table `activities` — toute la pipeline aval (TSS, CTL/ATL/TSB, zones HR, tendances, coach LLM) fonctionne sans changement.

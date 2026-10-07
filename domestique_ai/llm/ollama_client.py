@@ -155,6 +155,99 @@ async def stream_chat(
         )
 
 
+def extract_json_object(content: str | None) -> dict[str, Any] | None:
+    """Extrait un objet JSON d'une réponse LLM, tolérant aux fences markdown.
+
+    Les modèles cloud n'honorent pas toujours ``format=schema`` : ils peuvent
+    entourer le JSON de ```json … ``` ou d'un préambule textuel. On tente le
+    contenu brut, la version dé-fencée, puis le premier objet ``{…}`` équilibré.
+    Retourne ``None`` si rien de parsable.
+    """
+    text = (content or "").strip()
+    if not text:
+        return None
+    if text.startswith("```"):
+        lines = text.splitlines()
+        if lines and lines[0].startswith("```"):
+            lines = lines[1:]
+        if lines and lines[-1].strip().startswith("```"):
+            lines = lines[:-1]
+        text = "\n".join(lines).strip()
+
+    candidates = [text]
+    start = text.find("{")
+    end = text.rfind("}")
+    if start != -1 and end > start:
+        candidates.append(text[start : end + 1])
+
+    for candidate in candidates:
+        try:
+            parsed = json.loads(candidate)
+        except (json.JSONDecodeError, ValueError):
+            continue
+        if isinstance(parsed, dict):
+            return parsed
+    return None
+
+
+async def _structured_once(
+    messages: list[dict[str, Any]],
+    *,
+    model: str,
+    timeout_s: float,
+    options: dict[str, Any] | None,
+    fmt: Any,
+    label: str | None,
+) -> tuple[dict[str, Any] | None, bool]:
+    """Un appel contraint + parsing. Retourne ``(parsed, retryable)``.
+
+    ``retryable`` vaut ``True`` quand un repli de format peut aider (contenu
+    vide/non-JSON, ou refus Ollama) — jamais sur timeout/connexion (rejouer ne
+    servirait à rien et gaspillerait du quota).
+    """
+    response: Any = None
+    status = "ok"
+    error_type: str | None = None
+    parsed: dict[str, Any] | None = None
+    retryable = False
+    try:
+        response = await asyncio.wait_for(
+            _async_client().chat(
+                model=model,
+                messages=messages,
+                stream=False,
+                format=fmt,
+                options=options or {},
+            ),
+            timeout=timeout_s,
+        )
+        content = getattr(getattr(response, "message", None), "content", None) or ""
+        if not content.strip():
+            status, error_type, retryable = "error", "empty", True
+        else:
+            parsed = extract_json_object(content)
+            if parsed is None:
+                status, error_type, retryable = "error", "parse", True
+    except TimeoutError:
+        status, error_type, retryable = "error", "timeout", False
+    except ConnectionError:
+        status, error_type, retryable = "error", "connection", False
+    except ollama.ResponseError:
+        status, error_type, retryable = "error", "response", True
+    except Exception:  # noqa: BLE001 — best-effort, on retombe sur le fallback
+        status, error_type, retryable = "error", "unexpected", False
+    finally:
+        _record(
+            label=label,
+            entrypoint="chat_structured",
+            model=model,
+            response=response,
+            status=status,
+            error_type=error_type,
+        )
+    return parsed, retryable
+
+
 async def chat_structured(
     messages: list[dict[str, Any]],
     *,
@@ -167,8 +260,11 @@ async def chat_structured(
     """Appel chat non-stream avec sortie JSON contrainte et parsing du résultat.
 
     Par défaut ``format="json"`` (JSON valide non contraint). Si ``schema`` est
-    fourni (JSON Schema), il est passé en ``format`` au SDK : la décodage est
+    fourni (JSON Schema), il est passé en ``format`` au SDK : le décodage est
     alors contraint au schéma, ce qui réduit fortement les retries/fallbacks.
+    Certains modèles cloud ignorant le schéma, un **unique repli en
+    ``format="json"``** est tenté si la réponse au schéma n'est pas du JSON
+    (coût borné à 2 appels).
 
     Retourne le dict parsé en cas de succès, ou ``None`` si :
     - Ollama est injoignable / refuse la requête,
@@ -178,50 +274,24 @@ async def chat_structured(
     Cette fonction **ne lève jamais** : l'appelant choisit son fallback.
     """
     target_model = model or get_ollama_model()
-    response: Any = None
-    status = "ok"
-    error_type: str | None = None
-    try:
-        response = await asyncio.wait_for(
-            _async_client().chat(
-                model=target_model,
-                messages=messages,
-                stream=False,
-                format=schema if schema is not None else "json",
-                options=options or {},
-            ),
-            timeout=timeout_s,
-        )
-    except TimeoutError:
-        status, error_type = "error", "timeout"
-        return None
-    except ConnectionError:
-        status, error_type = "error", "connection"
-        return None
-    except ollama.ResponseError:
-        status, error_type = "error", "response"
-        return None
-    except Exception:  # noqa: BLE001 — best-effort, on retombe sur le fallback
-        status, error_type = "error", "unexpected"
-        return None
-    finally:
-        _record(
-            label=label,
-            entrypoint="chat_structured",
-            model=target_model,
-            response=response,
-            status=status,
-            error_type=error_type,
-        )
+    formats: list[Any] = [schema if schema is not None else "json"]
+    if schema is not None:
+        formats.append("json")
 
-    content = getattr(getattr(response, "message", None), "content", None) or ""
-    if not content.strip():
-        return None
-    try:
-        parsed = json.loads(content)
-    except json.JSONDecodeError:
-        return None
-    return parsed if isinstance(parsed, dict) else None
+    for fmt in formats:
+        parsed, retryable = await _structured_once(
+            messages,
+            model=target_model,
+            timeout_s=timeout_s,
+            options=options,
+            fmt=fmt,
+            label=label,
+        )
+        if parsed is not None:
+            return parsed
+        if not retryable:
+            break
+    return None
 
 
 def chat_structured_sync(

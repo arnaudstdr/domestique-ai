@@ -748,6 +748,41 @@ def get_session_idle_finalize_minutes() -> int:
         return 45
 
 
+def get_session_finalize_max_attempts() -> int:
+    """Nombre maximum de tentatives de finalisation pour une session inchangée.
+
+    Override via ``SESSION_FINALIZE_MAX_ATTEMPTS`` (défaut 3, 0 = illimité). Au
+    delà, la session n'est plus retentée tant qu'elle n'a pas de nouveaux
+    messages — sans ce plafond, une finalisation qui échoue (parsing LLM,
+    Ollama injoignable) est resoumise à chaque passage du scheduler.
+    """
+    raw = os.getenv("SESSION_FINALIZE_MAX_ATTEMPTS")
+    if raw is None or raw.strip() == "":
+        return 3
+    try:
+        return max(0, int(raw))
+    except ValueError:
+        logger.warning("SESSION_FINALIZE_MAX_ATTEMPTS=%r invalide — fallback 3.", raw)
+        return 3
+
+
+def get_session_finalize_max_per_run() -> int:
+    """Nombre maximum de sessions finalisées par passage du scheduler.
+
+    Override via ``SESSION_FINALIZE_MAX_PER_RUN`` (défaut 50, 0 = illimité) :
+    borne le coût d'un run quand le nombre de sessions inactives explose (ex.
+    import massif d'historique).
+    """
+    raw = os.getenv("SESSION_FINALIZE_MAX_PER_RUN")
+    if raw is None or raw.strip() == "":
+        return 50
+    try:
+        return max(0, int(raw))
+    except ValueError:
+        logger.warning("SESSION_FINALIZE_MAX_PER_RUN=%r invalide — fallback 50.", raw)
+        return 50
+
+
 def get_plan_min_ctl() -> float:
     """Plancher de CTL appliqué au plafond TSS hebdo des plans.
 

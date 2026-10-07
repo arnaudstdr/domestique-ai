@@ -215,6 +215,20 @@ def init_db(db_path: Path | None = None, *, ctx: AthleteContext | None = None) -
         _ensure_column(conn, "session_summaries", "topics", "TEXT")
         _ensure_column(conn, "session_summaries", "message_count", "INTEGER")
         _ensure_column(conn, "session_summaries", "last_summarized_message_id", "INTEGER")
+        # État de finalisation (résumé + faits) par session : borne les tentatives
+        # d'un appel LLM qui échoue en boucle. Sans lui, une session dont le
+        # parsing échoue est resoumise toutes les 15 min indéfiniment (le garde
+        # ``last_summarized_message_id`` n'avance que sur succès).
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS session_finalize_state (
+                session_id TEXT PRIMARY KEY,
+                attempts INTEGER NOT NULL DEFAULT 0,
+                last_attempt_at TEXT,
+                last_message_id INTEGER,
+                last_error TEXT
+            )
+        """)
+        _ensure_column(conn, "session_finalize_state", "last_message_id", "INTEGER")
         # Index de retrieval unique : messages, résumés et faits y sont
         # vectorisés. ``source_type`` ∈ 'message' | 'summary' | 'fact'.
         conn.execute("""

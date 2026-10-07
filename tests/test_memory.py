@@ -389,6 +389,128 @@ def test_finalize_uses_single_llm_call(tmp_path, monkeypatch):
     assert memory.get_session_summary(session)["summary"] == "Résumé final."
 
 
+def _backdate_attempts(tmp_path):
+    """Recule ``last_attempt_at`` pour contourner le backoff dans les tests."""
+    old = (dt.datetime.now(dt.UTC) - dt.timedelta(hours=2)).isoformat()
+    conn = sqlite3.connect(tmp_path / "memory.db")
+    conn.execute("UPDATE session_finalize_state SET last_attempt_at = ?", (old,))
+    conn.commit()
+    conn.close()
+
+
+def test_finalize_attempts_are_bounded_and_backed_off(tmp_path, monkeypatch):
+    """Une finalisation qui échoue n'est pas resoumise en boucle indéfiniment."""
+    _use_tmp_db(tmp_path, monkeypatch)
+    monkeypatch.setenv("SESSION_IDLE_FINALIZE_MINUTES", "30")
+    monkeypatch.setenv("SESSION_FINALIZE_MAX_ATTEMPTS", "2")
+    calls = {"n": 0}
+
+    def failing_llm(*args, **kwargs):
+        calls["n"] += 1
+        return None
+
+    monkeypatch.setattr(memory, "chat_structured_sync", failing_llm)
+    session = new_session_id()
+    append_message(session, "user", {"role": "user", "content": "a"})
+    append_message(session, "assistant", {"role": "assistant", "content": "b"})
+    old = (dt.datetime.now(dt.UTC) - dt.timedelta(hours=2)).isoformat()
+    conn = sqlite3.connect(tmp_path / "memory.db")
+    conn.execute("UPDATE conversations SET created_at = ? WHERE session_id = ?", (old, session))
+    conn.commit()
+    conn.close()
+
+    # 1ᵉʳ essai → 1 appel, échec borné.
+    assert memory.finalize_idle_sessions() == 0
+    assert calls["n"] == 1
+    # Backoff : un passage immédiat ne rappelle pas.
+    assert memory.finalize_idle_sessions() == 0
+    assert calls["n"] == 1
+
+    # Après le backoff → 2ᵉ essai (plafond non encore atteint).
+    _backdate_attempts(tmp_path)
+    assert memory.finalize_idle_sessions() == 0
+    assert calls["n"] == 2
+
+    # Plafond atteint, aucun nouveau message → plus aucun appel (la fuite).
+    _backdate_attempts(tmp_path)
+    assert memory.finalize_idle_sessions() == 0
+    assert calls["n"] == 2
+
+    # Un nouveau message rouvre le droit à une tentative.
+    append_message(session, "user", {"role": "user", "content": "c"})
+    conn = sqlite3.connect(tmp_path / "memory.db")
+    conn.execute("UPDATE conversations SET created_at = ? WHERE session_id = ?", (old, session))
+    conn.commit()
+    conn.close()
+    _backdate_attempts(tmp_path)
+    assert memory.finalize_idle_sessions() == 0
+    assert calls["n"] == 3
+
+
+def test_finalize_respects_max_per_run(tmp_path, monkeypatch):
+    """Le cap par passage borne le nombre de sessions traitées d'un run."""
+    _use_tmp_db(tmp_path, monkeypatch)
+    monkeypatch.setenv("SESSION_IDLE_FINALIZE_MINUTES", "30")
+    monkeypatch.setenv("SESSION_FINALIZE_MAX_PER_RUN", "1")
+    calls = {"n": 0}
+
+    def fake_llm(*args, **kwargs):
+        calls["n"] += 1
+        return {"summary": "Résumé.", "topics": [], "facts": []}
+
+    monkeypatch.setattr(memory, "chat_structured_sync", fake_llm)
+    for _ in range(3):
+        session = new_session_id()
+        append_message(session, "user", {"role": "user", "content": "a"})
+        append_message(session, "assistant", {"role": "assistant", "content": "b"})
+    old = (dt.datetime.now(dt.UTC) - dt.timedelta(hours=2)).isoformat()
+    conn = sqlite3.connect(tmp_path / "memory.db")
+    conn.execute("UPDATE conversations SET created_at = ?", (old,))
+    conn.commit()
+    conn.close()
+
+    assert memory.finalize_idle_sessions() == 1
+    assert calls["n"] == 1
+
+
+def test_finalize_success_clears_attempt_state(tmp_path, monkeypatch):
+    _use_tmp_db(tmp_path, monkeypatch)
+    monkeypatch.setattr(
+        memory,
+        "chat_structured_sync",
+        lambda *a, **k: {"summary": "Résumé.", "topics": [], "facts": []},
+    )
+    session = new_session_id()
+    append_message(session, "user", {"role": "user", "content": "a"})
+    append_message(session, "assistant", {"role": "assistant", "content": "b"})
+    result = memory.summarize_and_extract_facts(session)
+    assert result is not None and result["updated"] is True
+    assert memory._get_finalize_state(session) is None
+
+
+def test_summarize_session_attempts_are_bounded(tmp_path, monkeypatch):
+    """Le résumé roulant (chat) est borné lui aussi."""
+    _use_tmp_db(tmp_path, monkeypatch)
+    monkeypatch.setenv("SESSION_FINALIZE_MAX_ATTEMPTS", "1")
+    calls = {"n": 0}
+
+    def failing_llm(*args, **kwargs):
+        calls["n"] += 1
+        return None
+
+    monkeypatch.setattr(memory, "chat_structured_sync", failing_llm)
+    session = new_session_id()
+    append_message(session, "user", {"role": "user", "content": "a"})
+    append_message(session, "assistant", {"role": "assistant", "content": "b"})
+
+    assert memory.summarize_session(session) is None
+    assert calls["n"] == 1
+    # Plafond atteint, pas de nouveau message → aucun appel supplémentaire.
+    blocked = memory.summarize_session(session)
+    assert blocked is not None and blocked["updated"] is False
+    assert calls["n"] == 1
+
+
 def test_transcript_caps_total_chars():
     """Le transcript est borné globalement, en gardant les messages récents."""
     messages = [{"id": i, "role": "user", "payload": {"content": "x" * 500}} for i in range(200)]
