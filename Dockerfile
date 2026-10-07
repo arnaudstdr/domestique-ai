@@ -1,4 +1,4 @@
-# syntax=docker/dockerfile:1.7
+# syntax=docker/dockerfile:1.27
 
 # ---- Stage 1 : build du frontend React ----
 FROM node:24-alpine AS frontend-build
@@ -21,7 +21,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     UV_COMPILE_BYTECODE=1
 
 # uv installé depuis l'image officielle (binaire statique, pas de pip).
-COPY --from=ghcr.io/astral-sh/uv:0.10.9 /uv /uvx /bin/
+COPY --from=ghcr.io/astral-sh/uv:0.12.23 /uv /uvx /bin/
 
 RUN apt-get update \
  && apt-get install -y --no-install-recommends curl \
