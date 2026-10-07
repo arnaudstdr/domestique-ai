@@ -111,7 +111,7 @@ export default function SimilarActivities({ data }: Props) {
             <LineChart data={sparkData} margin={{ top: 4, right: 4, left: 4, bottom: 0 }}>
               <Tooltip
                 contentStyle={tooltipStyle}
-                formatter={(value: number) => [`${Math.round(value)} TSS`, "Charge"]}
+                formatter={(value) => [`${Math.round(Number(value))} TSS`, "Charge"]}
                 labelFormatter={(label) => String(label)}
               />
               <Line

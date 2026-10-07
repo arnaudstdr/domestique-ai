@@ -56,9 +56,9 @@ export default function MonthlyVolumeChart({ data }: Props) {
             <YAxis {...axisProps} />
             <Tooltip
               contentStyle={tooltipStyle}
-              formatter={(value: number, name: string) => [
-                `${value.toLocaleString("fr-FR")} km`,
-                name,
+              formatter={(value, name) => [
+                `${Number(value).toLocaleString("fr-FR")} km`,
+                String(name),
               ]}
               labelFormatter={(m) => formatMonth(m as string)}
             />
