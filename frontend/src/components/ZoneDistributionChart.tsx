@@ -69,9 +69,9 @@ export default function ZoneDistributionChart({ data }: Props) {
             />
             <Tooltip
               contentStyle={tooltipStyle}
-              formatter={(value: number, name: string) => [
-                `${value.toFixed(1)} %`,
-                name.toUpperCase(),
+              formatter={(value, name) => [
+                `${Number(value).toFixed(1)} %`,
+                String(name).toUpperCase(),
               ]}
               labelFormatter={(m) => formatMonth(m as string)}
             />

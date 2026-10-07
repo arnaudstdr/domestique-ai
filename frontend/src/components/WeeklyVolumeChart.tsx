@@ -75,8 +75,8 @@ export default function WeeklyVolumeChart({ data, embedded = false }: Props) {
             />
             <Tooltip
               contentStyle={tooltipStyle}
-              formatter={(value: number) => [
-                `${value.toLocaleString("fr-FR")} km`,
+              formatter={(value) => [
+                `${Number(value).toLocaleString("fr-FR")} km`,
                 "Distance",
               ]}
               labelFormatter={(d) => `Semaine du ${formatDay(d as string)}`}
