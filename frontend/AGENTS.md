@@ -148,8 +148,14 @@ textarea (mécanisme à utiliser depuis d'autres pages, ex. cartes du Dashboard)
   projection FTP).
 - **Montées** — page `/montees` (`pages/Climbs.tsx`, lien depuis Tendances) :
   montées détectées (`GET /api/climbs`), renommage inline (`PUT
-  /api/climbs/{id}` — self-only), stats meilleur/moyen temps, VAM, par année.
-  État vide → rappel du CLI de backfill
+  /api/climbs/{id}` — self-only), stats meilleur/moyen temps, **vitesse moyenne
+  (km/h, dérivée de `length_m / avg_sec` — pas de VAM à l'écran)**, par année.
+  **Trace GPS dépliable** : bouton épingle (`MapPin`) → carte `ActivityMap`
+  (marqueurs départ/arrivée) décodée depuis `ClimbSummary.map_polyline` par
+  `lib/polyline.ts` (partagé avec `RoutePreview`) — **une seule carte ouverte à
+  la fois**, montée à la demande (Leaflet est lourd sur ~100 montées) ; bouton
+  désactivé si la montée n'a pas de tracé (TCX/anciens segments). État vide →
+  rappel du CLI de backfill
   (`python -m domestique_ai.ingestion.backfill_streams --all`).
 - **Feedback** — page `/feedback` (bouton `Megaphone` dans l'en-tête, à côté
   de l'avatar ; masqué en consultation coach) → `POST /api/feedback`. Select

@@ -1051,6 +1051,10 @@ export interface ClimbSummary {
   efforts_count: number;
   start_lat: number | null;
   start_lng: number | null;
+  end_lat: number | null;
+  end_lng: number | null;
+  /** Tracé GPS du segment (polyline encodée Google), `null` si indisponible. */
+  map_polyline: string | null;
   efforts: number;
   best_sec: number | null;
   avg_sec: number | null;

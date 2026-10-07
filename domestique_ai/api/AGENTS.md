@@ -8,7 +8,7 @@ Couches voisines : `ingestion/AGENTS.md`, `processing/AGENTS.md`, `llm/AGENTS.md
 
 ## Montées détectées (/api/climbs)
 
-- `GET /api/climbs?limit=` — montées détectées (segments) avec stats (passages, meilleur/moyen temps, VAM, par année), triées par passages ; lecture coach autorisée.
+- `GET /api/climbs?limit=` — montées détectées (segments) avec stats (passages, meilleur/moyen temps, VAM, par année), triées par passages ; lecture coach autorisée. Chaque `ClimbSummary` porte aussi le **tracé GPS** du segment (`map_polyline`, polyline encodée Google — `null` si indisponible) et les coordonnées d'arrivée (`end_lat`/`end_lng`), consommés par la carte dépliable de la page Montées.
 - `GET /api/climbs/{id}` — détail + passages (date, durée, VAM, FC/puissance, activité).
 - `PUT /api/climbs/{id}` — nomme/renomme (`{name}`, ≤ 80 c., vide = efface) ; **écriture self-only** (refusée en consultation coach).
 - Données **dérivées** des streams persistés (`processing/climbs.py`, tables `climb_segments`/`climb_efforts`) : exclues de l'export RGPD comme `activity_streams`, supprimées avec l'espace athlète.

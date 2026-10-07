@@ -28,7 +28,7 @@ from typing import Any
 from domestique_ai.athlete_context import AthleteContext
 from domestique_ai.config import get_db_path
 from domestique_ai.ingestion.db import init_db
-from domestique_ai.processing.geo import haversine_m
+from domestique_ai.processing.geo import encode_polyline, haversine_m
 
 DEFAULT_MIN_LENGTH_M = 800.0
 DEFAULT_MIN_GAIN_M = 40.0
@@ -41,6 +41,8 @@ _ALTITUDE_WINDOW = 5
 _MATCH_START_M = 250.0
 _MATCH_END_M = 250.0
 _MATCH_LENGTH_RATIO = (0.7, 1.3)
+#: Cap de points du tracé encodé stocké par segment (carte dépliable).
+_TRACE_MAX_POINTS = 120
 
 
 def _resolve_path(db_path: Path | str | None, ctx: AthleteContext | None) -> Path:
@@ -104,6 +106,17 @@ def _smooth_altitudes(
     return smoothed
 
 
+def _downsample_trace(
+    points: list[tuple[float, float]], max_points: int = _TRACE_MAX_POINTS
+) -> list[tuple[float, float]]:
+    """Sous-échantillonne le tracé du segment (carte « Montées »)."""
+    n = len(points)
+    if n <= max_points:
+        return points
+    step = n / max_points
+    return [points[int(i * step)] for i in range(max_points)]
+
+
 def _build_climb(
     points: list[dict[str, float | None]],
     smoothed: list[float],
@@ -132,6 +145,11 @@ def _build_climb(
 
     hr_values = [point["hr"] for point in points[start_idx : last_idx + 2] if point["hr"]]
     power_values = [point["power"] for point in points[start_idx : last_idx + 2] if point["power"]]
+    trace = [
+        (float(point["lat"]), float(point["lng"]))
+        for point in points[start_idx : last_idx + 2]
+        if point["lat"] is not None and point["lng"] is not None
+    ]
     return {
         "start_idx": start_idx,
         "end_idx": last_idx + 1,
@@ -147,6 +165,7 @@ def _build_climb(
         "start_lng": start["lng"],
         "end_lat": end["lat"],
         "end_lng": end["lng"],
+        "map_polyline": encode_polyline(_downsample_trace(trace)),
     }
 
 
@@ -206,8 +225,8 @@ def detect_climbs(
 
 def _load_segments(conn: sqlite3.Connection) -> list[dict[str, Any]]:
     rows = conn.execute(
-        "SELECT id, name, start_lat, start_lng, end_lat, end_lng, length_m, gain_m "
-        "FROM climb_segments"
+        "SELECT id, name, start_lat, start_lng, end_lat, end_lng, length_m, gain_m, "
+        "map_polyline FROM climb_segments"
     ).fetchall()
     return [
         {
@@ -219,6 +238,7 @@ def _load_segments(conn: sqlite3.Connection) -> list[dict[str, Any]]:
             "end_lng": row[5],
             "length_m": row[6],
             "gain_m": row[7],
+            "map_polyline": row[8],
         }
         for row in rows
     ]
@@ -268,6 +288,7 @@ def rebuild_climbs(
         "activities_with_streams": 0,
         "activities_with_climbs": 0,
         "segments_created": 0,
+        "traces_backfilled": 0,
         "efforts_written": 0,
     }
     try:
@@ -292,7 +313,7 @@ def rebuild_climbs(
                     cursor = conn.execute(
                         "INSERT INTO climb_segments (name, start_lat, start_lng, end_lat, "
                         "end_lng, length_m, gain_m, avg_gradient_pct, first_seen, last_seen, "
-                        "created_at) VALUES (NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                        "created_at, map_polyline) VALUES (NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                         (
                             climb["start_lat"],
                             climb["start_lng"],
@@ -304,6 +325,7 @@ def rebuild_climbs(
                             date,
                             date,
                             created_at,
+                            climb["map_polyline"],
                         ),
                     )
                     segment = {
@@ -315,9 +337,20 @@ def rebuild_climbs(
                         "end_lng": climb["end_lng"],
                         "length_m": climb["length_m"],
                         "gain_m": climb["gain_m"],
+                        "map_polyline": climb["map_polyline"],
                     }
                     segments.append(segment)
                     result["segments_created"] += 1
+                elif climb["map_polyline"] and not segment.get("map_polyline"):
+                    # Backfill du tracé sur un segment existant (migration :
+                    # segments créés avant l'ajout de la colonne). Le nom
+                    # n'est jamais touché.
+                    conn.execute(
+                        "UPDATE climb_segments SET map_polyline = ? WHERE id = ?",
+                        (climb["map_polyline"], segment["id"]),
+                    )
+                    segment["map_polyline"] = climb["map_polyline"]
+                    result["traces_backfilled"] += 1
                 conn.execute(
                     "INSERT INTO climb_efforts (segment_id, activity_id, date, duration_sec, "
                     "vam_m_h, avg_hr, avg_power, avg_gradient_pct, max_gradient_pct) "
@@ -387,11 +420,15 @@ def _segment_dict(row: sqlite3.Row | tuple[Any, ...]) -> dict[str, Any]:
         "efforts_count": int(row[5]),
         "start_lat": row[6],
         "start_lng": row[7],
+        "end_lat": row[8],
+        "end_lng": row[9],
+        "map_polyline": row[10],
     }
 
 
 _SEGMENT_COLUMNS = (
-    "id, name, length_m, gain_m, avg_gradient_pct, efforts_count, start_lat, start_lng"
+    "id, name, length_m, gain_m, avg_gradient_pct, efforts_count, "
+    "start_lat, start_lng, end_lat, end_lng, map_polyline"
 )
 
 
@@ -440,6 +477,8 @@ def climb_report(
         segments = []
         for row in rows:
             segment = _segment_dict(row)
+            # Payload du tool coach : le tracé encodé ne sert qu'à la carte UI.
+            segment.pop("map_polyline", None)
             segment.update(_segment_stats(conn, segment["id"]))
             segments.append(segment)
     finally:

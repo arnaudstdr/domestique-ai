@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import sqlite3
 
+import pytest
+
 from domestique_ai.ingestion.db import delete_activity, init_db, store_activity_streams
 from domestique_ai.llm.tools import dispatch
 from domestique_ai.processing.climbs import (
@@ -13,6 +15,7 @@ from domestique_ai.processing.climbs import (
     rebuild_climbs,
     rename_climb,
 )
+from domestique_ai.processing.geo import decode_polyline
 
 STEP_SEC = 5.0
 SPEED_MPS = 6.0
@@ -81,6 +84,10 @@ def test_detect_climbs_finds_hill():
     assert climb["duration_sec"] > 250
     assert climb["avg_hr"] == 140.0
     assert climb["start_lat"] is not None
+    trace = decode_polyline(climb["map_polyline"])
+    assert len(trace) >= 2
+    assert trace[0][0] == pytest.approx(climb["start_lat"], abs=1e-4)
+    assert trace[-1][0] == pytest.approx(climb["end_lat"], abs=1e-4)
 
 
 def test_detect_climbs_ignores_flat_and_short():
@@ -120,6 +127,31 @@ def test_rebuild_climbs_matches_repeated_hill_and_keeps_name(tmp_path):
     assert stats["segments"][0]["name"] == "Col de test"
     assert stats["segments"][0]["efforts"] == 2
     assert stats["unnamed_segments"] == 0
+
+
+def test_rebuild_backfills_trace_without_touching_name(tmp_path):
+    """Migration : un segment nommé sans tracé est complété au rebuild suivant."""
+    db = tmp_path / "climbs.db"
+    init_db(db)
+    _seed_activity(db, 1, "2026-04-05T08:00:00Z", _hill_payload(), strava_id=1)
+    rebuild_climbs(db_path=db)
+    segment_id = climb_report(db_path=db)["segments"][0]["id"]
+    rename_climb(segment_id, "Col de test", db_path=db)
+
+    conn = sqlite3.connect(db)
+    try:
+        conn.execute("UPDATE climb_segments SET map_polyline = NULL")
+        conn.commit()
+    finally:
+        conn.close()
+
+    report = rebuild_climbs(db_path=db)
+    assert report["segments_created"] == 0
+    assert report["traces_backfilled"] == 1
+
+    detail = climb_detail(segment_id, db_path=db)
+    assert detail["name"] == "Col de test"
+    assert len(decode_polyline(detail["map_polyline"])) >= 2
 
 
 def test_rebuild_counts_two_passages_in_same_activity(tmp_path):

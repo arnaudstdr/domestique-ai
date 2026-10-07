@@ -46,6 +46,7 @@ from domestique_ai.processing.analyzer import (
     calculate_hr_zones,
     compute_training_load,
 )
+from domestique_ai.processing.geo import encode_polyline  # noqa: F401 — ré-export API historique
 
 log = get_logger("garmin_ingest")
 
@@ -637,36 +638,8 @@ def _log_zone_source_delta(
 # ---------------------------------------------------------------------------
 # Polyline (tracé GPS → aperçu des cartes de la liste)
 # ---------------------------------------------------------------------------
-
-
-def _encode_polyline_value(value: int) -> str:
-    """Encode un delta signé en varint base64-like (offset 63), format Google."""
-    value = ~(value << 1) if value < 0 else value << 1
-    chunks: list[str] = []
-    while value >= 0x20:
-        chunks.append(chr((0x20 | (value & 0x1F)) + 63))
-        value >>= 5
-    chunks.append(chr(value + 63))
-    return "".join(chunks)
-
-
-def encode_polyline(points: list[tuple[float, float]]) -> str | None:
-    """Encode une liste de ``(lat, lng)`` en polyline encodée Google.
-
-    Même format que le ``summary_polyline`` Strava (delta-encodage + varint,
-    précision 1e-5) — consommé tel quel par le composant ``RoutePreview`` du
-    frontend. ``None`` si moins de 2 points.
-    """
-    if not points or len(points) < 2:
-        return None
-    out: list[str] = []
-    prev_lat = prev_lng = 0
-    for lat, lng in points:
-        ilat, ilng = round(lat * 1e5), round(lng * 1e5)
-        out.append(_encode_polyline_value(ilat - prev_lat))
-        out.append(_encode_polyline_value(ilng - prev_lng))
-        prev_lat, prev_lng = ilat, ilng
-    return "".join(out)
+# ``encode_polyline`` vit dans ``processing/geo.py`` (helper pur) ; l'import
+# ci-dessus garde le nom importable depuis ce module (``tcx.py``, tests).
 
 
 def _polyline_from_details(details: dict[str, Any] | None) -> list[tuple[float, float]]:

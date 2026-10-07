@@ -138,7 +138,9 @@ def backfill_streams_for_athlete(
     return summary
 
 
-def _iter_contexts(args: argparse.Namespace) -> list[AthleteContext]:
+def _iter_contexts(
+    args: argparse.Namespace, *, require_tokens: bool = True
+) -> list[AthleteContext]:
     from domestique_ai.athlete_context import context_for_athlete
     from domestique_ai.config import garmin_token_dir_for
     from domestique_ai.export.garmin_connect import token_cache_present
@@ -167,7 +169,7 @@ def _iter_contexts(args: argparse.Namespace) -> list[AthleteContext]:
         except Exception:  # noqa: BLE001
             log.warning("Contexte athlète indisponible : %s", user.get("public_id"), exc_info=True)
             continue
-        if not token_cache_present(garmin_token_dir_for(ctx)):
+        if require_tokens and not token_cache_present(garmin_token_dir_for(ctx)):
             if args.public_id:
                 print(
                     f"Aucun token Garmin pour {args.public_id} — rien à faire.",
@@ -181,6 +183,11 @@ def _iter_contexts(args: argparse.Namespace) -> list[AthleteContext]:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description="Backfill one-off des streams Garmin (activités sans streams).",
+    )
+    parser.add_argument(
+        "--all",
+        action="store_true",
+        help="Tous les athlètes (défaut ; flag accepté pour la compatibilité de la doc).",
     )
     parser.add_argument("--public-id", help="Limiter à un athlète (défaut : tous).")
     parser.add_argument("--limit", type=int, help="Nombre max d'activités par athlète.")
@@ -196,19 +203,31 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="Ne pas reconstruire les montées après le backfill.",
     )
+    parser.add_argument(
+        "--rebuild-only",
+        action="store_true",
+        help="Reconstruire les montées (rebuild + backfill des tracés) sans télécharger de "
+        "streams — utile après une migration de schéma.",
+    )
     parser.add_argument("--force", action="store_true", help="Relancer même si le flag est posé.")
     args = parser.parse_args(argv)
 
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
 
-    contexts = _iter_contexts(args)
+    contexts = _iter_contexts(args, require_tokens=not args.rebuild_only)
     if not contexts:
-        print("Aucun athlète avec tokens Garmin.")
+        print("Aucun athlète." if args.rebuild_only else "Aucun athlète avec tokens Garmin.")
         return 1
 
     exit_code = 0
     for ctx in contexts:
         path = Path(ctx.db_path)
+        if args.rebuild_only:
+            from domestique_ai.processing.climbs import rebuild_climbs
+
+            report = rebuild_climbs(ctx=ctx)
+            print(f"[{ctx.public_id}] montées : {json.dumps(report)}")
+            continue
         if not args.force and get_sync_meta(STREAMS_BACKFILL_FLAG, path) is not None:
             print(
                 f"[{ctx.public_id}] flag {STREAMS_BACKFILL_FLAG} déjà posé — skip (--force pour relancer)."

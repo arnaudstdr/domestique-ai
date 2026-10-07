@@ -428,9 +428,13 @@ def init_db(db_path: Path | None = None, *, ctx: AthleteContext | None = None) -
                 efforts_count INTEGER NOT NULL DEFAULT 0,
                 first_seen TEXT,
                 last_seen TEXT,
-                created_at TEXT NOT NULL
+                created_at TEXT NOT NULL,
+                map_polyline TEXT
             )
         """)
+        # Migration douce : trace GPS du segment (polyline encodée Google),
+        # remplie par ``rebuild_climbs`` (page « Montées », carte dépliable).
+        _ensure_column(conn, "climb_segments", "map_polyline", "TEXT")
         conn.execute(_CLIMB_EFFORTS_DDL)
         # Migration douce : la 1ʳᵉ version portait ``UNIQUE(segment_id,
         # activity_id)`` — une sortie peut légitimement grimper la même montée

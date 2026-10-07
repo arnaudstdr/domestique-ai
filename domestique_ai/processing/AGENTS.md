@@ -189,12 +189,12 @@ Classification **pure** partagée (`activity_classify.py`) : `sport_bucket(sport
 
 Détection des cols/bosses récurrents à partir des **streams persistés** (backfill Garmin aligné / TCX) — aucune donnée réseau.
 
-- **Détection** (`detect_climbs`, pur) : lissage d'altitude (moyenne glissante ±2), pente par segment, points « en montée » à pente ≥ 2 % (hystérésis), interruptions < 150 m fusionnées, puis filtre **pente moyenne ≥ 3 %, D+ ≥ 40 m, longueur ≥ 800 m**. Sortie : longueur, D+, pente moy/max, durée, VAM, FC/puissance moy, coordonnées départ/arrivée.
-- **Appariement** (`rebuild_climbs`, idempotent) : même montée si départ **et** arrivée ≤ 250 m + longueur ± 30 % ; les **noms des segments survivent** au rebuild. Réécrit `climb_efforts` puis les compteurs (`efforts_count`, `first_seen`, `last_seen`). Un changement de seuils nécessite un rebuild.
-- **Tables** : `climb_segments` (nom nullable, géométrie, stats) + `climb_efforts` (UNIQUE `segment_id`+`activity_id`), créées par `init_db` ; `delete_activity` purge les efforts de l'activité et rafraîchit les compteurs (les segments nommés survivent).
-- **Nommage** : aucun géocodage → l'utilisateur nomme depuis la page « Montées » (`PUT /api/climbs/{id}`) ; le coach liste les montées sans nom (`unnamed_segments`).
+- **Détection** (`detect_climbs`, pur) : lissage d'altitude (moyenne glissante ±2), pente par segment, points « en montée » à pente ≥ 2 % (hystérésis), interruptions < 150 m fusionnées, puis filtre **pente moyenne ≥ 3 %, D+ ≥ 40 m, longueur ≥ 800 m**. Sortie : longueur, D+, pente moy/max, durée, VAM, FC/puissance moy, coordonnées départ/arrivée, **tracé encodé** (`map_polyline`, ≤ 120 points, `encode_polyline` de `processing/geo.py`).
+- **Appariement** (`rebuild_climbs`, idempotent) : même montée si départ **et** arrivée ≤ 250 m + longueur ± 30 % ; les **noms des segments survivent** au rebuild. Réécrit `climb_efforts` puis les compteurs (`efforts_count`, `first_seen`, `last_seen`). Au passage, un segment existant sans tracé (migration) est **complété** depuis une détection GPS (`traces_backfilled`) — jamais écrasé, le nom n'est pas touché. Un changement de seuils nécessite un rebuild.
+- **Tables** : `climb_segments` (nom nullable, géométrie, stats, `map_polyline`) + `climb_efforts` (UNIQUE `segment_id`+`activity_id`), créées par `init_db` ; `delete_activity` purge les efforts de l'activité et rafraîchit les compteurs (les segments nommés survivent).
+- **Nommage** : aucun géocodage → l'utilisateur nomme depuis la page « Montées » (`PUT /api/climbs/{id}`) ; le coach liste les montées sans nom (`unnamed_segments`). Le tracé sert à identifier la montée (carte dépliable côté front) ; il est **retiré du payload du tool coach** (`climb_report`).
 - **Exposition** : tool `get_climb_stats(name, limit)` ; API `GET /api/climbs`, `GET/PUT /api/climbs/{id}` (`api/AGENTS.md`). Données **dérivées** → exclues de l'export RGPD, comme `activity_streams`.
-- **CLI** : `python -m domestique_ai.ingestion.backfill_streams --all` (backfill + rebuild automatique ; `--no-rebuild` pour dissocier). Tests : `tests/test_climbs.py`, `tests/test_garmin_aligned.py`, `tests/test_climbs_api.py`.
+- **CLI** : `python -m domestique_ai.ingestion.backfill_streams --all` (backfill + rebuild automatique ; `--no-rebuild` pour dissocier ; `--rebuild-only` pour rejouer le rebuild seul, sans réseau — migration de schéma / backfill des tracés). Tests : `tests/test_climbs.py`, `tests/test_garmin_aligned.py`, `tests/test_climbs_api.py`.
 
 ## Records de puissance (`processing/records.py`)
 

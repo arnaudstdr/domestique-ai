@@ -10,6 +10,7 @@ from fastapi.testclient import TestClient
 
 from domestique_ai.ingestion.db import init_db, store_activity_streams
 from domestique_ai.processing.climbs import rebuild_climbs
+from domestique_ai.processing.geo import decode_polyline
 
 STEP_SEC = 5.0
 SPEED_MPS = 6.0
@@ -80,6 +81,9 @@ def test_list_climbs_returns_detected_segment(client: TestClient):
     assert len(climbs) == 1
     assert climbs[0]["efforts"] == 1
     assert climbs[0]["best_sec"] is not None
+    assert climbs[0]["end_lat"] is not None
+    assert climbs[0]["end_lng"] is not None
+    assert len(decode_polyline(climbs[0]["map_polyline"])) >= 2
 
 
 def test_rename_and_detail(client: TestClient):

@@ -1,9 +1,11 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import { Pencil, X } from "lucide-react";
+import { MapPin, Pencil, X } from "lucide-react";
 import { api, ApiError } from "../api/client";
 import type { ClimbSummary } from "../api/types";
+import ActivityMap from "../components/ActivityMap";
 import { useToast } from "../hooks/useToast";
+import { decodePolyline } from "../lib/polyline";
 
 function formatDuration(seconds: number | null): string {
   if (seconds == null) return "—";
@@ -22,17 +24,36 @@ function formatDate(iso: string | null): string {
   return date.toLocaleDateString("fr-FR", { day: "2-digit", month: "short", year: "numeric" });
 }
 
+function formatSpeedKmh(lengthM: number, seconds: number | null): string {
+  if (seconds == null || seconds <= 0 || lengthM <= 0) return "—";
+  return `${((lengthM / seconds) * 3.6).toFixed(1)} km/h`;
+}
+
 function ClimbCard({
   climb,
+  expanded,
+  onToggleTrace,
   onRenamed,
 }: {
   climb: ClimbSummary;
+  expanded: boolean;
+  onToggleTrace: () => void;
   onRenamed: (updated: ClimbSummary) => void;
 }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(climb.name ?? "");
   const [saving, setSaving] = useState(false);
   const { push } = useToast();
+
+  const trace = useMemo(() => {
+    if (!climb.map_polyline) return null;
+    try {
+      const points = decodePolyline(climb.map_polyline);
+      return points.length >= 2 ? points : null;
+    } catch {
+      return null;
+    }
+  }, [climb.map_polyline]);
 
   async function save() {
     setSaving(true);
@@ -96,21 +117,48 @@ function ClimbCard({
                 · {climb.gain_m} m D+ · {climb.avg_gradient_pct} % moyen
               </p>
             </div>
-            <button
-              type="button"
-              onClick={() => {
-                setDraft(climb.name ?? "");
-                setEditing(true);
-              }}
-              className="btn-ghost"
-              aria-label="Nommer la montée"
-              title="Nommer la montée"
-            >
-              <Pencil className="h-4 w-4" />
-            </button>
+            <div className="flex items-center gap-1">
+              <button
+                type="button"
+                onClick={onToggleTrace}
+                disabled={!trace}
+                className={`btn-ghost ${expanded ? "text-accent" : ""}`}
+                aria-label={expanded ? "Masquer la trace GPS" : "Voir la trace GPS"}
+                aria-expanded={expanded}
+                title={trace ? "Voir la trace GPS" : "Trace GPS indisponible pour cette montée"}
+              >
+                <MapPin className="h-4 w-4" />
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setDraft(climb.name ?? "");
+                  setEditing(true);
+                }}
+                className="btn-ghost"
+                aria-label="Nommer la montée"
+                title="Nommer la montée"
+              >
+                <Pencil className="h-4 w-4" />
+              </button>
+            </div>
           </>
         )}
       </div>
+
+      {expanded && trace && (
+        <ActivityMap
+          latlng={trace}
+          start={
+            climb.start_lat != null && climb.start_lng != null
+              ? [climb.start_lat, climb.start_lng]
+              : null
+          }
+          end={
+            climb.end_lat != null && climb.end_lng != null ? [climb.end_lat, climb.end_lng] : null
+          }
+        />
+      )}
 
       <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
         <div className="flex flex-col rounded-xl border border-border/[0.08] bg-overlay/[0.03] px-3 py-2">
@@ -126,9 +174,9 @@ function ClimbCard({
           </span>
         </div>
         <div className="flex flex-col rounded-xl border border-border/[0.08] bg-overlay/[0.03] px-3 py-2">
-          <span className="text-[11px] uppercase tracking-wide text-muted">VAM max</span>
+          <span className="text-[11px] uppercase tracking-wide text-muted">Vitesse moy.</span>
           <span className="font-display text-lg font-bold text-fg">
-            {climb.best_vam_m_h ? `${Math.round(climb.best_vam_m_h)} m/h` : "—"}
+            {formatSpeedKmh(climb.length_m, climb.avg_sec)}
           </span>
         </div>
         <div className="flex flex-col rounded-xl border border-border/[0.08] bg-overlay/[0.03] px-3 py-2">
@@ -157,6 +205,8 @@ function ClimbCard({
 
 export default function Climbs() {
   const [climbs, setClimbs] = useState<ClimbSummary[] | null>(null);
+  // Une seule carte ouverte à la fois (limite le nombre de cartes Leaflet montées).
+  const [expandedId, setExpandedId] = useState<number | null>(null);
   const { push } = useToast();
 
   const load = useCallback(async () => {
@@ -179,8 +229,9 @@ export default function Climbs() {
       <div>
         <h2 className="font-display text-2xl font-extrabold tracking-tight text-fg">Montées</h2>
         <p className="mt-1 text-sm text-muted">
-          Montées détectées automatiquement dans tes sorties (départ/arrivée proches). Nomme-les
-          pour que le coach réponde « combien de fois », « meilleur temps », etc.
+          Montées détectées automatiquement dans tes sorties (départ/arrivée proches). Affiche la
+          trace GPS (épingle) pour l'identifier, puis nomme-la pour que le coach réponde
+          « combien de fois », « meilleur temps », etc.
         </p>
       </div>
 
@@ -203,6 +254,10 @@ export default function Climbs() {
         <ClimbCard
           key={climb.id}
           climb={climb}
+          expanded={expandedId === climb.id}
+          onToggleTrace={() =>
+            setExpandedId((prev) => (prev === climb.id ? null : climb.id))
+          }
           onRenamed={(updated) =>
             setClimbs((prev) =>
               (prev ?? []).map((item) => (item.id === updated.id ? updated : item)),

@@ -898,6 +898,9 @@ class ClimbSummary(BaseModel):
     efforts_count: int
     start_lat: float | None = None
     start_lng: float | None = None
+    end_lat: float | None = None
+    end_lng: float | None = None
+    map_polyline: str | None = None
     efforts: int = 0
     best_sec: float | None = None
     avg_sec: float | None = None
