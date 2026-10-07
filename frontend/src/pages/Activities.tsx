@@ -149,14 +149,14 @@ export default function Activities() {
             </span>
           )}
           <button
-            className="btn-ghost !px-2 !py-1"
+            className="btn-ghost px-2! py-1!"
             title="Ajouter une activité"
             onClick={() => setPanel((p) => (p === "manual" ? "none" : "manual"))}
           >
             <Plus size={16} />
           </button>
           <button
-            className="btn-ghost !px-2 !py-1"
+            className="btn-ghost px-2! py-1!"
             title="Importer des fichiers TCX"
             onClick={() => setPanel((p) => (p === "tcx" ? "none" : "tcx"))}
           >

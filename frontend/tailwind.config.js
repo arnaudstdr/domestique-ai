@@ -1,4 +1,3 @@
-import typography from "@tailwindcss/typography";
 import defaultColors from "tailwindcss/colors";
 
 // Nuances « statut » utilisées dans l'UI : en thème clair, les tons clairs
@@ -132,5 +131,4 @@ export default {
       },
     },
   },
-  plugins: [typography],
 };

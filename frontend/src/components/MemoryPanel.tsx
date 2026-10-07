@@ -232,7 +232,7 @@ export default function MemoryPanel() {
         <button
           type="button"
           onClick={() => setShowHelp((v) => !v)}
-          className="btn-ghost ml-auto !px-2 !py-1"
+          className="btn-ghost ml-auto px-2! py-1!"
           aria-label="À propos de la mémoire"
           aria-expanded={showHelp}
         >
@@ -276,7 +276,7 @@ export default function MemoryPanel() {
           type="button"
           onClick={add}
           disabled={saving || !content.trim()}
-          className="btn-primary !px-3"
+          className="btn-primary px-3!"
           aria-label="Mémoriser"
           title="Mémoriser"
         >
@@ -417,14 +417,14 @@ function FactRow({ fact, ...rp }: { fact: CoachMemoryFact } & RowProps) {
         />
         <button
           onClick={() => rp.saveEdit(fact.id)}
-          className="btn-ghost !px-2 !py-1"
+          className="btn-ghost px-2! py-1!"
           aria-label="Valider"
         >
           <Check size={15} />
         </button>
         <button
           onClick={() => rp.setEditingId(null)}
-          className="btn-ghost !px-2 !py-1"
+          className="btn-ghost px-2! py-1!"
           aria-label="Annuler"
         >
           <X size={15} />
@@ -493,7 +493,7 @@ function FactMenu({
       <button
         type="button"
         onClick={() => setMenuId(open ? null : fact.id)}
-        className="btn-ghost !px-2 !py-1"
+        className="btn-ghost px-2! py-1!"
         aria-label="Actions sur le fait"
         aria-haspopup="menu"
         aria-expanded={open}

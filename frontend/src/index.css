@@ -1,6 +1,33 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import "tailwindcss";
+@config "../tailwind.config.js";
+@plugin "@tailwindcss/typography";
+
+/* Compat v3 : en v4, la couleur de bordure par défaut est `currentColor`.
+   On restaure le gris 200 d'avant pour les éléments qui n'ont pas de
+   `border-*` explicite (les tokens sémantiques restent prioritaires). */
+@layer base {
+  *,
+  ::after,
+  ::before,
+  ::backdrop,
+  ::file-selector-button {
+    border-color: var(--color-gray-200, currentColor);
+  }
+}
+
+/* Classes custom réutilisées par `@apply` dans la couche components :
+   en v4, seules les utilities (dont celles définies par `@utility`)
+   sont applicables — plus les classes de `@layer components`. */
+@utility tabular {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum" 1;
+}
+
+@utility btn {
+  @apply inline-flex items-center justify-center gap-2 rounded-xl px-4 py-2.5
+         text-sm font-semibold tracking-tight transition-all duration-150
+         disabled:opacity-50 disabled:cursor-not-allowed;
+}
 
 /* ───────────────────────────────────────────────────────────────────────
    Polices auto-hébergées (sous-ensembles latin + latin-ext, OFL).
@@ -212,12 +239,6 @@
     mix-blend-mode: overlay;
     background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
   }
-
-  /* Chiffres alignés partout (instrument). */
-  .tabular {
-    font-variant-numeric: tabular-nums;
-    font-feature-settings: "tnum" 1;
-  }
 }
 
 @layer components {
@@ -229,11 +250,6 @@
         rgb(var(--card-hover) / 0.55),
         rgb(var(--card)) 42%
       );
-  }
-  .btn {
-    @apply inline-flex items-center justify-center gap-2 rounded-xl px-4 py-2.5
-           text-sm font-semibold tracking-tight transition-all duration-150
-           disabled:opacity-50 disabled:cursor-not-allowed;
   }
   /* Accent → encre d'accent (sombre en thème sombre, blanche en thème clair),
      glow au survol. */
@@ -248,7 +264,7 @@
   .input {
     @apply w-full min-w-0 rounded-xl bg-overlay/[0.04] border border-border/[0.08]
            px-3 py-2 text-fg placeholder:text-muted transition-colors
-           focus:outline-none focus:border-accent/60 focus:ring-2 focus:ring-accent/30;
+           focus:outline-hidden focus:border-accent/60 focus:ring-2 focus:ring-accent/30;
   }
   /* iOS Safari : neutraliser le min-width intrinsèque des inputs date/time
      (qui hérite du placeholder « jj/mm/aaaa ») pour qu'ils respectent

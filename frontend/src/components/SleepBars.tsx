@@ -48,7 +48,7 @@ export default function SleepBars({ history, baseline }: Props) {
             <div key={i} className="flex flex-1 flex-col items-center gap-1">
               <div className="flex h-9 w-full items-end">
                 <div
-                  className={`w-full rounded-sm ${
+                  className={`w-full rounded-xs ${
                     low ? "bg-orange-400/70" : "bg-accent/70"
                   }`}
                   style={{ height: `${Math.max(pct, h == null ? 0 : 6)}%` }}

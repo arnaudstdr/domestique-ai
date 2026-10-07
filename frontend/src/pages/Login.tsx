@@ -149,7 +149,7 @@ export default function Login() {
       <div className="relative w-full max-w-sm">
         <form
           onSubmit={challenge ? submitCode : submitCredentials}
-          className="stagger w-full space-y-4 rounded-2xl border border-border/[0.08] bg-gradient-to-b from-cardHover/60 to-card/80 p-6 shadow-card backdrop-blur-xl"
+          className="stagger w-full space-y-4 rounded-2xl border border-border/[0.08] bg-linear-to-b from-cardHover/60 to-card/80 p-6 shadow-card backdrop-blur-xl"
         >
           <div className="text-center">
             <div className="relative mx-auto h-16 w-16">
