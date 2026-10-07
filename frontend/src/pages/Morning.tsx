@@ -850,7 +850,7 @@ function HypnogramBody({ entry }: { entry: MorningEntry }) {
                   <div
                     key={i}
                     title={`${row.label} · ${formatClock(s.start)} → ${formatClock(s.end)} (${formatMin(durMin)})`}
-                    className="absolute top-0 h-full rounded-sm"
+                    className="absolute top-0 h-full rounded-xs"
                     style={{ left: `${leftPct}%`, width: `${widthPct}%`, backgroundColor: row.color }}
                   />
                 );

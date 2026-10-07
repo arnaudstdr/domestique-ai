@@ -296,7 +296,7 @@ export default function ActivityDetail() {
             </h3>
             <button
               onClick={() => setEditing(false)}
-              className="btn-ghost !px-2 !py-1"
+              className="btn-ghost px-2! py-1!"
               aria-label="Annuler"
             >
               <X size={16} />
@@ -405,7 +405,7 @@ export default function ActivityDetail() {
             {!viewing && (
               <button
                 onClick={startEdit}
-                className="btn-ghost !px-2 !py-1"
+                className="btn-ghost px-2! py-1!"
                 title="Modifier cette activité"
               >
                 <Pencil size={16} />
@@ -415,7 +415,7 @@ export default function ActivityDetail() {
               <button
                 onClick={removeActivity}
                 disabled={deleting}
-                className="btn-ghost !px-2 !py-1 text-tsb_neg disabled:opacity-50"
+                className="btn-ghost px-2! py-1! text-tsb_neg disabled:opacity-50"
                 title="Supprimer cette activité"
               >
                 <Trash2 size={16} />

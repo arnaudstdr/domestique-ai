@@ -17,6 +17,14 @@ Endpoints consommés : `domestique_ai/api/AGENTS.md`. Données/coach :
   embarqué par `workbox-build` (`vite-plugin-pwa`) → `npm install` échoue en
   ERESOLVE. Ne pas monter cet override vers 8.x tant que workbox n'a pas migré
   (Renovate l'ignore explicitement, cf. `renovate.json`).
+- **Tailwind CSS v4** : la config JS historique (`tailwind.config.js`) est
+  conservée et chargée via `@config` en tête de `src/index.css` ; le plugin
+  typography passe par `@plugin "@tailwindcss/typography"`. Le plugin PostCSS
+  est `@tailwindcss/postcss` (autoprefixer conservé pour les CSS tiers —
+  leaflet, driver.js). `@apply` n'accepte que des utilities : toute classe
+  custom réutilisée en `@apply` doit être déclarée avec `@utility` (ex. `btn`,
+  `tabular` dans `index.css`). Le modificateur important est suffixé
+  (`px-2!`, plus de préfixe `!px-2`).
 - **Service worker généré par `vite-plugin-pwa`** (`registerType: "autoUpdate"`,
   stratégie Workbox `generateSW`) : precache révisionné automatiquement à
   chaque build, `navigateFallback` sur `/index.html`, `cleanupOutdatedCaches`.
