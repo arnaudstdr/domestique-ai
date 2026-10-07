@@ -55,6 +55,12 @@
       "description": "Ne pas toucher l'override @babel/plugin-transform-runtime ^7.29.0 (frontend) : Babel 8 est incompatible avec le Babel 7 embarqué par workbox-build (vite-plugin-pwa) et fait échouer npm install",
       "matchDepNames": ["@babel/plugin-transform-runtime"],
       "enabled": false
+    },
+    {
+      "description": "Geler react-leaflet en v4 : la v5 exige React 19 — migration React 19 à planifier comme chantier dédié",
+      "matchPackageNames": ["react-leaflet"],
+      "matchUpdateTypes": ["major"],
+      "enabled": false
     }
   ]
 }
