@@ -61,6 +61,12 @@
       "matchPackageNames": ["react-leaflet"],
       "matchUpdateTypes": ["major"],
       "enabled": false
+    },
+    {
+      "description": "Geler TypeScript en 5.x : TS 7 (compilateur natif) est une migration dédiée (lockfile, tsconfig, support de tsc -b à valider)",
+      "matchPackageNames": ["typescript"],
+      "matchUpdateTypes": ["major"],
+      "enabled": false
     }
   ]
 }
