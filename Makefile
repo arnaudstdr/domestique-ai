@@ -10,7 +10,7 @@
 COMPOSE := $(shell if docker compose version >/dev/null 2>&1; then echo docker compose; else echo docker-compose; fi)
 COMPOSE_FILES := -f docker-compose.yml $(if $(wildcard docker-compose.override.yml),-f docker-compose.override.yml)
 
-.PHONY: all up down restart logs rebuild
+.PHONY: all up down restart logs rebuild eval eval-update-baseline eval-install
 
 # Cible par défaut : down puis up -d.
 all: down up
@@ -34,3 +34,22 @@ rebuild:
 		exit 1; \
 	fi; \
 	exec docker logs -f "$$container"
+
+# --- Évaluation LLM (gate déterministe, cf. docs/EVALUATION.md) ---
+EVAL_RESULTS := eval-reports/results.json
+
+# Gate : promptfoo en mode stub (aucun réseau) puis comparaison à la baseline.
+eval:
+	mkdir -p eval-reports
+	cd evals && PROMPTFOO_PYTHON="$(CURDIR)/.venv/bin/python" npm run eval --silent -- -o "$(CURDIR)/$(EVAL_RESULTS)"
+	.venv/bin/python evals/baseline_check.py --results $(EVAL_RESULTS)
+
+# Re-baseline explicite : à faire après relecture du rapport quand un prompt change.
+eval-update-baseline:
+	mkdir -p eval-reports
+	cd evals && PROMPTFOO_PYTHON="$(CURDIR)/.venv/bin/python" npm run eval --silent -- -o "$(CURDIR)/$(EVAL_RESULTS)"
+	.venv/bin/python evals/baseline_check.py --results $(EVAL_RESULTS) --update
+
+# Installe promptfoo (dev/CI uniquement — jamais dans l'image de prod).
+eval-install:
+	cd evals && npm ci

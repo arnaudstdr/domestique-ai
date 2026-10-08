@@ -15,29 +15,31 @@
 const childProcess = require("node:child_process");
 const util = require("node:util");
 
-function execFileAsync(file, args, options) {
-  return new Promise((resolve, reject) => {
-    childProcess.execFile(file, args, options, (error, stdout, stderr) => {
-      if (error) {
-        error.stdout = stdout;
-        error.stderr = stderr;
-        reject(error);
-        return;
-      }
-      resolve({ stdout, stderr });
+// Node ≤ 25 expose déjà le promisify custom attendu : ne rien patcher.
+const nodeMajor = Number.parseInt(process.versions.node.split(".")[0], 10);
+if (nodeMajor >= 26) {
+  const originalExecFile = childProcess.execFile;
+
+  const execFileAsync = (file, args, options) =>
+    new Promise((resolve, reject) => {
+      originalExecFile(file, args, options, (error, stdout, stderr) => {
+        if (error) {
+          error.stdout = stdout;
+          error.stderr = stderr;
+          reject(error);
+          return;
+        }
+        resolve({ stdout, stderr });
+      });
     });
+
+  const patchedExecFile = (...args) => originalExecFile.apply(this, args);
+  patchedExecFile[util.promisify.custom] = execFileAsync;
+
+  Object.defineProperty(childProcess, "execFile", {
+    value: patchedExecFile,
+    writable: true,
+    configurable: true,
+    enumerable: true,
   });
 }
-
-const originalExecFile = childProcess.execFile;
-function patchedExecFile(...args) {
-  return originalExecFile.apply(this, args);
-}
-patchedExecFile[util.promisify.custom] = execFileAsync;
-
-Object.defineProperty(childProcess, "execFile", {
-  value: patchedExecFile,
-  writable: true,
-  configurable: true,
-  enumerable: true,
-});
