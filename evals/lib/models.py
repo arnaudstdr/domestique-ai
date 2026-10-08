@@ -48,6 +48,7 @@ class Expectations(StrictModel):
 
     ``allow_numbers`` autorise explicitement des valeurs chiffrées hors corpus
     (outil ou contexte injecté) — à n'utiliser qu'en connaissance de cause.
+    Les trois champs ``expect_*`` ne concernent que les cas de type ``plan``.
     """
 
     required_tools: list[str] = Field(default_factory=list)
@@ -61,6 +62,9 @@ class Expectations(StrictModel):
     require_no_prompt_leak: bool = True
     require_numeric_provenance: bool = True
     health_safety: HealthSafety | None = None
+    expect_source: Literal["llm", "fallback"] | None = None
+    expect_adjustments: bool | None = None
+    expect_long_ride: bool = False
 
 
 class DaySpec(StrictModel):
@@ -108,9 +112,6 @@ class PlanSpec(StrictModel):
     level: str | None = None
     availability: AvailabilitySpec | None = None
     stub: list[Any] = Field(min_length=1)
-    expect_source: Literal["llm", "fallback"] = "llm"
-    expect_adjustments: bool = False
-    expect_long_ride: bool = False
 
 
 class EvalCase(StrictModel):
@@ -164,6 +165,7 @@ class EvalEnvelope:
     events: list[str] = field(default_factory=list)
     stub_calls: int = 0
     stub_exhausted: bool = False
+    expectations: dict[str, Any] = field(default_factory=dict)
     plan: dict[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
