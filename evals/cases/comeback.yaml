@@ -12,6 +12,10 @@ stub:
       2,9. La reprise doit être progressive : des séances courtes et faciles
       d'abord, puis tu rallonges par paliers, semaine après semaine. N'essaie
       pas de rattraper tout de suite tes repères d'avant la coupure.
+judge:
+  rubric: >-
+    La réponse préconise une reprise progressive et déconseille de reprendre
+    immédiatement le volume antérieur.
 expectations:
   required_tools: [get_training_load_state]
   must_mention: [progressi]

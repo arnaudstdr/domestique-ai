@@ -1,13 +1,21 @@
 """Exécution d'un cas d'évaluation contre le vrai pipeline du coach.
 
-Mode ``stub`` : tous les appels LLM sont scriptés (aucun réseau, aucun Ollama) ;
-le reste est réel — tools, DB SQLite seedée, boucle agentique, validateurs de
-plan. La date est figée sur ``case.today`` dans les modules qui lisent
+Deux modes :
+
+- ``stub`` (défaut, gate CI) : tous les appels LLM sont scriptés — aucun
+  réseau, aucun Ollama — le reste est réel (tools, DB SQLite seedée, boucle
+  agentique, validateurs de plan) ;
+- ``ollama`` (local/Pi, reporting) : la boucle du coach (ou la génération de
+  plan) est servie par le vrai modèle local ; seules les générations LLM
+  auxiliaires restent neutralisées pour que stub et live ne diffèrent que par
+  le modèle évalué.
+
+La date est figée sur ``case.today`` dans les modules qui lisent
 ``date.today()`` directement (tools, séance du jour, décision du matin).
 
-Le résultat est une ``EvalEnvelope`` autosuffisante : elle embarque la réponse,
-la trace des tools, le contexte système injecté et les attentes du cas, de
-sorte que les assertions promptfoo n'aient besoin que de l'output du provider.
+Le résultat est une ``EvalEnvelope`` autosuffisante : réponse, trace des tools,
+contexte système injecté et attentes du cas — les assertions promptfoo n'ont
+besoin que de l'output du provider.
 """
 
 from __future__ import annotations
@@ -32,9 +40,11 @@ _FROZEN_DT_TARGETS = (
     "domestique_ai.llm.daily_decision._dt",
 )
 
+PROVIDERS = ("stub", "ollama")
+
 
 class UnsupportedProviderError(ValueError):
-    """Provider d'évaluation non supporté (le mode live arrive plus tard)."""
+    """Provider d'évaluation inconnu."""
 
 
 def run_case(
@@ -44,13 +54,13 @@ def run_case(
     provider: str = "stub",
 ) -> EvalEnvelope:
     """Exécute un cas et retourne son enveloppe de résultat."""
-    if provider != "stub":
-        raise UnsupportedProviderError(f"provider inconnu : {provider!r}")
+    if provider not in PROVIDERS:
+        raise UnsupportedProviderError(f"provider inconnu : {provider!r} (attendu : {PROVIDERS})")
     seed_paths = seeds.seed_scenario(root, case.scenario)
     ctx = _athlete_context(case, seed_paths)
     if case.kind == "plan":
-        return _run_plan(case, ctx)
-    return _run_chat(case, ctx)
+        return _run_plan(case, ctx, provider=provider)
+    return _run_chat(case, ctx, provider=provider)
 
 
 async def _consume(iterator: AsyncIterator[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -69,9 +79,13 @@ def _frozen_today(day: dt.date) -> Iterator[None]:
         yield
 
 
-def _stub_patches(scripted: ScriptedLLM) -> list[Any]:
-    """Neutralise tout appel LLM non scripté (fallbacks déterministes)."""
-    from domestique_ai.llm import coach, daily_brief, memory, ollama_client, plan_generator
+def _aux_patches() -> list[Any]:
+    """Neutralise les générations LLM auxiliaires (contexte, brief, embeddings).
+
+    L'évaluation ne mesure qu'un chemin LLM à la fois : identique en stub et en
+    live pour que la comparaison ne porte que sur le modèle évalué.
+    """
+    from domestique_ai.llm import daily_brief, memory, ollama_client
     from domestique_ai.processing import today as today_module
 
     async def _no_structured(*args: Any, **kwargs: Any) -> None:
@@ -87,8 +101,6 @@ def _stub_patches(scripted: ScriptedLLM) -> list[Any]:
         return None
 
     return [
-        mock.patch.object(coach, "stream_chat", scripted.stream_chat),
-        mock.patch.object(plan_generator, "chat_structured", scripted.chat_structured),
         mock.patch.object(ollama_client, "chat_structured", _no_structured),
         mock.patch.object(ollama_client, "chat_structured_sync", _no_structured_sync),
         mock.patch.object(daily_brief, "chat_structured_sync", _no_structured_sync),
@@ -96,6 +108,67 @@ def _stub_patches(scripted: ScriptedLLM) -> list[Any]:
         mock.patch.object(memory, "embed_texts_sync", _fake_embed),
         mock.patch.object(today_module, "_decide_kind_with_llm", _no_today_llm),
     ]
+
+
+def _stub_patches(scripted: ScriptedLLM) -> list[Any]:
+    """Scripte les deux points d'entrée LLM mesurés + neutralise les auxiliaires."""
+    from domestique_ai.llm import coach, plan_generator
+
+    return [
+        mock.patch.object(coach, "stream_chat", scripted.stream_chat),
+        mock.patch.object(plan_generator, "chat_structured", scripted.chat_structured),
+        *_aux_patches(),
+    ]
+
+
+def _live_chat_patches(capture: dict[str, Any]) -> list[Any]:
+    """Appelle le vrai ``stream_chat`` en capturant messages et nombre d'appels."""
+    from domestique_ai.llm import coach
+
+    real = coach.stream_chat
+
+    async def recording(
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]] | None = None,
+        model: str | None = None,
+        think: bool = False,
+        options: dict[str, Any] | None = None,
+        label: str | None = None,
+    ) -> AsyncIterator[dict[str, Any]]:
+        capture["calls"] = int(capture.get("calls") or 0) + 1
+        capture.setdefault(
+            "system_messages",
+            [
+                str(message.get("content", ""))
+                for message in messages
+                if message.get("role") == "system"
+            ],
+        )
+        async for chunk in real(
+            messages, tools=tools, model=model, think=think, options=options, label=label
+        ):
+            yield chunk
+
+    return [mock.patch.object(coach, "stream_chat", recording), *_aux_patches()]
+
+
+def _live_plan_patches(capture: dict[str, Any]) -> list[Any]:
+    """Appelle le vrai ``chat_structured`` du générateur de plan en le comptant."""
+    from domestique_ai.llm import plan_generator
+
+    real = plan_generator.chat_structured
+
+    async def recording(messages: list[dict[str, Any]], **kwargs: Any) -> dict[str, Any] | None:
+        capture["calls"] = int(capture.get("calls") or 0) + 1
+        return await real(messages, **kwargs)
+
+    return [mock.patch.object(plan_generator, "chat_structured", recording), *_aux_patches()]
+
+
+def _live_model() -> str:
+    from domestique_ai.config import get_ollama_model
+
+    return get_ollama_model()
 
 
 def _athlete_context(case: EvalCase, seed_paths: seeds.SeedPaths) -> Any:
@@ -115,41 +188,69 @@ def _athlete_context(case: EvalCase, seed_paths: seeds.SeedPaths) -> Any:
     )
 
 
-def _run_chat(case: EvalCase, ctx: Any) -> EvalEnvelope:
+def _run_chat(case: EvalCase, ctx: Any, *, provider: str) -> EvalEnvelope:
     from domestique_ai.llm import coach
 
-    scripted = ScriptedLLM(turns=case.stub)
+    capture: dict[str, Any] = {}
+    scripted: ScriptedLLM | None = None
+    if provider == "stub":
+        scripted = ScriptedLLM(turns=case.stub)
+        patches = _stub_patches(scripted)
+        mode, model = "stub", "stub"
+    else:
+        patches = _live_chat_patches(capture)
+        mode, model = "ollama", _live_model()
+
     with contextlib.ExitStack() as stack:
         stack.enter_context(_frozen_today(case.today))
-        for patch in _stub_patches(scripted):
+        for patch in patches:
             stack.enter_context(patch)
         events = asyncio.run(
             _consume(coach.run_turn_stream(case.user or "", case.history or None, ctx=ctx))
         )
     final = next((event for event in reversed(events) if event["type"] == "final"), None)
+
+    if scripted is not None:
+        system_messages = scripted.system_messages()
+        calls = len(scripted.calls)
+        exhausted = scripted.exhausted
+    else:
+        system_messages = list(capture.get("system_messages") or [])
+        calls = int(capture.get("calls") or 0)
+        exhausted = False
+
     return EvalEnvelope(
         case_id=case.id,
         kind="chat",
-        mode="stub",
+        mode=mode,
         prompt_sha=prompts.compute_prompt_sha(),
-        model="stub",
+        model=model,
         answer=str((final or {}).get("content") or ""),
         tool_trace=list((final or {}).get("tool_trace") or []),
-        system_messages=scripted.system_messages(),
+        system_messages=system_messages,
         user_message=case.user or "",
         events=[event["type"] for event in events],
-        stub_calls=len(scripted.calls),
-        stub_exhausted=scripted.exhausted,
+        stub_calls=calls,
+        stub_exhausted=exhausted,
         expectations=case.expectations.model_dump(mode="json"),
     )
 
 
-def _run_plan(case: EvalCase, ctx: Any) -> EvalEnvelope:
+def _run_plan(case: EvalCase, ctx: Any, *, provider: str) -> EvalEnvelope:
     from domestique_ai.llm import plan_generator as pg
 
     spec = case.plan
     assert spec is not None  # garanti par la validation d'EvalCase
-    scripted = ScriptedLLM(structured=spec.stub)
+    capture: dict[str, Any] = {}
+    scripted: ScriptedLLM | None = None
+    if provider == "stub":
+        scripted = ScriptedLLM(structured=spec.stub)
+        patches = _stub_patches(scripted)
+        mode, model = "stub", "stub"
+    else:
+        patches = _live_plan_patches(capture)
+        mode, model = "ollama", _live_model()
+
     availability = spec.availability.to_availability() if spec.availability else None
     generation = pg.GenerationContext(
         sessions_per_week=spec.sessions_per_week,
@@ -164,7 +265,7 @@ def _run_plan(case: EvalCase, ctx: Any) -> EvalEnvelope:
     )
     with contextlib.ExitStack() as stack:
         stack.enter_context(_frozen_today(case.today))
-        for patch in _stub_patches(scripted):
+        for patch in patches:
             stack.enter_context(patch)
         _plan, weeks = asyncio.run(pg.collect_plan(generation))
 
@@ -190,16 +291,19 @@ def _run_plan(case: EvalCase, ctx: Any) -> EvalEnvelope:
         "min_ctl": spec.min_ctl,
         "level": spec.level or case.level,
     }
+    calls = (
+        len(scripted.structured_calls) if scripted is not None else int(capture.get("calls") or 0)
+    )
     return EvalEnvelope(
         case_id=case.id,
         kind="plan",
-        mode="stub",
+        mode=mode,
         prompt_sha=prompts.compute_prompt_sha(),
-        model="stub",
+        model=model,
         answer="",
         events=[],
-        stub_calls=len(scripted.structured_calls),
-        stub_exhausted=scripted.exhausted,
+        stub_calls=calls,
+        stub_exhausted=scripted.exhausted if scripted is not None else False,
         expectations=case.expectations.model_dump(mode="json"),
         plan=payload,
     )

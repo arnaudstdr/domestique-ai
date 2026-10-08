@@ -14,6 +14,10 @@ stub:
       donc ton TSB est de -10,7 (zone « Fatigué »). La charge progresse
       régulièrement, mais la fatigue récente est installée : garde du repos et
       n'ajoute pas d'intensité cette semaine.
+judge:
+  rubric: >-
+    La réponse cite des valeurs de charge (CTL/ATL/TSB) cohérentes avec les
+    données fournies et reste factuelle, sans chiffre inventé.
 expectations:
   required_tools: [get_training_load_state, get_training_trends]
   must_mention: [CTL]

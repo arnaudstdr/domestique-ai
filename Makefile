@@ -10,7 +10,7 @@
 COMPOSE := $(shell if docker compose version >/dev/null 2>&1; then echo docker compose; else echo docker-compose; fi)
 COMPOSE_FILES := -f docker-compose.yml $(if $(wildcard docker-compose.override.yml),-f docker-compose.override.yml)
 
-.PHONY: all up down restart logs rebuild eval eval-update-baseline eval-install
+.PHONY: all up down restart logs rebuild eval eval-live eval-update-baseline eval-install
 
 # Cible par défaut : down puis up -d.
 all: down up
@@ -53,3 +53,9 @@ eval-update-baseline:
 # Installe promptfoo (dev/CI uniquement — jamais dans l'image de prod).
 eval-install:
 	cd evals && npm ci
+
+# Run live contre Ollama (local requis) : mesure le vrai modèle, hors gate CI.
+# `EVAL_JUDGE=1 make eval-live` ajoute les rubriques du juge LLM local.
+eval-live:
+	mkdir -p eval-reports
+	cd evals && PROMPTFOO_PYTHON="$(CURDIR)/.venv/bin/python" EVAL_JUDGE="$(EVAL_JUDGE)" npm run eval:live --silent -- -o "$(CURDIR)/eval-reports/live-results.json"

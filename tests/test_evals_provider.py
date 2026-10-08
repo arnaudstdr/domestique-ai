@@ -87,3 +87,23 @@ def test_generate_tests_emits_one_test_per_case(tmp_path):
     assert [test["vars"]["case_id"] for test in tests] == ["a", "b"]
     assert tests[0]["assert"][0]["value"] == "file://assertions.py:get_assert"
     assert tests[0]["description"] == "Cas a"
+
+
+def test_generate_tests_adds_judge_assertion_only_when_enabled(tmp_path, monkeypatch):
+    cases_dir = tmp_path / "cases"
+    _write_case(cases_dir, "a", answer="Ta FTP est de 250 W.")
+    path = cases_dir / "a.yaml"
+    payload = yaml.safe_load(path.read_text(encoding="utf-8"))
+    payload["judge"] = {"rubric": "La réponse est factuelle."}
+    path.write_text(yaml.safe_dump(payload, allow_unicode=True), encoding="utf-8")
+
+    monkeypatch.delenv("EVAL_JUDGE", raising=False)
+    assert len(generate_tests({"cases_dir": str(cases_dir)})[0]["assert"]) == 1
+
+    monkeypatch.setenv("EVAL_JUDGE", "1")
+    monkeypatch.delenv("EVAL_JUDGE_MODEL", raising=False)
+    monkeypatch.setenv("OLLAMA_MODEL", "qwen2.5:7b")
+    assertions = generate_tests({"cases_dir": str(cases_dir)})[0]["assert"]
+    assert [assertion["type"] for assertion in assertions] == ["python", "llm-rubric"]
+    assert assertions[1]["provider"] == "ollama:chat:qwen2.5:7b"
+    assert assertions[1]["value"] == "La réponse est factuelle."

@@ -114,6 +114,17 @@ class PlanSpec(StrictModel):
     stub: list[Any] = Field(min_length=1)
 
 
+class JudgeSpec(StrictModel):
+    """Rubrique du juge LLM local (reporting uniquement, jamais le gate CI).
+
+    Activée par ``EVAL_JUDGE=1`` (voir ``evals/cases.py``) ; le modèle est
+    ``EVAL_JUDGE_MODEL`` > ``OLLAMA_MODEL`` > défaut de l'app.
+    """
+
+    rubric: str
+    model: str | None = None
+
+
 class EvalCase(StrictModel):
     """Un cas d'évaluation chargé depuis un YAML."""
 
@@ -128,6 +139,7 @@ class EvalCase(StrictModel):
     history: list[dict[str, Any]] = Field(default_factory=list)
     stub: list[StubTurn] = Field(default_factory=list)
     plan: PlanSpec | None = None
+    judge: JudgeSpec | None = None
     expectations: Expectations = Field(default_factory=Expectations)
 
     @model_validator(mode="after")

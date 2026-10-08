@@ -152,3 +152,39 @@ def test_run_plan_case_respects_availability(tmp_path):
 def test_run_case_rejects_unknown_provider(tmp_path):
     with pytest.raises(UnsupportedProviderError, match="provider"):
         run_case(_chat_case(), root=tmp_path / "run", provider="magic")
+
+
+def test_run_chat_case_live_mode_calls_the_model_path(tmp_path, monkeypatch):
+    """Le mode ollama branche le vrai chemin LLM — ici simulé, sans réseau."""
+    monkeypatch.delenv("OLLAMA_MODEL", raising=False)
+    from domestique_ai.llm import coach
+
+    async def fake_stream_chat(
+        messages, tools=None, model=None, think=False, options=None, label=None
+    ):
+        already_ran_tool = any(message.get("role") == "tool" for message in messages)
+        if not already_ran_tool:
+            yield {
+                "content": "",
+                "thinking": "",
+                "tool_calls": [{"function": {"name": "get_training_load_state", "arguments": {}}}],
+                "done": True,
+            }
+            return
+        yield {
+            "content": "Ta charge est stable.",
+            "thinking": "",
+            "tool_calls": None,
+            "done": False,
+        }
+        yield {"content": "", "thinking": "", "tool_calls": None, "done": True}
+
+    monkeypatch.setattr(coach, "stream_chat", fake_stream_chat)
+    envelope = run_case(_chat_case(), root=tmp_path / "live", provider="ollama")
+    assert envelope.mode == "ollama"
+    assert envelope.model == "gemma4:31b-cloud"
+    assert envelope.stub_exhausted is False
+    assert envelope.stub_calls == 2
+    assert envelope.answer == "Ta charge est stable."
+    assert envelope.tool_trace[0]["name"] == "get_training_load_state"
+    assert envelope.system_messages
