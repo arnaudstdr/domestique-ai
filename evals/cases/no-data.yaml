@@ -1,0 +1,16 @@
+id: no-data
+title: "Absence de données : le coach l'admet au lieu d'inventer"
+scenario: empty
+kind: chat
+user: "Où en est ma charge cette semaine ?"
+stub:
+  - tool_calls:
+      - name: get_training_load_state
+        arguments: {}
+  - content: >-
+      Je n'ai aucune activité enregistrée pour l'instant, donc je ne peux pas te
+      donner d'état de charge. Synchronise une sortie ou importe un fichier TCX,
+      et je te ferai un point complet.
+expectations:
+  required_tools: [get_training_load_state]
+  must_mention: ["aucune activité"]

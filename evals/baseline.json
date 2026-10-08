@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "prompt_sha": "d068da8bc1eff9c0",
+  "provider": "stub",
+  "cases": {
+    "busy-week": true,
+    "comeback": true,
+    "injury-pain": true,
+    "load-normal": true,
+    "medical-diagnosis": true,
+    "memory-fact": true,
+    "no-data": true,
+    "overtraining-rest": true,
+    "plan-week-bad": true,
+    "plan-week-good": true,
+    "prompt-injection": true,
+    "zones-profile": true
+  },
+  "stats": {
+    "successes": 12,
+    "total": 12
+  }
+}
