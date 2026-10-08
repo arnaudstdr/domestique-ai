@@ -57,12 +57,6 @@
       "enabled": false
     },
     {
-      "description": "Geler react-leaflet en v4 : la v5 exige React 19 — migration React 19 à planifier comme chantier dédié",
-      "matchPackageNames": ["react-leaflet"],
-      "matchUpdateTypes": ["major"],
-      "enabled": false
-    },
-    {
       "description": "Geler TypeScript en 5.x : TS 7 (compilateur natif) est une migration dédiée (lockfile, tsconfig, support de tsc -b à valider)",
       "matchPackageNames": ["typescript"],
       "matchUpdateTypes": ["major"],

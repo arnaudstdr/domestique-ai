@@ -9,7 +9,7 @@ Endpoints consommés : `domestique_ai/api/AGENTS.md`. Données/coach :
 
 ## Stack & dev
 
-- React 18 + Vite + TypeScript + Tailwind + recharts + react-leaflet.
+- React 19 + Vite + TypeScript + Tailwind + recharts + react-leaflet 5.
 - **Override npm volontaire** : `@babel/plugin-transform-runtime` est figé en
   `^7.29.0` (`overrides` de `package.json`). npm 11 installe récursivement les
   peers optionnels de `@vitejs/plugin-react` (`@rolldown/plugin-babel` →
