@@ -1,0 +1,17 @@
+{
+  "name": "domestique-ai-evals",
+  "private": true,
+  "version": "0.0.0",
+  "description": "Harnais d'évaluation promptfoo du coach LLM (stub déterministe + live Ollama)",
+  "engines": {
+    "node": ">=22.22.0"
+  },
+  "scripts": {
+    "eval": "promptfoo eval -c promptfooconfig.yaml --no-cache --no-write",
+    "eval:live": "EVAL_PROVIDER=ollama promptfoo eval -c promptfooconfig.yaml --no-cache --no-write",
+    "view": "promptfoo view"
+  },
+  "devDependencies": {
+    "promptfoo": "0.124.0"
+  }
+}
