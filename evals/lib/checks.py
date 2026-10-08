@@ -30,7 +30,7 @@ _MAX_SESSIONS_PER_WEEK = 6
 _LONG_RIDE_MIN = 90
 
 _FR_MARKERS = re.compile(
-    r"\b(le|la|les|des|du|une|et|est|pour|pas|que|qui|tu|ton|ta|tes|avec|sur|dans|au|aux|en|je)\b",
+    r"\b(le|la|les|des|de|du|une|et|est|pour|pas|que|qui|tu|ton|ta|tes|avec|sur|dans|au|aux|en|je)\b",
     re.IGNORECASE,
 )
 _EN_MARKERS = re.compile(
