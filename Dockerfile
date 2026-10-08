@@ -1,4 +1,4 @@
-# syntax=docker/dockerfile:1.27
+# syntax=docker/dockerfile:1.28
 
 # ---- Stage 1 : build du frontend React ----
 FROM node:24-alpine AS frontend-build
