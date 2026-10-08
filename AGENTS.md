@@ -45,6 +45,7 @@ un dossier).
 | Coach LLM — coach, mémoire, génération de plan, décisions | `domestique_ai/llm/AGENTS.md` |
 | API & plateforme — routers, scheduler, notifs, export, auth/avatar | `domestique_ai/api/AGENTS.md` |
 | Frontend PWA | `frontend/AGENTS.md` |
+| Évaluation LLM — harnais promptfoo, cas dorés, provenance, baseline | `evals/AGENTS.md` |
 
 ### Tenir ces guides à jour
 
@@ -83,6 +84,11 @@ pytest
 pytest tests/test_analyzer.py::test_calculate_hr_tss_anchored_to_100_at_threshold
 pytest -k "hr_tss"               # filtre par expression
 pytest tests/test_garmin.py -x   # stoppe au premier échec
+
+# Évaluation LLM (gate déterministe : cas dorés + baseline, aucun réseau ; job CI "llm-eval")
+make eval                     # promptfoo stub + baseline_check
+make eval-update-baseline     # après relecture du rapport, quand un prompt a changé
+make eval-live                # contre Ollama local (reporting ; EVAL_JUDGE=1 pour le juge)
 
 # 1re connexion Garmin Connect (interactif, MFA inclus — seed data/.garmin_tokens)
 python -m domestique_ai.export.garmin_connect
