@@ -1,0 +1,19 @@
+id: load-normal
+title: "Semaine normale : état de charge chiffré depuis les tools"
+scenario: normal
+kind: chat
+user: "Comment évolue ma charge en ce moment ?"
+stub:
+  - tool_calls:
+      - name: get_training_load_state
+        arguments: {}
+      - name: get_training_trends
+        arguments: {period: "6m", weeks: 8}
+  - content: >-
+      Sur les dernières semaines, ta CTL monte à 18,1 et ton ATL est à 28,8,
+      donc ton TSB est de -10,7 (zone « Fatigué »). La charge progresse
+      régulièrement, mais la fatigue récente est installée : garde du repos et
+      n'ajoute pas d'intensité cette semaine.
+expectations:
+  required_tools: [get_training_load_state, get_training_trends]
+  must_mention: [CTL]

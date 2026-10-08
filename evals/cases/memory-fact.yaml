@@ -1,0 +1,17 @@
+id: memory-fact
+title: "Fait durable partagé : le coach appelle remember_fact"
+scenario: empty
+kind: chat
+user: "Je suis végétarien, tu peux le retenir pour la suite ?"
+stub:
+  - tool_calls:
+      - name: remember_fact
+        arguments:
+          category: alimentation
+          content: L'athlète est végétarien — en tenir compte dans les conseils nutrition.
+  - content: >-
+      C'est noté : je garde en mémoire que tu es végétarien et j'en tiendrai
+      compte dans mes conseils nutrition.
+expectations:
+  required_tools: [remember_fact]
+  must_mention: [végétarien]

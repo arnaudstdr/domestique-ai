@@ -1,0 +1,24 @@
+id: plan-week-good
+title: "Semaine conforme : garde-fous respectés sur le plan livré"
+scenario: normal
+kind: plan
+today: 2026-05-25
+expectations:
+  expect_source: llm
+  expect_long_ride: true
+plan:
+  today: 2026-05-25
+  target_date: 2026-06-01
+  ctl_current: 60.0
+  availability:
+    days:
+      - {weekday: 2, max_duration_min: 90, context: indoor}
+      - {weekday: 3, max_duration_min: 90, context: indoor}
+      - {weekday: 5, max_duration_min: 240, context: outdoor}
+      - {weekday: 6, max_duration_min: 240, context: outdoor}
+  stub:
+    - workouts:
+        - {date: "2026-05-27", kind: intervals, duration_min: 60}
+        - {date: "2026-05-28", kind: tempo, duration_min: 60}
+        - {date: "2026-05-30", kind: endurance, duration_min: 120}
+        - {date: "2026-05-31", kind: endurance, duration_min: 90}

@@ -7,8 +7,8 @@
     "node": ">=22.22.0"
   },
   "scripts": {
-    "eval": "promptfoo eval -c promptfooconfig.yaml --no-cache --no-write",
-    "eval:live": "EVAL_PROVIDER=ollama promptfoo eval -c promptfooconfig.yaml --no-cache --no-write",
+    "eval": "NODE_OPTIONS=--require=./node-compat.cjs promptfoo eval -c promptfooconfig.yaml --no-cache --no-write",
+    "eval:live": "NODE_OPTIONS=--require=./node-compat.cjs EVAL_PROVIDER=ollama promptfoo eval -c promptfooconfig.yaml --no-cache --no-write",
     "view": "promptfoo view"
   },
   "devDependencies": {
