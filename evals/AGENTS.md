@@ -38,6 +38,9 @@ cd evals && npm run view  # UI promptfoo des runs locaux
 
 - Ne pas modifier `cases/*.yaml` sans re-passer `make eval` et relire le
   rapport ; les tests de sensibilité vivent dans `tests/test_evals_sensitivity.py`.
+- Après un changement de seeds, re-calibrer les réponses dorées avec
+  `.venv/bin/python evals/calibrate.py <case-id>` (affiche les sorties réelles
+  des tools — la provenance numérique exige qu'elles correspondent).
 - `evals/node_modules` pèse ~1.2 Go (dev/CI seulement, ignoré par git).
 - Le provider recharge les cas par `case_id` : ne pas dupliquer un id (le
   loader refuse les doublons).

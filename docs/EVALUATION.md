@@ -137,8 +137,8 @@ also unit-tests every post-LLM guarantee (guardrails, provenance, safety).
   model path.
 - Why not auto-record fixtures from the model? Because a degraded model would
   bake its degradation into the reference: golden answers are curated, and
-  their numbers are calibrated from real tool outputs (see `tmp/` calibration
-  workflow in the PR notes).
+  their numbers are calibrated from real tool outputs with
+  `python evals/calibrate.py <case-id>`.
 
 ## Tool choice: promptfoo (options compared)
 
