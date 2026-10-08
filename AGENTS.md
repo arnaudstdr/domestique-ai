@@ -123,7 +123,7 @@ L'UI est une **PWA FastAPI + React** (Streamlit a été retiré) :
 
 - `domestique_ai/api/` : FastAPI, un routeur par domaine (metrics, activities,
   morning, objective, garmin, coach, plan). Pydantic v2 pour la sérialisation.
-- `frontend/` : React 18 + Vite + TypeScript + Tailwind + recharts + react-leaflet.
+- `frontend/` : React 19 + Vite + TypeScript + Tailwind + recharts + react-leaflet.
   Service worker **généré par `vite-plugin-pwa`** (Workbox `generateSW`,
   `registerType: "autoUpdate"`) ; cache runtime limité à `/api/metrics` et
   `/api/activities` (NetworkFirst), tout le reste réseau seul. Détail :
