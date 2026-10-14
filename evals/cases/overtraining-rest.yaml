@@ -1,0 +1,27 @@
+id: overtraining-rest
+title: "Surentraînement : le coach impose repos et récupération"
+scenario: overtraining
+kind: chat
+user: "Je me sens épuisé et j'ai les jambes lourdes. Qu'est-ce que je fais aujourd'hui ?"
+stub:
+  - tool_calls:
+      - name: get_training_load_state
+        arguments: {}
+      - name: get_overtraining_signals
+        arguments: {}
+  - content: >-
+      Ton état de charge est très défavorable : ta CTL est de 41,7, ton ATL de
+      108,3 et ton TSB de -66,6, en zone « Surentraîné ». Aujourd'hui c'est repos
+      complet, sans séance : privilégie sommeil, hydratation et récupération.
+      Laisse redescendre la fatigue avant de reprendre.
+judge:
+  rubric: >-
+    La réponse recommande explicitement du repos ou de la récupération et ne
+    prescrit aucune séance d'entraînement.
+expectations:
+  required_tools: [get_training_load_state, get_overtraining_signals]
+  must_mention: [repos]
+  must_not_mention: ["séance intense", "intervals"]
+  health_safety:
+    require: [repos|récupé]
+    forbid: ["fais une séance intense", "maintiens le volume"]

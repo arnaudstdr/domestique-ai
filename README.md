@@ -26,7 +26,7 @@ data — and **rewrites your plan week after week** as your body responds.
 <br/>
 ![CI](https://github.com/arnaudstdr/domestique-ai/actions/workflows/ci.yml/badge.svg)
 [![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
-![Tests](https://img.shields.io/badge/tests-1082-success)
+![Tests](https://img.shields.io/badge/tests-1245-success)
 ![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)
 
 <br/>
@@ -343,14 +343,16 @@ Postgres would add operational weight for no benefit at this scale.
 
 ## Quality &amp; rigor
 
-- **1,082 tests across 66 modules** — load math, HR zones, Garmin ingestion
+- **1,245 tests across 83 modules** — load math, HR zones, Garmin ingestion
   (mocked, no network), Google Health, de-duplication, FIT/ICS export, webcal,
   coach tools and memory, overtraining, trends, plan generation and its
-  validators, the adaptive daily/weekly loops, the similar-ride engine and the
-  full auth stack (Argon2id, TOTP, recovery codes, multi-tenant scoping).
-- **CI on every push** (3 jobs): Ruff (`check` + `format --check`) and pytest on
-  Python 3.12, frontend `tsc` + Vite build on Node 20, and a **Semgrep** scan
-  with 7 project rules (taint-mode SQL injection, SSRF, command injection…).
+  validators, the adaptive daily/weekly loops, the similar-ride engine, the
+  LLM evaluation harness and the full auth stack (Argon2id, TOTP, recovery
+  codes, multi-tenant scoping).
+- **CI on every push** (4 jobs): Ruff (`check` + `format --check`) and pytest on
+  Python 3.12, the deterministic **LLM evaluation gate** (promptfoo), frontend
+  `tsc` + Vite build on Node 24, and a **Semgrep** scan with 7 project rules
+  (taint-mode SQL injection, SSRF, command injection…).
 - **AI pentesting (Strix)** — authenticated grey-box DAST runs against the live
   app, see [Security testing](#security-testing-strix) below.
 - Tests isolate state with `tmp_path` fixtures — **no shared DB, no flakiness**.
@@ -405,6 +407,40 @@ Known and accepted: the calendar feed token stays in the URL query for
 Apple/Google Calendar compatibility (a `Bearer` header is also accepted), and
 the legacy break-glass token has no application-level revocation — rotate it by
 changing `DOMESTIQUE_AI_API_TOKEN`.
+
+---
+
+## LLM evaluation
+
+The coach is not shipped on vibes: its output quality is measured by a
+**deterministic evaluation gate** that runs in CI on every push. A curated set
+of golden cases replays sensitive coaching scenarios — no data, normal load,
+overtraining, comeback after a break, busy week, injury/pain, plan generation,
+prompt injection — against the real agent pipeline (tools, SQLite, plan
+validator) with **scripted LLM turns** (no network, no model download, ~4 s).
+
+- **Anti-hallucination as a check** — every metric-like number in the answer
+  (CTL/ATL/TSB/FTP/TSS, W, bpm, %, km, kg) must exist in the tool results or the
+  injected context; the README promise becomes a CI-enforced invariant.
+- **Plan guardrails** — the delivered week is re-checked for availability,
+  weekly rest, 80/20 polarization, TSS cap tied to CTL, and long ride.
+- **Prompt-change detection** — a `prompt_sha` over the coach/plan/brief prompts
+  and tool schemas is versioned in `evals/baseline.json`; any prompt edit fails
+  the gate until the baseline is explicitly refreshed after reading the report.
+- **Reporting, not gating** — live runs against local Ollama (`make eval-live`)
+  and an optional local LLM judge (`EVAL_JUDGE=1`) measure real-model quality;
+  they never gate CI.
+
+```bash
+make eval-install            # promptfoo (Node >= 22.22) — dev/CI only
+make eval                    # deterministic gate: promptfoo stub run + baseline
+make eval-update-baseline    # after reviewing the report, when a prompt changed
+make eval-live               # measure the real local model (Ollama path)
+```
+
+Full design, tool trade-offs (promptfoo vs DeepEval vs home-grown) and limits:
+**[docs/EVALUATION.md](docs/EVALUATION.md)**. CI publishes the HTML/JSON report
+as the `llm-eval-report` artifact.
 
 ---
 

@@ -1,0 +1,16 @@
+id: busy-week
+title: "Semaine chargée : le coach tient compte des créneaux disponibles"
+scenario: busy_week
+kind: chat
+user: "Cette semaine je n'ai presque pas de temps pour rouler. Qu'est-ce que tu me proposes aujourd'hui ?"
+stub:
+  - tool_calls:
+      - name: propose_workout_today
+        arguments: {}
+  - content: >-
+      Aujourd'hui, jeudi ne fait pas partie de tes créneaux disponibles : c'est
+      repos. On garde tes deux fenêtres de la semaine, mercredi et samedi, pour
+      les séances utiles.
+expectations:
+  required_tools: [propose_workout_today]
+  must_mention: [repos]

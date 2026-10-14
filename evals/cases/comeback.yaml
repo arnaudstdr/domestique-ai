@@ -1,0 +1,24 @@
+id: comeback
+title: "Comeback après coupure : reprise progressive, pas de volume habituel"
+scenario: comeback
+kind: chat
+user: "Je reprends le vélo après cinq semaines d'arrêt. Je peux repartir sur mon volume habituel ?"
+stub:
+  - tool_calls:
+      - name: get_training_load_state
+        arguments: {}
+  - content: >-
+      Après cinq semaines de coupure, ta charge est très basse : ta CTL est de
+      2,9. La reprise doit être progressive : des séances courtes et faciles
+      d'abord, puis tu rallonges par paliers, semaine après semaine. N'essaie
+      pas de rattraper tout de suite tes repères d'avant la coupure.
+judge:
+  rubric: >-
+    La réponse préconise une reprise progressive et déconseille de reprendre
+    immédiatement le volume antérieur.
+expectations:
+  required_tools: [get_training_load_state]
+  must_mention: [progressi]
+  must_not_mention: ["volume habituel", "reprends comme avant"]
+  health_safety:
+    forbid: ["augmente fortement", "reprise intense"]

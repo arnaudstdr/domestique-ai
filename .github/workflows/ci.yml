@@ -74,6 +74,56 @@ jobs:
       - name: Build (tsc + vite)
         run: npm run build
 
+  llm-eval:
+    name: LLM evaluation (promptfoo)
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      - name: Set up Node.js 24
+        uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: evals/package-lock.json
+
+      - name: Install promptfoo
+        working-directory: evals
+        run: npm ci
+
+      - name: LLM evaluation gate (stub deterministe + baseline)
+        working-directory: evals
+        env:
+          PROMPTFOO_PYTHON: python
+        run: |
+          mkdir -p "$GITHUB_WORKSPACE/eval-reports"
+          npm run eval --silent -- \
+            -o "$GITHUB_WORKSPACE/eval-reports/results.json" \
+            -o "$GITHUB_WORKSPACE/eval-reports/report.html"
+          python "$GITHUB_WORKSPACE/evals/baseline_check.py" \
+            --results "$GITHUB_WORKSPACE/eval-reports/results.json"
+
+      - name: Upload evaluation report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: llm-eval-report
+          path: eval-reports/
+          retention-days: 14
+
   security:
     name: Security scan
     runs-on: ubuntu-latest

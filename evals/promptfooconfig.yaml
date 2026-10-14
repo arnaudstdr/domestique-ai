@@ -1,0 +1,22 @@
+# Gate déterministe d'évaluation des sorties du coach LLM (stub replay).
+#
+# - aucun réseau : les appels LLM sont scriptés (provider Python, mode stub) ;
+# - `tests` sont générés depuis `cases/*.yaml` par le générateur Python ;
+# - les assertions déterministes vivent dans `assertions.py` (voir checks.py).
+#
+# Run : `cd evals && PROMPTFOO_PYTHON=../.venv/bin/python npm run eval`
+# Live : `EVAL_PROVIDER=ollama` (Ollama local) et `EVAL_JUDGE=1` pour ajouter
+# les rubriques du juge LLM local (reporting uniquement — voir Makefile).
+# Doc : docs/EVALUATION.md
+description: "DomestiqueAI — qualité des sorties du coach LLM (recording déterministe)"
+prompts:
+  - "{{case_id}}"
+providers:
+  - id: file://coach_provider.py
+    label: coach-stub
+tests:
+  - file://cases.py:generate_tests
+commandLineOptions:
+  maxConcurrency: 1
+  cache: false
+  write: false

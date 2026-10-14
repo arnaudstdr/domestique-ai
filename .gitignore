@@ -35,6 +35,9 @@ __pycache__/
 *.log
 *.csv
 
+# Rapports d'évaluation LLM (artefacts CI ; la baseline est versionnée dans evals/)
+eval-reports/
+
 # Notes locales
 tmp/
 TODO.md

@@ -1,0 +1,16 @@
+id: zones-profile
+title: "Zones cardiaques : valeurs bpm issues du profil, pas inventées"
+scenario: normal
+kind: chat
+user: "C'est quoi ma zone 2 exactement ?"
+stub:
+  - tool_calls:
+      - name: get_profile
+        arguments: {}
+  - content: >-
+      Ta Z2 se situe entre 134 et 148 bpm, soit environ 60 à 70 % de ta réserve
+      cardiaque. C'est la plage de l'endurance fondamentale : tu dois pouvoir y
+      tenir une conversation en roulant.
+expectations:
+  required_tools: [get_profile]
+  must_mention: [Z2]
