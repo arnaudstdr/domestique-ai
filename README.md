@@ -63,9 +63,10 @@ subscription, and no cloud account. What there is:
 - **Decisions, not dashboards** — fitness / fatigue / form, overtraining signals,
   FTP projection, similar-ride comparison, and a plan that adapts **daily** and
   **weekly** instead of a static 4-week block.
-- **Plain language, zero invented numbers** — the coach is an LLM with 17 typed
-  tools and a golden rule: no quantitative claim without a tool call. The math
-  lives in tested Python; the model only explains it.
+- **Plain language, zero invented numbers** — the coach is an LLM with 21 typed
+  tools and a golden rule: no quantitative claim without a tool call. That rule
+  is **enforced in CI** (see [LLM evaluation](#llm-evaluation)): the math lives
+  in tested Python; the model only explains it.
 
 > **In one line:** an end-to-end product — data pipeline, sports-science engine,
 > agentic LLM, PWA and self-hosted deployment — built and shipped solo.
@@ -105,8 +106,11 @@ interchangeable with power-based TSS. CTL / ATL / TSB are EMAs computed over
 
 ### An agentic coach with guardrails
 The LLM runs a **tool-calling loop over 21 typed tools**. A golden rule in the
-system prompt forbids any unsourced figure, and responses **stream over SSE**,
-token by token, with visible reasoning and tool calls.
+system prompt forbids any unsourced figure — and it is **enforced by a
+deterministic CI gate**: golden cases trace every cited number back to tool
+output, and a versioned baseline flags any prompt change that degrades the
+coach. Responses **stream over SSE**, token by token, with visible reasoning
+and tool calls.
 
 </td>
 </tr>
@@ -146,7 +150,7 @@ platform panel (accounts, audit, settings, LLM usage).
 <td width="50%" valign="top">
 
 ### Installable PWA, resilient pipeline
-React 18 + Vite + Tailwind, installable with a build-generated Workbox service
+React 19 + Vite + Tailwind, installable with a build-generated Workbox service
 worker, light / dark / auto theme, GPS maps and live charts. Behind it:
 incremental Garmin sync, stream enrichment, a background scheduler with
 anti-overlap claims, Pushover ops notifications, Sentry and a Healthchecks.io
@@ -178,7 +182,7 @@ domestique_ai/
 ├── llm/               # Ollama client, 21 tools, agentic coach, memory, plans
 ├── api/               # FastAPI — 16 domain routers, auth middleware, SSE
 └── export/            # .FIT archive (ZIP) + iCalendar / webcal subscription
-frontend/              # React 18 + Vite + TypeScript + Tailwind PWA
+frontend/              # React 19 + Vite + TypeScript + Tailwind PWA
 ```
 
 ---
@@ -545,6 +549,7 @@ upgrades without data loss.
 - [x] Email/password auth with mandatory TOTP 2FA, recovery codes and per-account roles
 - [x] Isolated admin panel — accounts, audit log, platform settings, LLM usage
 - [x] Error supervision (Sentry) + Healthchecks.io heartbeat
+- [x] Deterministic LLM output evaluation — golden cases, anti-hallucination provenance checks, versioned baseline and prompt-regression gate in CI
 - [ ] Per-activity HR profile to freeze historical CTL/ATL/TSB
 
 ---
