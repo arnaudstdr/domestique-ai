@@ -6,8 +6,18 @@ import type { TotpEnrollResponse } from "../api/types";
 /**
  * Assistant d'enrôlement TOTP : scan du QR → confirmation d'un code →
  * affichage une seule fois des codes de secours. Appelle `onDone` à la fin.
+ *
+ * `onSkip` (optionnel) : report de l'enrôlement — rendu uniquement à l'étape
+ * d'enrôlement, tant que la 2FA n'est pas activée (pas sur les codes de
+ * secours). Les appelants ne le fournissent que si la grâce 2FA est active.
  */
-export default function TwoFactorSetup({ onDone }: { onDone: () => void }) {
+export default function TwoFactorSetup({
+  onDone,
+  onSkip,
+}: {
+  onDone: () => void;
+  onSkip?: () => void;
+}) {
   const [enroll, setEnroll] = useState<TotpEnrollResponse | null>(null);
   const [code, setCode] = useState("");
   const [recoveryCodes, setRecoveryCodes] = useState<string[] | null>(null);
@@ -234,6 +244,21 @@ export default function TwoFactorSetup({ onDone }: { onDone: () => void }) {
       >
         {submitting ? "Vérification…" : "Activer"}
       </button>
+      {onSkip ? (
+        <div className="space-y-1 pt-1 text-center">
+          <button
+            type="button"
+            onClick={onSkip}
+            className="text-xs font-medium text-muted underline underline-offset-4 transition-colors hover:text-fg-soft"
+          >
+            Passer pour l'instant
+          </button>
+          <p className="text-[11px] leading-snug text-muted">
+            Tu pourras l'activer plus tard depuis ton profil — un rappel s'affichera dans
+            l'application.
+          </p>
+        </div>
+      ) : null}
     </form>
   );
 }

@@ -234,12 +234,19 @@ textarea (mécanisme à utiliser depuis d'autres pages, ex. cartes du Dashboard)
   Signup/AcceptInvite/SetupTwoFactor) : sur mobile (`pointer: coarse`), le deep
   link `otpauth://` (« Ouvrir mon application d'authentification », compte
   pré-rempli) et la copie de la clé passent en premier, le QR est replié dans un
-  `<details>` « depuis un autre appareil » ; sur desktop, QR d'abord. Pendant la
-  période de grâce 2FA (`me.totp_grace_until`, `frontend/src/api/types.ts`),
-  `components/TotpGraceBanner.tsx` est monté dans `AuthedShell` : bandeau
-  **non masquable** « Sécurise ton compte — J-x » (style urgent à ≤ 2 jours),
-  CTA vers `/setup-2fa?next=…`. Expiré → le middleware renvoie
-  `403 totp_setup_required` et `client.ts` redirige vers `/setup-2fa`.
+  `<details>` « depuis un autre appareil » ; sur desktop, QR d'abord.
+  **Report de l'enrôlement** : les parcours de création (`Signup.tsx` et
+  `AcceptInvite.tsx` en mode création) passent `onSkip` → lien discret « Passer
+  pour l'instant » sous le bouton « Activer », rendu uniquement à l'étape
+  d'enrôlement (jamais sur les codes de secours, ni sur `/setup-2fa` où le
+  middleware renvoie sur 403 → boucle). `onSkip` n'est fourni que si la grâce
+  court (`me.totp_grace_until` futur, vérifié via `/api/auth/me` après le
+  signup) — rien n'est persisté côté serveur, la grâce laisse l'app utilisable.
+  Pendant la période de grâce 2FA (`me.totp_grace_until`,
+  `frontend/src/api/types.ts`), `components/TotpGraceBanner.tsx` est monté dans
+  `AuthedShell` : bandeau **non masquable** « Sécurise ton compte — J-x » (style
+  urgent à ≤ 2 jours), CTA vers `/setup-2fa?next=…`. Expiré → le middleware
+  renvoie `403 totp_setup_required` et `client.ts` redirige vers `/setup-2fa`.
 - **Suppression de compte** — `DangerZoneSection` en bas de `/profil` : rappel
   irréversible, confirmation par saisie de `SUPPRIMER`, mot de passe (si
   `me.has_password`) + code TOTP (si `me.totp_enabled`), puis

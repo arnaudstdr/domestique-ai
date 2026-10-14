@@ -8,7 +8,8 @@ import { usePageMeta } from "../hooks/usePageMeta";
 
 /**
  * Inscription self-service (si activée côté serveur) : email + mot de passe +
- * choix du rôle (athlète ou coach), puis enrôlement TOTP obligatoire.
+ * choix du rôle (athlète ou coach), puis enrôlement TOTP — reportable tant que
+ * la grâce 2FA du nouveau compte court (lien « Passer pour l'instant »).
  *
  * Un coach reçoit à l'inscription son lien d'invitation réutilisable (visible
  * ensuite dans Roster).
@@ -22,6 +23,7 @@ export default function Signup() {
   const [confirm, setConfirm] = useState("");
   const [stage, setStage] = useState<"form" | "totp">("form");
   const [isCoach, setIsCoach] = useState(false);
+  const [canSkipTotp, setCanSkipTotp] = useState(false);
   const [acceptsTerms, setAcceptsTerms] = useState(false);
   const [acceptsHealthData, setAcceptsHealthData] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -60,6 +62,15 @@ export default function Signup() {
       setApiToken(res.session_token);
       setIsCoach(res.role === "coach");
       setStage("totp");
+      // Report possible seulement si une grâce 2FA court (jamais avec
+      // DOMESTIQUE_AI_TOTP_GRACE_DAYS=0, sinon le premier 403 renverrait ici).
+      api.auth
+        .me()
+        .then((me) => {
+          const grace = me.totp_grace_until;
+          setCanSkipTotp(Boolean(grace && new Date(grace).getTime() > Date.now()));
+        })
+        .catch(() => setCanSkipTotp(false));
     } catch (err) {
       setError(signupErrorMessage(err));
     } finally {
@@ -93,7 +104,7 @@ export default function Signup() {
             L'inscription publique est désactivée. Demande une invitation à ton coach.
           </p>
         ) : stage === "totp" ? (
-          <TwoFactorSetup onDone={done} />
+          <TwoFactorSetup onDone={done} onSkip={canSkipTotp ? done : undefined} />
         ) : (
           <form onSubmit={submit} className="space-y-4">
             <div className="grid grid-cols-2 gap-2">

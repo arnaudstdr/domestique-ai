@@ -13,7 +13,8 @@ import { usePageMeta } from "../hooks/usePageMeta";
  * `/accept-invite?coach=<code>` (lien réutilisable d'un coach).
  *
  * Deux parcours :
- * 1. « Créer un compte » — nouveau compte athlète, puis enrôlement TOTP ;
+ * 1. « Créer un compte » — nouveau compte athlète, puis enrôlement TOTP
+ *    (reportable tant que la grâce court) ;
  * 2. « J'ai déjà un compte » — connexion (mdp + TOTP) du compte existant, puis
  *    rattachement au coach (aucun doublon de compte).
  */
@@ -25,6 +26,7 @@ export default function AcceptInvite() {
 
   const [mode, setMode] = useState<"create" | "existing">("create");
   const [stage, setStage] = useState<"form" | "totp">("form");
+  const [canSkipTotp, setCanSkipTotp] = useState(false);
   const [displayName, setDisplayName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -65,6 +67,15 @@ export default function AcceptInvite() {
       });
       setApiToken(res.session_token);
       setStage("totp");
+      // Report possible seulement si une grâce 2FA court (jamais avec
+      // DOMESTIQUE_AI_TOTP_GRACE_DAYS=0, sinon le premier 403 renverrait ici).
+      api.auth
+        .me()
+        .then((me) => {
+          const grace = me.totp_grace_until;
+          setCanSkipTotp(Boolean(grace && new Date(grace).getTime() > Date.now()));
+        })
+        .catch(() => setCanSkipTotp(false));
     } catch (err) {
       setError(acceptErrorMessage(err));
     } finally {
@@ -123,6 +134,10 @@ export default function AcceptInvite() {
     }
   }
 
+  function done() {
+    window.location.assign("/");
+  }
+
   function submit(event: React.FormEvent) {
     if (challenge) return linkTotp(event);
     return mode === "existing" ? linkSubmit(event) : createAccount(event);
@@ -145,7 +160,7 @@ export default function AcceptInvite() {
         </div>
 
         {stage === "totp" ? (
-          <TwoFactorSetup onDone={() => window.location.assign("/")} />
+          <TwoFactorSetup onDone={done} onSkip={canSkipTotp ? done : undefined} />
         ) : (
           <form onSubmit={submit} className="space-y-4">
             {!challenge && (
