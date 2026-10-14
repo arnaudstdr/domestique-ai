@@ -6,6 +6,7 @@
     ":semanticCommits"
   ],
   "timezone": "Europe/Paris",
+  "minimumReleaseAge": "7 days",
   "prConcurrentLimit": 5,
   "prHourlyLimit": 0,
   "labels": ["dependencies"],
@@ -24,9 +25,10 @@
       "groupName": "dépendances non-majeures"
     },
     {
-      "description": "Automerge des GitHub Actions (minor/patch/digest) une fois la CI verte",
+      "description": "Automerge des GitHub Actions (minor/patch/digest) une fois la CI verte — exemptées du seuil minimumReleaseAge",
       "matchManagers": ["github-actions"],
       "matchUpdateTypes": ["minor", "patch", "digest", "pin"],
+      "minimumReleaseAge": null,
       "automerge": true
     },
     {
