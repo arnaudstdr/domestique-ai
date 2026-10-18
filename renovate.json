@@ -8,7 +8,7 @@
   "timezone": "Europe/Paris",
   "minimumReleaseAge": "7 days",
   "constraints": {
-    "npm": ">=11.18.0 <12"
+    "npm": "<13"
   },
   "prConcurrentLimit": 5,
   "prHourlyLimit": 0,
