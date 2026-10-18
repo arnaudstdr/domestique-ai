@@ -12,6 +12,6 @@
     "view": "promptfoo view"
   },
   "devDependencies": {
-    "promptfoo": "0.124.0"
+    "promptfoo": "0.124.1"
   }
 }
