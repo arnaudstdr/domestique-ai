@@ -66,6 +66,13 @@
       "matchPackageNames": ["typescript"],
       "matchUpdateTypes": ["major"],
       "enabled": false
+    },
+    {
+      "description": "Geler la contrainte npm en 11.x : npm 12 bascule allow-remote à none et casse la régénération de frontend/package-lock.json via --package-lock-only (npm/cli#9800) — retirer quand #9800 est fermé",
+      "matchManagers": ["renovate-config"],
+      "matchDepTypes": ["tool-constraint"],
+      "matchPackageNames": ["npm"],
+      "enabled": false
     }
   ]
 }
