@@ -355,7 +355,7 @@ Postgres would add operational weight for no benefit at this scale.
   codes, multi-tenant scoping).
 - **CI on every push** (4 jobs): Ruff (`check` + `format --check`) and pytest on
   Python 3.12, the deterministic **LLM evaluation gate** (promptfoo), frontend
-  `tsc` + Vite build on Node 24, and a **Semgrep** scan with 7 project rules
+  `tsc` + Vite build on Node 26, and a **Semgrep** scan with 7 project rules
   (taint-mode SQL injection, SSRF, command injection…).
 - **AI pentesting (Strix)** — authenticated grey-box DAST runs against the live
   app, see [Security testing](#security-testing-strix) below.
