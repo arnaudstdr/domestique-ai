@@ -20,9 +20,10 @@ Documentation de référence : `docs/EVALUATION.md`. Guide racine : `AGENTS.md`.
   Provider, assertions et générateur ne font que brancher promptfoo sur ce
   moteur — garder cette séparation.
 - **Node ≥ 22.22** requis par promptfoo (pinné dans `package.json`, dev/CI
-  uniquement, jamais dans l'image prod). `node-compat.cjs` restaure
-  `promisify(execFile)` cassé par Node ≥ 26 et ne fait rien sur Node ≤ 25 ; il
-  est requis dans les scripts npm.
+  uniquement, jamais dans l'image prod) ; la CI et le stage de build frontend
+  tournent en **Node 26**. `node-compat.cjs` n'est utile que si un hook
+  `NODE_OPTIONS` remplace `child_process.execFile` (Node 26 stock conserve
+  `promisify.custom`) ; il reste requis dans les scripts npm.
 
 ## Commandes
 

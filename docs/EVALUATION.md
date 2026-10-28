@@ -33,7 +33,7 @@ evals/
   coach_provider.py                  # runs one case via the real pipeline, returns the envelope
   cases.py                           # generate_tests(): one test per cases/*.yaml (+ judge on demand)
   assertions.py                      # get_assert(): runs the deterministic check suite
-  node-compat.cjs                    # Node >= 26 execFile promisify shim (no-op elsewhere)
+  node-compat.cjs                    # safety net when a NODE_OPTIONS hook replaces execFile (no-op on stock Node)
   cases/*.yaml                       # 12 golden cases (data + scripted LLM turns + expectations)
   baseline.json                      # versioned: prompt_sha + per-case results
   baseline_check.py                  # regression / prompt-change gate (exit 1 on drift)
@@ -158,7 +158,7 @@ CI ergonomics without owning the logic.
 New `llm-eval` job (`.github/workflows/ci.yml`), parallel to `quality`:
 
 1. Python 3.12 + `pip install -e ".[dev]"` (promptfoo runs the project code);
-2. Node 24 (promptfoo needs >= 22.22) + `npm ci` in `evals/` (cached);
+2. Node 26 (promptfoo needs >= 22.22) + `npm ci` in `evals/` (cached);
 3. `npm run eval` — stub run, `--no-cache`, writes `eval-reports/results.json`
    and `report.html`;
 4. `python evals/baseline_check.py` — regression / prompt-change gate;
@@ -213,8 +213,12 @@ EXIT = 1
    explicit re-baseline. That is the point (snapshot semantics), but wording
    tweaks also trigger it.
 5. **Judge is probabilistic** and speaks only when asked (`EVAL_JUDGE=1`).
-6. Node 26 broke `promisify(execFile)` used by promptfoo; `node-compat.cjs`
-   restores the documented behaviour and is a no-op on Node <= 25.
+6. Node 26 keeps `execFile[promisify.custom]` (verified on 26.12.1 and in the
+   v26.0.0 source, `lib/child_process.js`), so `promisify(execFile)` still
+   resolves `{stdout, stderr}` and promptfoo runs out of the box. The
+   "Python 3 not found" failure comes from `NODE_OPTIONS` hooks that wrap
+   `child_process.execFile` and drop that symbol; `node-compat.cjs` is a no-op
+   on stock Node.
 
 ---
 
