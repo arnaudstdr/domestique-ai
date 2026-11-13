@@ -128,7 +128,7 @@ jobs:
     name: Security scan
     runs-on: ubuntu-latest
     container:
-      image: semgrep/semgrep:1.183.0
+      image: semgrep/semgrep:1.185.0
 
     steps:
       - uses: actions/checkout@v7
